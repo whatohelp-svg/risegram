@@ -509,7 +509,6 @@ async def cb_toggle_mode(call: CallbackQuery):
     new_mode = "tg" if call.data == "set_mode_tg" else "rub"
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute("UPDATE users SET price_mode = ? WHERE tg_id = ?", (new_mode, call.from_user.id))
-        await db.commit()
     await call.answer("Курс отображения обновлён!")
     await cb_settings(call)
 
