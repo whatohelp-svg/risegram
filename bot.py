@@ -816,4 +816,5 @@ async def on_pre_checkout(query: PreCheckoutQuery):
 
 
 @router.message(F.successful_payment)
-async def on_successful_payment(message:)
+async def on_successful_payment(message: Message):
+
