@@ -1,0 +1,807 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>RiseGram — Telegram Mini App</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+  :root {
+    --bg: #0f1620;
+    --card: #17212b;
+    --card-2: #1e2a38;
+    --border: rgba(255, 255, 255, 0.08);
+    --text: #f3f6fa;
+    --muted: #8b9bb0;
+    --blue: #2ea6ff;
+    --blue-dark: #1d7ec7;
+    --green: #22c55e;
+    --gold: #fbbf24;
+    --red: #ef4444;
+    --purple: #a855f7;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    padding-bottom: 78px;
+    overflow-x: hidden;
+  }
+
+  /* Top Bar */
+  .topbar {
+    position: sticky; top: 0; z-index: 40;
+    background: rgba(15, 22, 32, 0.92);
+    backdrop-filter: blur(12px);
+    border-bottom: 1px solid var(--border);
+    padding: 10px 14px;
+    display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  }
+  .brand { display: flex; align-items: center; gap: 8px; font-weight: 800; font-size: 16px; }
+  .brand-badge {
+    background: linear-gradient(135deg, #2ea6ff, #6366f1);
+    width: 28px; height: 28px; border-radius: 9px;
+    display: grid; place-items: center; font-size: 15px;
+  }
+  .balances { display: flex; align-items: center; gap: 6px; }
+  .pill {
+    background: var(--card-2); border: 1px solid var(--border);
+    padding: 5px 9px; border-radius: 99px; font-size: 12px; font-weight: 700;
+    display: flex; align-items: center; gap: 4px;
+  }
+  .pill.gold { color: var(--gold); }
+  .pill.blue { color: var(--blue); }
+
+  /* Admin Button */
+  .admin-btn {
+    display: none;
+    background: linear-gradient(135deg, #f59e0b, #ef4444);
+    color: #fff; border: none; border-radius: 99px;
+    padding: 5px 10px; font-size: 12px; font-weight: 800; cursor: pointer;
+    box-shadow: 0 0 14px rgba(239, 68, 68, 0.45);
+  }
+  .admin-btn.visible { display: inline-flex; align-items: center; gap: 4px; }
+
+  .container { max-width: 480px; margin: 0 auto; padding: 14px; }
+  .tab { display: none; animation: fadeIn 0.18s ease; }
+  .tab.active { display: block; }
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+
+  /* Profile Orbit Hero */
+  .hero {
+    background: radial-gradient(circle at 50% 35%, rgba(46,166,255,0.18), transparent 65%), var(--card);
+    border: 1px solid var(--border); border-radius: 22px;
+    padding: 22px 16px 18px; text-align: center; position: relative; overflow: hidden;
+  }
+  .orbit-wrap {
+    position: relative; width: 170px; height: 170px; margin: 0 auto 12px;
+    display: grid; place-items: center;
+  }
+  .orbit-ring {
+    position: absolute; inset: 10px; border-radius: 50%;
+    border: 1px dashed rgba(46, 166, 255, 0.35);
+    animation: spinSlow 24s linear infinite;
+  }
+  @keyframes spinSlow { to { transform: rotate(360deg); } }
+  .avatar {
+    width: 84px; height: 84px; border-radius: 50%;
+    background: linear-gradient(135deg, #2ea6ff, #8b5cf6);
+    display: grid; place-items: center; font-size: 34px; font-weight: 800;
+    border: 3px solid #0f1620; z-index: 2; box-shadow: 0 8px 24px rgba(0,0,0,0.45);
+  }
+  .orbit-gift {
+    position: absolute; width: 34px; height: 34px; border-radius: 50%;
+    background: var(--card-2); border: 1px solid rgba(255,255,255,0.15);
+    display: grid; place-items: center; font-size: 18px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.4); z-index: 3;
+  }
+  .og-1 { top: 4px; left: 50%; transform: translateX(-50%); }
+  .og-2 { bottom: 4px; left: 50%; transform: translateX(-50%); }
+  .og-3 { left: 4px; top: 50%; transform: translateY(-50%); }
+  .og-4 { right: 4px; top: 50%; transform: translateY(-50%); }
+
+  .profile-name {
+    font-size: 20px; font-weight: 800; display: flex; align-items: center; justify-content: center; gap: 6px;
+  }
+  .badge-verify { color: var(--blue); font-size: 16px; }
+  .badge-scam {
+    background: rgba(239,68,68,0.18); color: var(--red); border: 1px solid var(--red);
+    font-size: 10px; padding: 1px 6px; border-radius: 5px; font-weight: 800;
+  }
+  .profile-meta { color: var(--muted); font-size: 13px; margin-top: 4px; }
+  .lvl-chip {
+    display: inline-flex; align-items: center; gap: 6px; margin-top: 12px;
+    background: linear-gradient(135deg, rgba(251,191,36,0.18), rgba(245,158,11,0.08));
+    border: 1px solid rgba(251,191,36,0.4); color: var(--gold);
+    padding: 6px 14px; border-radius: 99px; font-size: 13px; font-weight: 800; cursor: pointer;
+  }
+
+  /* Cards & Grids */
+  .section-title { font-size: 15px; font-weight: 800; margin: 16px 0 10px; display: flex; justify-content: space-between; align-items: center; }
+  .card {
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 16px; padding: 14px; margin-bottom: 10px;
+  }
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .item-card {
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 16px; padding: 12px; display: flex; flex-direction: column; justify-content: space-between;
+  }
+  .item-icon { font-size: 30px; margin-bottom: 6px; }
+  .item-title { font-weight: 700; font-size: 14px; }
+  .item-sub { color: var(--muted); font-size: 11px; margin: 3px 0 10px; line-height: 1.35; }
+
+  .btn {
+    width: 100%; border: none; border-radius: 11px; padding: 9px 12px;
+    font-weight: 700; font-size: 13px; cursor: pointer; transition: 0.15s;
+    background: var(--blue); color: #fff;
+  }
+  .btn:active { transform: scale(0.97); }
+  .btn.green { background: var(--green); color: #052e16; }
+  .btn.gold { background: var(--gold); color: #271a00; }
+  .btn.red { background: var(--red); color: #fff; }
+  .btn.ghost { background: var(--card-2); color: var(--text); border: 1px solid var(--border); }
+  .btn:disabled { opacity: 0.45; cursor: not-allowed; }
+
+  /* Games */
+  .crash-display {
+    background: #0b1118; border: 1px solid var(--border); border-radius: 16px;
+    padding: 26px 14px; text-align: center; margin-bottom: 12px;
+  }
+  .crash-mult { font-size: 42px; font-weight: 900; color: var(--green); }
+  .crash-mult.busted { color: var(--red); }
+
+  .mines-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; margin: 12px 0; }
+  .mine-cell {
+    aspect-ratio: 1; background: var(--card-2); border: 1px solid var(--border);
+    border-radius: 10px; font-size: 20px; display: grid; place-items: center; cursor: pointer;
+  }
+  .mine-cell.safe { background: rgba(34,197,94,0.2); border-color: var(--green); }
+  .mine-cell.boom { background: rgba(239,68,68,0.25); border-color: var(--red); }
+
+  /* Wheel */
+  .wheel-box { text-align: center; padding: 14px 0; }
+  .wheel-circle {
+    width: 150px; height: 150px; margin: 0 auto 14px; border-radius: 50%;
+    border: 5px solid var(--gold);
+    background: conic-gradient(#2ea6ff 0 90deg, #a855f7 90deg 180deg, #22c55e 180deg 270deg, #f59e0b 270deg 360deg);
+    display: grid; place-items: center; font-size: 34px;
+    transition: transform 2.2s cubic-bezier(0.15, 0.85, 0.25, 1);
+  }
+
+  /* Switch */
+  .switch-row {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 10px 0; border-bottom: 1px solid var(--border);
+  }
+  .switch-row:last-child { border-bottom: none; }
+
+  /* Bottom Nav */
+  .nav {
+    position: fixed; bottom: 0; left: 0; right: 0; z-index: 40;
+    background: rgba(23, 33, 43, 0.96); backdrop-filter: blur(12px);
+    border-top: 1px solid var(--border);
+    display: grid; grid-template-columns: repeat(4, 1fr);
+    padding: 6px 4px 10px;
+  }
+  .nav-btn {
+    background: none; border: none; color: var(--muted);
+    display: flex; flex-direction: column; align-items: center; gap: 3px;
+    font-size: 11px; font-weight: 600; cursor: pointer;
+  }
+  .nav-btn span:first-child { font-size: 19px; }
+  .nav-btn.active { color: var(--blue); }
+
+  /* Modal */
+  .modal-bg {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 60;
+    display: none; align-items: flex-end; justify-content: center;
+  }
+  .modal-bg.open { display: flex; }
+  .modal-sheet {
+    background: var(--card); width: 100%; max-width: 480px;
+    border-radius: 22px 22px 0 0; padding: 18px; border-top: 1px solid var(--border);
+  }
+  input.field {
+    width: 100%; background: var(--bg); border: 1px solid var(--border);
+    color: var(--text); padding: 10px 12px; border-radius: 10px; font-size: 14px; margin: 10px 0;
+  }
+  .toast {
+    position: fixed; top: 62px; left: 50%; transform: translateX(-50%);
+    background: #1e293b; color: #fff; border: 1px solid var(--blue);
+    padding: 8px 14px; border-radius: 99px; font-size: 12px; font-weight: 700;
+    z-index: 80; display: none; box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+  }
+</style>
+</head>
+<body>
+
+<div id="toast" class="toast"></div>
+
+<div class="topbar">
+  <div class="brand">
+    <div class="brand-badge">🚀</div>
+    <span>RiseGram</span>
+  </div>
+  <div class="balances">
+    <div class="pill blue">TG ⭐ <span id="tgStars">150</span></div>
+    <div class="pill gold">⭐ <span id="riseStars">2 500</span></div>
+    <button id="adminBtn" class="admin-btn" onclick="openTab('admin')">⚡ Админка</button>
+  </div>
+</div>
+
+<div class="container">
+
+  <!-- TAB 1: PROFILE -->
+  <div id="tab-profile" class="tab active">
+    <div class="hero">
+      <div class="orbit-wrap">
+        <div class="orbit-ring"></div>
+        <div class="orbit-gift og-1" id="slot0">👑</div>
+        <div class="orbit-gift og-2" id="slot1">💎</div>
+        <div class="orbit-gift og-3" id="slot2">🔥</div>
+        <div class="orbit-gift og-4" id="slot3">🛸</div>
+        <div class="avatar" id="avatarLetter">K</div>
+      </div>
+      <div class="profile-name">
+        <span id="dispName">koyyzz</span>
+        <span id="dispVerify" class="badge-verify" style="display:none;">☑️</span>
+        <span id="dispScam" class="badge-scam" style="display:none;">SCAM</span>
+      </div>
+      <div class="profile-meta">
+        <span id="dispUser">@koyzzov</span> • <span id="dispPhone">+888 0420 6969</span>
+      </div>
+      <div class="profile-meta" style="font-size:11px; margin-top:2px;">
+        ID: <span id="dispId">7206852053</span>
+      </div>
+      <div class="lvl-chip" onclick="openLevelModal()">
+        🛡️ Уровень <span id="dispLvl">57</span> • 1.3M / 1.3M 👑
+      </div>
+    </div>
+
+    <div class="section-title">
+      <span>🎒 Инвентарь подарков</span>
+      <span style="font-size:12px; color:var(--muted);">Нажми, чтобы надеть</span>
+    </div>
+    <div class="grid-2" id="inventoryGrid"></div>
+  </div>
+
+  <!-- TAB 2: MARKET -->
+  <div id="tab-market" class="tab">
+    <div class="section-title"><span>🔥 Акция (1 раз на аккаунт)</span></div>
+    <div class="card" style="border-color: rgba(251,191,36,0.4);">
+      <div style="display:flex; justify-content:space-between; align-items:center;">
+        <div>
+          <div style="font-weight:800; font-size:15px;">⭐ Стартовый пак RiseStars</div>
+          <div class="item-sub" style="margin:3px 0 0;">1 000 RiseStars по спецкурсу (строго 1 покупка)</div>
+        </div>
+        <span id="starterBadge" class="pill gold">0/1</span>
+      </div>
+      <button id="starterBtn" class="btn gold" style="margin-top:10px;" onclick="buyStarterPack()">
+        Купить за 10 TG ⭐
+      </button>
+    </div>
+
+    <div class="section-title"><span>💎 Статусы и номера за TG ⭐</span></div>
+    <div class="grid-2">
+      <div class="item-card">
+        <div>
+          <div class="item-icon">⚠️</div>
+          <div class="item-title">Метка SCAM / FAKE</div>
+          <div class="item-sub">Пометить аккаунт или канал мошенника</div>
+        </div>
+        <button class="btn red" onclick="openScamModal()">15 TG ⭐</button>
+      </div>
+      <div class="item-card">
+        <div>
+          <div class="item-icon">📞</div>
+          <div class="item-title">Номер +888</div>
+          <div class="item-sub">Анонимный виртуальный номер в профиль</div>
+        </div>
+        <button class="btn" onclick="openNumberModal()">от 25 TG ⭐</button>
+      </div>
+      <div class="item-card">
+        <div>
+          <div class="item-icon">🏷️</div>
+          <div class="item-title">NFT-юзернейм</div>
+          <div class="item-sub">Коллекционный короткий @username</div>
+        </div>
+        <button class="btn" onclick="openNftModal()">от 10 TG ⭐</button>
+      </div>
+      <div class="item-card">
+        <div>
+          <div class="item-icon">☑️</div>
+          <div class="item-title">Верификация</div>
+          <div class="item-sub">Официальная галочка Мажора</div>
+        </div>
+        <button class="btn green" onclick="buyVerify()">50 TG ⭐</button>
+      </div>
+    </div>
+
+    <div class="section-title"><span>🎁 Лимитированные дропы (за RiseStars)</span></div>
+    <div class="grid-2" id="dropsGrid"></div>
+  </div>
+
+  <!-- TAB 3: GAMES -->
+  <div id="tab-games" class="tab">
+    <div class="section-title"><span>🚀 Краш (ставка 100 ⭐)</span></div>
+    <div class="card" id="gameCrashBox">
+      <div class="crash-display">
+        <div id="crashMult" class="crash-mult">1.00x</div>
+        <div id="crashStatus" style="font-size:12px; color:var(--muted); margin-top:4px;">Готов к запуску</div>
+      </div>
+      <button id="crashBtn" class="btn green" onclick="toggleCrash()">Ставка 100 ⭐ • Старт</button>
+    </div>
+
+    <div class="section-title"><span>💣 Мины 5×5 (ставка 100 ⭐)</span></div>
+    <div class="card" id="gameMinesBox">
+      <div style="display:flex; justify-content:space-between; font-size:13px;">
+        <span>Множитель: <b id="minesMult" style="color:var(--gold);">1.00x</b></span>
+        <span id="minesInfo" style="color:var(--muted);">5 мин на поле</span>
+      </div>
+      <div class="mines-grid" id="minesGrid"></div>
+      <button id="minesBtn" class="btn" onclick="startOrCashoutMines()">Начать игру (100 ⭐)</button>
+    </div>
+
+    <div class="section-title"><span>🎡 Ежедневная рулетка</span></div>
+    <div class="card wheel-box" id="gameWheelBox">
+      <div id="wheelCircle" class="wheel-circle">🎁</div>
+      <button id="wheelBtn" class="btn gold" onclick="spinWheel()">Крутить бесплатно (1 раз в 24ч)</button>
+    </div>
+  </div>
+
+  <!-- TAB 4: LEADERS -->
+  <div id="tab-leaders" class="tab">
+    <div class="section-title"><span>🏆 Топ игроков RiseGram</span></div>
+    <div class="card">
+      <div class="switch-row">
+        <div><b>1. 👑 koyyzz</b> <span style="color:var(--muted); font-size:12px;">@koyzzov</span></div>
+        <span class="pill gold">Ур. 57</span>
+      </div>
+      <div class="switch-row">
+        <div><b>2. 💎 Murzik</b> <span style="color:var(--muted); font-size:12px;">+7 982 264-57-52</span></div>
+        <span class="pill">Ур. 49</span>
+      </div>
+      <div class="switch-row">
+        <div><b>3. 🔥 ShadowRise</b> <span style="color:var(--muted); font-size:12px;">+888 8 777</span></div>
+        <span class="pill">Ур. 44</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- TAB 5: HIDDEN ADMIN PANEL -->
+  <div id="tab-admin" class="tab">
+    <div class="section-title">
+      <span>⚡ Панель Создателя (ID 7206852053)</span>
+    </div>
+    <div class="card">
+      <div style="font-weight:700; margin-bottom:8px;">🎛 Рубильники функций (Feature Flags)</div>
+      <div class="switch-row">
+        <span>Игра «Краш»</span>
+        <input type="checkbox" checked onchange="toggleFeature('gameCrashBox', this.checked)">
+      </div>
+      <div class="switch-row">
+        <span>Игра «Мины»</span>
+        <input type="checkbox" checked onchange="toggleFeature('gameMinesBox', this.checked)">
+      </div>
+      <div class="switch-row">
+        <span>Ежедневная рулетка</span>
+        <input type="checkbox" checked onchange="toggleFeature('gameWheelBox', this.checked)">
+      </div>
+    </div>
+
+    <div class="card">
+      <div style="font-weight:700; margin-bottom:8px;">💰 Быстрая выдача и тесты</div>
+      <div class="grid-2">
+        <button class="btn gold" onclick="adminAddStars()">+5 000 RiseStars</button>
+        <button class="btn" onclick="adminAddTgStars()">+100 TG ⭐</button>
+        <button class="btn green" onclick="adminLvlUp()">+1 Уровень</button>
+        <button class="btn ghost" onclick="adminResetStarter()">Сброс пака 0/1</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <div style="font-weight:700; margin-bottom:6px;">🎁 Запустить новый лимит-дроп</div>
+      <input id="newDropEmoji" class="field" placeholder="Эмодзи (например: 🐉)" value="🐉">
+      <input id="newDropName" class="field" placeholder="Название (например: Cyber Dragon)" value="Cyber Dragon">
+      <input id="newDropPrice" class="field" type="number" placeholder="Цена в RiseStars" value="800">
+      <input id="newDropStock" class="field" type="number" placeholder="Тираж (шт.)" value="3">
+      <button class="btn green" onclick="adminCreateDrop()">Опубликовать в Маркет</button>
+    </div>
+  </div>
+
+</div>
+
+<!-- BOTTOM NAV -->
+<div class="nav">
+  <button class="nav-btn active" onclick="openTab('profile', this)"><span>👤</span><span>Профиль</span></button>
+  <button class="nav-btn" onclick="openTab('market', this)"><span>🛒</span><span>Маркет</span></button>
+  <button class="nav-btn" onclick="openTab('games', this)"><span>🎮</span><span>Игры</span></button>
+  <button class="nav-btn" onclick="openTab('leaders', this)"><span>🏆</span><span>Лидеры</span></button>
+</div>
+
+<!-- MODAL -->
+<div id="modalBg" class="modal-bg" onclick="if(event.target===this) closeModal()">
+  <div class="modal-sheet" id="modalContent"></div>
+</div>
+
+<script>
+  const ADMIN_ID = 7206852053;
+  const tg = window.Telegram && window.Telegram.WebApp ? window.Telegram.WebApp : null;
+
+  let state = {
+    tgId: ADMIN_ID,
+    name: "koyyzz",
+    username: "@koyzzov",
+    phone: "+888 0420 6969",
+    tgStars: 150,
+    riseStars: 2500,
+    level: 57,
+    verified: false,
+    scam: false,
+    starterClaimed: false,
+    wheelSpun: false,
+    orbit: ["👑", "💎", "🔥", "🛸"],
+    inventory: [
+      { emoji: "👑", name: "Royal Crown", val: 500 },
+      { emoji: "💎", name: "Ocean Diamond", val: 450 },
+      { emoji: "🔥", name: "Inferno Flame", val: 300 },
+      { emoji: "🛸", name: "UFO X-1", val: 600 }
+    ],
+    drops: [
+      { id: 1, emoji: "🧸", name: "Plush Pepe", price: 650, stock: 3, max: 5 },
+      { id: 2, emoji: "🎩", name: "Durov Cap", price: 900, stock: 2, max: 5 }
+    ]
+  };
+
+  // Init Telegram WebApp
+  if (tg) {
+    tg.ready();
+    tg.expand();
+    const u = tg.initDataUnsafe && tg.initDataUnsafe.user;
+    if (u) {
+      state.tgId = u.id;
+      state.name = u.first_name || "Player";
+      state.username = u.username ? "@" + u.username : "@id" + u.id;
+    }
+  }
+
+  // Check Admin Rights (Telegram ID or ?admin=7206852053)
+  const urlParams = new URLSearchParams(window.location.search);
+  if (state.tgId === ADMIN_ID || urlParams.get("admin") === String(ADMIN_ID)) {
+    document.getElementById("adminBtn").classList.add("visible");
+  }
+
+  function toast(msg) {
+    const t = document.getElementById("toast");
+    t.textContent = msg;
+    t.style.display = "block";
+    clearTimeout(window._toastTimer);
+    window._toastTimer = setTimeout(() => t.style.display = "none", 2400);
+  }
+
+  function render() {
+    document.getElementById("tgStars").textContent = state.tgStars;
+    document.getElementById("riseStars").textContent = state.riseStars.toLocaleString("ru-RU");
+    document.getElementById("dispName").textContent = state.name;
+    document.getElementById("avatarLetter").textContent = state.name.charAt(0).toUpperCase();
+    document.getElementById("dispUser").textContent = state.username;
+    document.getElementById("dispPhone").textContent = state.phone;
+    document.getElementById("dispId").textContent = state.tgId;
+    document.getElementById("dispLvl").textContent = state.level;
+    document.getElementById("dispVerify").style.display = state.verified ? "inline" : "none";
+    document.getElementById("dispScam").style.display = state.scam ? "inline" : "none";
+
+    state.orbit.forEach((em, i) => {
+      document.getElementById("slot" + i).textContent = em || "➕";
+    });
+
+    // Starter pack status
+    const sb = document.getElementById("starterBtn");
+    const badge = document.getElementById("starterBadge");
+    if (state.starterClaimed) {
+      badge.textContent = "1/1";
+      sb.textContent = "✓ Уже получено (1/1)";
+      sb.disabled = true;
+    } else {
+      badge.textContent = "0/1";
+      sb.textContent = "Купить за 10 TG ⭐";
+      sb.disabled = false;
+    }
+
+    // Inventory
+    const invGrid = document.getElementById("inventoryGrid");
+    invGrid.innerHTML = state.inventory.map((item, idx) => `
+      <div class="item-card">
+        <div>
+          <div class="item-icon">${item.emoji}</div>
+          <div class="item-title">${item.name}</div>
+          <div class="item-sub">Ценность: ${item.val} ⭐</div>
+        </div>
+        <button class="btn ghost" onclick="equipGift(${idx})">На орбиту</button>
+      </div>
+    `).join("");
+
+    // Drops
+    const dropsGrid = document.getElementById("dropsGrid");
+    dropsGrid.innerHTML = state.drops.map(d => `
+      <div class="item-card">
+        <div>
+          <div class="item-icon">${d.emoji}</div>
+          <div class="item-title">${d.name}</div>
+          <div class="item-sub">Осталось: ${d.stock}/${d.max} шт.</div>
+        </div>
+        <button class="btn" ${d.stock <= 0 ? "disabled" : ""} onclick="buyDrop(${d.id})">
+          ${d.stock > 0 ? d.price + " ⭐" : "Распродано"}
+        </button>
+      </div>
+    `).join("");
+  }
+
+  function openTab(name, btnEl) {
+    document.querySelectorAll(".tab").forEach(t => t.classList.remove("active"));
+    document.getElementById("tab-" + name).classList.add("active");
+    if (btnEl) {
+      document.querySelectorAll(".nav-btn").forEach(b => b.classList.remove("active"));
+      btnEl.classList.add("active");
+    }
+  }
+
+  function equipGift(idx) {
+    const gift = state.inventory[idx];
+    state.orbit.pop();
+    state.orbit.unshift(gift.emoji);
+    toast(`${gift.emoji} ${gift.name} добавлен на орбиту!`);
+    render();
+  }
+
+  // Market Actions
+  function buyStarterPack() {
+    if (state.starterClaimed) return toast("Уже получено (1/1)");
+    if (state.tgStars < 10) return toast("Недостаточно TG ⭐");
+    state.tgStars -= 10;
+    state.riseStars += 1000;
+    state.starterClaimed = true;
+    toast("🎉 Получено +1 000 RiseStars!");
+    render();
+  }
+
+  function buyVerify() {
+    if (state.verified) return toast("У вас уже есть верификация!");
+    if (state.tgStars < 50) return toast("Нужно 50 TG ⭐");
+    state.tgStars -= 50;
+    state.verified = true;
+    toast("☑️ Верификация Мажора активирована!");
+    render();
+  }
+
+  function buyDrop(id) {
+    const d = state.drops.find(x => x.id === id);
+    if (!d || d.stock <= 0) return;
+    if (state.riseStars < d.price) return toast("Не хватает RiseStars ⭐");
+    state.riseStars -= d.price;
+    d.stock -= 1;
+    state.inventory.unshift({ emoji: d.emoji, name: d.name, val: d.price });
+    toast(`🎁 Вы купили ${d.name}!`);
+    render();
+  }
+
+  // Modals
+  function openModal(html) {
+    document.getElementById("modalContent").innerHTML = html;
+    document.getElementById("modalBg").classList.add("open");
+  }
+  function closeModal() {
+    document.getElementById("modalBg").classList.remove("open");
+  }
+
+  function openLevelModal() {
+    openModal(`
+      <h3 style="margin-bottom:8px;">🛡️ Рейтинг и Уровень ${state.level}</h3>
+      <p style="font-size:13px; color:var(--muted); line-height:1.45;">
+        Надетые на орбиту NFT-подарки повышают ваш рейтинг и уровень профиля. При продаже подарка обратно за звёзды списывается 85% его рейтинга.
+      </p>
+      <button class="btn" style="margin-top:14px;" onclick="closeModal()">Понятно</button>
+    `);
+  }
+
+  function openScamModal() {
+    openModal(`
+      <h3>⚠️ Метка SCAM / FAKE • 15 TG ⭐</h3>
+      <p style="font-size:12px; color:var(--muted); margin-top:4px;">Введите @username или повесьте метку на свой профиль для теста:</p>
+      <input id="scamInput" class="field" placeholder="@username" value="${state.username}">
+      <button class="btn red" onclick="confirmScam()">Оплатить 15 TG ⭐</button>
+    `);
+  }
+  function confirmScam() {
+    if (state.tgStars < 15) return toast("Недостаточно TG ⭐");
+    state.tgStars -= 15;
+    state.scam = true;
+    closeModal();
+    toast("⚠️ Метка SCAM выдана!");
+    render();
+  }
+
+  function openNumberModal() {
+    openModal(`
+      <h3>📞 Анонимные номера +888</h3>
+      <p style="font-size:12px; color:var(--muted); margin:6px 0 12px;">Новый номер сразу привяжется к вашему аккаунту:</p>
+      <button class="btn" style="margin-bottom:8px;" onclick="buy888(25, '+888 0492 8190')">+888 0XXX XXXX • 25 TG ⭐</button>
+      <button class="btn green" onclick="buy888(50, '+888 8 777')">+888 8 XXX (VIP) • 50 TG ⭐</button>
+    `);
+  }
+  function buy888(cost, num) {
+    if (state.tgStars < cost) return toast("Недостаточно TG ⭐");
+    state.tgStars -= cost;
+    state.phone = num;
+    closeModal();
+    toast(`📞 Номер ${num} привязан!`);
+    render();
+  }
+
+  function openNftModal() {
+    openModal(`
+      <h3>🏷️ Коллекционный NFT-юзернейм</h3>
+      <p style="font-size:12px; color:var(--muted); margin-top:4px;">4 буквы — 14 TG ⭐ • 5+ букв — 10 TG ⭐</p>
+      <input id="nftInput" class="field" placeholder="@rise" value="@rise">
+      <button class="btn" onclick="confirmNft()">Купить юзернейм</button>
+    `);
+  }
+  function confirmNft() {
+    const raw = document.getElementById("nftInput").value.trim().replace(/^@/, "");
+    if (raw.length < 4) return toast("Минимум 4 символа!");
+    const cost = raw.length === 4 ? 14 : 10;
+    if (state.tgStars < cost) return toast("Недостаточно TG ⭐");
+    state.tgStars -= cost;
+    state.username = "@" + raw;
+    closeModal();
+    toast(`🏷️ Юзернейм @${raw} установлен!`);
+    render();
+  }
+
+  // Game 1: Crash
+  let crashRunning = false, crashTimer = null, crashVal = 1.0, crashTarget = 2.0;
+  function toggleCrash() {
+    const btn = document.getElementById("crashBtn");
+    const multEl = document.getElementById("crashMult");
+    const stEl = document.getElementById("crashStatus");
+
+    if (!crashRunning) {
+      if (state.riseStars < 100) return toast("Нужно 100 ⭐");
+      state.riseStars -= 100;
+      render();
+      crashRunning = true;
+      crashVal = 1.00;
+      crashTarget = +(1.15 + Math.random() * 3.5).toFixed(2);
+      multEl.classList.remove("busted");
+      btn.className = "btn gold";
+      btn.textContent = "Забрать выигрыш!";
+      stEl.textContent = "Ракета летит...";
+
+      crashTimer = setInterval(() => {
+        crashVal = +(crashVal + 0.07).toFixed(2);
+        multEl.textContent = crashVal.toFixed(2) + "x";
+        if (crashVal >= crashTarget) {
+          clearInterval(crashTimer);
+          crashRunning = false;
+          multEl.classList.add("busted");
+          stEl.textContent = `💥 Краш на ${crashTarget.toFixed(2)}x!`;
+          btn.className = "btn green";
+          btn.textContent = "Ставка 100 ⭐ • Старт";
+        }
+      }, 120);
+    } else {
+      clearInterval(crashTimer);
+      crashRunning = false;
+      const win = Math.floor(100 * crashVal);
+      state.riseStars += win;
+      stEl.textContent = `✅ Вы забрали +${win} ⭐!`;
+      btn.className = "btn green";
+      btn.textContent = "Ставка 100 ⭐ • Старт";
+      toast(`🚀 Выигрыш +${win} ⭐!`);
+      render();
+    }
+  }
+
+  // Game 2: Mines
+  let minesActive = false, minesBombs = [], minesOpened = 0;
+  function buildMinesBoard() {
+    const grid = document.getElementById("minesGrid");
+    grid.innerHTML = "";
+    for (let i = 0; i < 25; i++) {
+      const cell = document.createElement("div");
+      cell.className = "mine-cell";
+      cell.textContent = "?";
+      cell.onclick = () => clickMine(i, cell);
+      grid.appendChild(cell);
+    }
+  }
+  function startOrCashoutMines() {
+    const btn = document.getElementById("minesBtn");
+    if (!minesActive) {
+      if (state.riseStars < 100) return toast("Нужно 100 ⭐");
+      state.riseStars -= 100;
+      render();
+      minesActive = true;
+      minesOpened = 0;
+      minesBombs = [];
+      while (minesBombs.length < 5) {
+        const r = Math.floor(Math.random() * 25);
+        if (!minesBombs.includes(r)) minesBombs.push(r);
+      }
+      document.getElementById("minesMult").textContent = "1.00x";
+      btn.className = "btn green";
+      btn.textContent = "Забрать (100 ⭐)";
+      buildMinesBoard();
+    } else {
+      const mult = +(1 + minesOpened * 0.25).toFixed(2);
+      const win = Math.floor(100 * mult);
+      state.riseStars += win;
+      minesActive = false;
+      btn.className = "btn";
+      btn.textContent = "Начать игру (100 ⭐)";
+      toast(`💎 Вы забрали +${win} ⭐!`);
+      render();
+    }
+  }
+  function clickMine(idx, cell) {
+    if (!minesActive || cell.classList.contains("safe")) return;
+    if (minesBombs.includes(idx)) {
+      cell.classList.add("boom");
+      cell.textContent = "💣";
+      minesActive = false;
+      const btn = document.getElementById("minesBtn");
+      btn.className = "btn";
+      btn.textContent = "Начать игру (100 ⭐)";
+      toast("💥 Бабах! Вы попали на мину.");
+    } else {
+      cell.classList.add("safe");
+      cell.textContent = "💎";
+      minesOpened++;
+      const mult = +(1 + minesOpened * 0.25).toFixed(2);
+      document.getElementById("minesMult").textContent = mult + "x";
+      document.getElementById("minesBtn").textContent = `Забрать (${Math.floor(100 * mult)} ⭐)`;
+    }
+  }
+
+  // Game 3: Wheel
+  function spinWheel() {
+    if (state.wheelSpun) return toast("Приходите завтра за новой круткой!");
+    state.wheelSpun = true;
+    const deg = 1440 + Math.floor(Math.random() * 360);
+    document.getElementById("wheelCircle").style.transform = `rotate(${deg}deg)`;
+    setTimeout(() => {
+      state.riseStars += 350;
+      document.getElementById("wheelBtn").disabled = true;
+      document.getElementById("wheelBtn").textContent = "✓ Использовано сегодня";
+      toast("🎡 Выпало +350 RiseStars!");
+      render();
+    }, 2250);
+  }
+
+  // Admin Actions
+  function toggleFeature(elId, enabled) {
+    document.getElementById(elId).style.display = enabled ? "block" : "none";
+    toast(enabled ? "✅ Модуль включён" : "⛔ Модуль скрыт у игроков");
+  }
+  function adminAddStars() { state.riseStars += 5000; toast("+5 000 RiseStars"); render(); }
+  function adminAddTgStars() { state.tgStars += 100; toast("+100 TG ⭐"); render(); }
+  function adminLvlUp() { state.level += 1; toast("Уровень повышен!"); render(); }
+  function adminResetStarter() { state.starterClaimed = false; toast("Пак сброшен в 0/1"); render(); }
+  function adminCreateDrop() {
+    const emoji = document.getElementById("newDropEmoji").value || "🎁";
+    const name = document.getElementById("newDropName").value || "Limited Gift";
+    const price = parseInt(document.getElementById("newDropPrice").value) || 500;
+    const stock = parseInt(document.getElementById("newDropStock").value) || 3;
+    state.drops.unshift({ id: Date.now(), emoji, name, price, stock, max: stock });
+    toast(`🚀 Дроп «${name}» запущен!`);
+    render();
+  }
+
+  buildMinesBoard();
+  render();
+</script>
+</body>
+</html>
