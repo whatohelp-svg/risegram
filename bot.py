@@ -539,17 +539,16 @@ async def cb_help(call: CallbackQuery):
 
 # ================= СКРЫТАЯ АДМИНКА (/admin7206852053) =================
 @router.message(Command("admin7206852053"))
-async def cmd_secret_admin(message: Message):
+async def cmd_secret_admin(message: Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID:
-        return  # Для всех остальных игнор
-    
+        return
+    await state.clear()
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📊 Статистика базы", callback_data="adm_stats")],
-        [InlineKeyboardButton(text="📢 Рассылка", callback_data="adm_broadcast")],
-        [InlineKeyboardButton(text="⭐ Выдать RiseStars", callback_data="adm_grant")],
+        [InlineKeyboardButton(text="🎁 Выдать награду / предмет", callback_data="adm_grant_menu")],
     ])
     await message.answer(
-        "👑 <b>Панель создателя RiseGram</b>\n\nДобро пожаловать, босс. Выберите действие:",
+        "👑 <b>Панель создателя RiseGram</b>\n\nВыбери нужный раздел:",
         reply_markup=kb,
         parse_mode="HTML"
     )
@@ -569,11 +568,125 @@ async def cb_adm_stats(call: CallbackQuery):
         f"👥 Пользователей в базе: <b>{users_count}</b>\n"
         f"⭐ Всего заработано XTR: <b>{total_xtr} ⭐</b>",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="↩️ Назад", callback_data="back_main")]
+            [InlineKeyboardButton(text="↩️ В админку", callback_data="back_admin")]
+        ], parse_mode="HTML")
+    )
+
+@router.callback_query(F.data == "back_admin")
+async def cb_back_admin(call: CallbackQuery, state: FSMContext):
+    if call.from_user.id != ADMIN_ID:
+        return
+    await state.clear()
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📊 Статистика базы", callback_data="adm_stats")],
+        [InlineKeyboardButton(text="🎁 Выдать награду / предмет", callback_data="adm_grant_menu")],
+    ])
+    await call.message.edit_text("👑 <b>Панель создателя RiseGram</b>", reply_markup=kb, parse_mode="HTML")
+
+@router.callback_query(F.data == "adm_grant_menu")
+async def cb_adm_grant_menu(call: CallbackQuery):
+    if call.from_user.id != ADMIN_ID:
+        return
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="⭐ RiseStars (+1000)", callback_data="grant:stars:1000")],
+        [InlineKeyboardButton(text="☑️ Верификация", callback_data="grant:verify:1")],
+        [InlineKeyboardButton(text="⚠️ Метка SCAM", callback_data="grant:scam:1")],
+        [InlineKeyboardButton(text="📞 Номер +888 (кастом)", callback_data="grant:num888")],
+        [InlineKeyboardButton(text="🏷 NFT-юзернейм", callback_data="grant:nft")],
+        [InlineKeyboardButton(text="↩️ В админку", callback_data="back_admin")],
+    ])
+    await call.message.edit_text("🎁 <b>Выберите, что именно выдать пользователю:</b>", reply_markup=kb, parse_mode="HTML")
+
+@router.callback_query(F.data.startswith("grant:"))
+async def cb_grant_select(call: CallbackQuery, state: FSMContext):
+    if call.from_user.id != ADMIN_ID:
+        return
+    parts = call.data.split(":")
+    action = parts[1]
+    val = parts[2] if len(parts) > 2 else "input"
+    
+    await state.update_data(grant_action=action, grant_val=val)
+    await state.set_state(AdminStates.waiting_grant_target)
+    
+    await call.message.edit_text(
+        f"🎯 <b>Выбран предмет для выдачи:</b> <code>{action}</code>\n\n"
+        f"Теперь отправьте **Telegram ID** пользователя (например: <code>7206852053</code>):",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="❌ Отмена", callback_data="back_admin")]
         ]),
         parse_mode="HTML"
     )
 
+@router.message(AdminStates.waiting_grant_target)
+async def process_grant_target(message: Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID:
+        return
+    
+    target_raw = message.text.strip()
+    data = await state.get_data()
+    action = data.get("grant_action")
+    val = data.get("grant_val")
+    await state.clear()
+
+    try:
+        target_id = int(target_raw)
+    except ValueError:
+        return await message.answer("❌ Ошибка! ID должен состоять только из цифр.")
+
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cur = await db.execute("SELECT * FROM users WHERE tg_id = ?", (target_id,))
+        user = await cur.fetchone()
+        if not user:
+            return await message.answer(f"❌ Пользователь с ID <code>{target_id}</code> не найден в базе бота.", parse_mode="HTML")
+
+        if action == "stars":
+            await db.execute("UPDATE users SET risestars = risestars + 1000 WHERE tg_id = ?", (target_id,))
+            msg_text = "🎁 Вам начислено <b>1 000 RiseStars</b> от администратора!"
+        elif action == "verify":
+            await db.execute("UPDATE users SET verified = 1 WHERE tg_id = ?", (target_id,))
+            msg_text = "🎁 Ваш аккаунт получил официальную <b>верификацию</b>!"
+        elif action == "scam":
+            await db.execute("UPDATE users SET scam_mark = 1 WHERE tg_id = ?", (target_id,))
+            msg_text = "⚠️ На ваш аккаунт была установлена <b>метка SCAM</b>."
+        elif action == "num888":
+            num = f"+888 {random.randint(1000, 9999)}"
+            await db.execute("UPDATE users SET phone = ? WHERE tg_id = ?", (num, target_id))
+            msg_text = f"🎁 Вам выдан новый анонимный номер: <b>{num}</b>"
+        elif action == "nft":
+            uname = f"@rise_{random.randint(100,999)}"
+            await db.execute("UPDATE users SET username = ? WHERE tg_id = ?", (uname, target_id))
+            msg_text = f"🎁 Вам выдан коллекционный NFT-юзернейм: <b>{uname}</b>"
+        else:
+            msg_text = "🎁 Администратор выдал вам предмет!"
+
+        await db.commit()
+
+    try:
+        await message.bot.send_message(target_id, msg_text, parse_mode="HTML")
+        notified = " (уведомление отправлено пользователю)"
+    except Exception:
+        notified = " (но бот не смог написать пользователю в ЛС)"
+
+    await message.answer(
+        f"✅ <b>Успешно выдано!</b>\nПользователь ID: <code>{target_id}</code>{notified}",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="👑 В админку", callback_data="back_admin")]
+        ]),
+        parse_mode="HTML"
+    )
+
+async def main():
+    await init_db()
+    bot = Bot(token=BOT_TOKEN)
+    dp = Dispatcher()
+    dp.include_router(router)
+    print("Бот успешно запущен!")
+    await dp.start_polling(bot)
+
+if __name__ == "__main__":
+    asyncio.run(main())
+    
 async def main():
     await init_db()
     bot = Bot(token=BOT_TOKEN)
