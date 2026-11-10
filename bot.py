@@ -31,9 +31,10 @@ class ShopStates(StatesGroup):
     waiting_custom_888 = State()
     waiting_scam_target = State()
     waiting_admin_grant = State()
-    waiting_grant_type = State()
+
+class AdminStates(StatesGroup):
     waiting_grant_target = State()
-    
+
 
 
 # ================= БАЗА ДАННЫХ =================
