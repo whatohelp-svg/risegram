@@ -817,4 +817,34 @@ async def on_pre_checkout(query: PreCheckoutQuery):
 
 @router.message(F.successful_payment)
 async def on_successful_payment(message: Message):
+    pay = message.successful_payment
+    payload = pay.invoice_payload
+    stars_paid = pay.total_amount
+    tg_id = message.from_user.id
 
+    async with aiosqlite.connect(DB_PATH) as db:
+        if payload == "starter_1000":
+            await db.execute("UPDATE users SET risestars = risestars + 1000, starter_claimed = 1 WHERE tg_id = ?", (tg_id,))
+            title = "1 000 Звёзд"
+        elif payload == "verify_major":
+            await db.execute("UPDATE users SET verified = 1 WHERE tg_id = ?", (tg_id,))
+            title = "Верификация (Мажор)"
+        elif payload.startswith("scam:"):
+            target = payload.split(":", 1)[1]
+            await db.execute("UPDATE users SET scam_mark = 1 WHERE username = ?", (target,))
+            title = f"Метка SCAM ({target})"
+        elif payload.startswith("num888:"):
+            num = payload.split(":", 1)[1]
+            await db.execute("UPDATE users SET phone = ? WHERE tg_id = ?", (num, tg_id))
+            title = f"Номер {num}"
+        elif payload.startswith("nft:"):
+            uname = payload.split(":", 1)[1]
+            await db.execute("UPDATE users SET username = ? WHERE tg_id = ?", (uname, tg_id))
+            title = f"NFT-юз {uname}"
+        else:
+            title = payload
+
+        await db.execute("INSERT INTO purchases (tg_id, title, price_xtr) VALUES (?, ?, ?)", (tg_id, title, stars_paid))
+        await db.commit()
+
+    await message.answer(f"✅ <b>Оплата прошла успешно!</b>\nВыдано: <b>{title}</b>", reply_markup=kb_main_menu(tg_id), parse_mode="HTML")
