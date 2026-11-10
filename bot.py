@@ -119,7 +119,7 @@ def kb_main_menu(user_id: int) -> InlineKeyboardMarkup:
 
 
 def kb_shop_menu(starter_claimed: int) -> InlineKeyboardMarkup:
-    starter_text = "🟢 RiseStars (Получено)" if starter_claimed else "🟢 RiseStars (1000 ⭐ • 10 TG ⭐)"
+    starter_text = "🟢 Звёзды (Получено)" if starter_claimed else "🟢 Звёзды (1000 ⭐ • 10 TG ⭐)"
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text=starter_text, callback_data="buy_starter")],
         [
@@ -376,7 +376,6 @@ async def cb_buy_starter(call: CallbackQuery):
         return await call.answer("❌ Вы уже забрали стартовый пак!", show_alert=True)
     await call.answer()
     await send_stars_invoice(call.bot, call.from_user.id, "1 000 Звёзд", "Стартовый пак", "starter_1000", 10)
-    
 
 
 @router.callback_query(F.data == "buy_verify")
@@ -428,6 +427,36 @@ async def cb_buy_888_custom(call: CallbackQuery, state: FSMContext):
 
 @router.message(ShopStates.waiting_custom_888)
 async def process_custom_888(message: Message, state: FSMContext):
+    num = f"+888 {message.text.strip().replace('+888', '').strip()}"
+    await state.clear()
+    await send_stars_invoice(message.bot, message.from_user.id, f"Номер {num}", "Кастомный +888", f"num888:{num}", 75)
+
+
+@router.callback_query(F.data == "shop_nft")
+async def cb_shop_nft(call: CallbackQuery, state: FSMContext):
+    await state.set_state(ShopStates.waiting_nft_username)
+    await call.message.edit_text("🏷 <b>NFT-юзернеймы</b>\n\nОтправьте юзернейм:", reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="❌ Отмена", callback_data="menu_shop")]
+    ]), parse_mode="HTML")
+
+
+@router.message(ShopStates.waiting_nft_username)
+async def process_nft_username(message: Message, state: FSMContext):
+    raw = message.text.strip().lstrip("@")
+    if len(raw) < 4:
+        return await message.answer("⚠️ Минимум 4 символа!")
+    price = 14 if len(raw) == 4 else 10
+    await state.clear()
+    await send_stars_invoice(message.bot, message.from_user.id, f"NFT @{raw}", "NFT юзернейм", f"nft:@{raw}", price)
+
+
+@router.pre_checkout_query()
+async def on_pre_checkout(query: PreCheckoutQuery):
+    await query.answer(ok=True)
+
+
+@router.message(F.successful_payment)
+async def on_successful_payment(message: Message, state: FSMContext):
     num = f"+888 {message.text.strip().replace('+888', '').strip()}"
     await state.clear()
     await send_stars_invoice(message.bot, message.from_user.id, f"Номер {num}", "Кастомный +888", f"num888:{num}", 75)
@@ -729,126 +758,6 @@ async def main():
     print("Бот OceanGram успешно запущен!")
     await dp.start_polling(bot)
 
-if __name__ == "__main__":
-    asyncio.run(main())
-            u = await get_or_create_user(call.from_user.id, call.from_user.full_name, call.from_user.username)
-    if u["starter_claimed"]:
-        return await call.answer("❌ Вы уже забрали стартовый пак!", show_alert=True)
-    await call.answer()
-    await send_stars_invoice(call.bot, call.from_user.id, "1 000 Звёзд", "Стартовый пак", "starter_1000", 10)
-
-
-@router.callback_query(F.data == "buy_verify")
-async def cb_buy_verify(call: CallbackQuery):
-    await call.answer()
-    await send_stars_invoice(call.bot, call.from_user.id, "Верификация • Мажор", "Галочка", "verify_major", 50)
-
-
-@router.callback_query(F.data == "buy_scam")
-async def cb_buy_scam(call: CallbackQuery, state: FSMContext):
-    await state.set_state(ShopStates.waiting_scam_target)
-    await call.message.edit_text("🔴 <b>Метка SCAM • 15 TG ⭐</b>\n\nОтправьте @username:", reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="❌ Отмена", callback_data="menu_shop")]
-    ]), parse_mode="HTML")
-
-
-@router.message(ShopStates.waiting_scam_target)
-async def process_scam_target(message: Message, state: FSMContext):
-    target = message.text.strip()
-    await state.clear()
-    await send_stars_invoice(message.bot, message.from_user.id, f"Метка SCAM на {target}", "Мошенник", f"scam:{target}", 15)
-
-
-@router.callback_query(F.data == "shop_888")
-async def cb_shop_888(call: CallbackQuery):
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🟢 +888 8 XXX • 50 ⭐", callback_data="buy_888_vip")],
-        [InlineKeyboardButton(text="🔵 +888 0XXX XXXX • 25 ⭐", callback_data="buy_888_std")],
-        [InlineKeyboardButton(text="🟡 Свой номер • 75 ⭐", callback_data="buy_888_custom")],
-        [InlineKeyboardButton(text="↩️ Назад", callback_data="menu_shop")],
-    ])
-    await call.message.edit_text("📞 <b>Анонимные номера +888</b>", reply_markup=kb, parse_mode="HTML")
-
-
-@router.callback_query(F.data.in_({"buy_888_vip", "buy_888_std"}))
-async def cb_buy_888_preset(call: CallbackQuery):
-    await call.answer()
-    num = f"+888 8 {random.randint(100, 999)}" if call.data == "buy_888_vip" else f"+888 0{random.randint(100, 999)} {random.randint(1000, 9999)}"
-    await send_stars_invoice(call.bot, call.from_user.id, f"Номер {num}", "Номер +888", f"num888:{num}", 50 if call.data == "buy_888_vip" else 25)
-
-
-@router.callback_query(F.data == "buy_888_custom")
-async def cb_buy_888_custom(call: CallbackQuery, state: FSMContext):
-    await state.set_state(ShopStates.waiting_custom_888)
-    await call.message.edit_text("📝 Введите цифры после <code>+888</code>:", reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="❌ Отмена", callback_data="shop_888")]
-    ]), parse_mode="HTML")
-
-
-@router.message(ShopStates.waiting_custom_888)
-async def process_custom_888(message: Message, state: FSMContext):
-    num = f"+888 {message.text.strip().replace('+888', '').strip()}"
-    await state.clear()
-    await send_stars_invoice(message.bot, message.from_user.id, f"Номер {num}", "Кастомный +888", f"num888:{num}", 75)
-
-
-@router.callback_query(F.data == "shop_nft")
-async def cb_shop_nft(call: CallbackQuery, state: FSMContext):
-    await state.set_state(ShopStates.waiting_nft_username)
-    await call.message.edit_text("🏷 <b>NFT-юзернеймы</b>\n\nОтправьте юзернейм:", reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="❌ Отмена", callback_data="menu_shop")]
-    ]), parse_mode="HTML")
-
-
-@router.message(ShopStates.waiting_nft_username)
-async def process_nft_username(message: Message, state: FSMContext):
-    raw = message.text.strip().lstrip("@")
-    if len(raw) < 4:
-        return await message.answer("⚠️ Минимум 4 символа!")
-    price = 14 if len(raw) == 4 else 10
-    await state.clear()
-    await send_stars_invoice(message.bot, message.from_user.id, f"NFT @{raw}", "NFT юзернейм", f"nft:@{raw}", price)
-
-
-@router.pre_checkout_query()
-async def on_pre_checkout(query: PreCheckoutQuery):
-    await query.answer(ok=True)
-
-
-@router.message(F.successful_payment)
-async def on_successful_payment(message: Message):
-    pay = message.successful_payment
-    payload = pay.invoice_payload
-    stars_paid = pay.total_amount
-    tg_id = message.from_user.id
-
-    async with aiosqlite.connect(DB_PATH) as db:
-        if payload == "starter_1000":
-            await db.execute("UPDATE users SET risestars = risestars + 1000, starter_claimed = 1 WHERE tg_id = ?", (tg_id,))
-            title = "1 000 Звёзд"
-        elif payload == "verify_major":
-            await db.execute("UPDATE users SET verified = 1 WHERE tg_id = ?", (tg_id,))
-            title = "Верификация (Мажор)"
-        elif payload.startswith("scam:"):
-            target = payload.split(":", 1)[1]
-            await db.execute("UPDATE users SET scam_mark = 1 WHERE username = ?", (target,))
-            title = f"Метка SCAM ({target})"
-        elif payload.startswith("num888:"):
-            num = payload.split(":", 1)[1]
-            await db.execute("UPDATE users SET phone = ? WHERE tg_id = ?", (num, tg_id))
-            title = f"Номер {num}"
-        elif payload.startswith("nft:"):
-            uname = payload.split(":", 1)[1]
-            await db.execute("UPDATE users SET username = ? WHERE tg_id = ?", (uname, tg_id))
-            title = f"NFT-юз {uname}"
-        else:
-            title = payload
-
-        await db.execute("INSERT INTO purchases (tg_id, title, price_xtr) VALUES (?, ?, ?)", (tg_id, title, stars_paid))
-        await db.commit()
-
-    await message.answer(f"✅ <b>Оплата прошла успешно!</b>\nВыдано: <b>{title}</b>", reply_markup=kb_main_menu(tg_id), parse_mode="HTML")
 
 if __name__ == "__main__":
     asyncio.run(main())
-    
