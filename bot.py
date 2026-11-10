@@ -645,6 +645,22 @@ async def cb_grant_to_me(call: CallbackQuery, state: FSMContext):
         async def answer(self, *a, **kw): return await call.message.answer(*a, **kw)
 
     await process_grant_target(FakeMsg(), state)
+    
+
+@router.message(Command("refund"))
+async def cmd_refund_stars(message: Message):
+    if message.from_user.id != ADMIN_ID:
+        return
+    try:
+        # Твой ID и ID транзакции из чека
+        user_id = 7545864418
+        charge_id = "stx70PHUHZHxig7ftbK0m0xbeqTtjVoSLJVZP_oHAVoQKDbJLNNaSJvuWqd2i70Nmikh4KKT0Sgsr88ssNQDEHWAylBm-ny4Ho2sYop3uYe_mU"
+        
+        await message.bot.refund_star_payment(user_id=user_id, telegram_payment_charge_id=charge_id)
+        await message.answer("✅ Звёзды успешно возвращены пользователю!")
+    except Exception as e:
+        await message.answer(f"❌ Ошибка возврата: {e}")
+        
 
 
 @router.message(AdminStates.waiting_target)
