@@ -33,7 +33,8 @@ class ShopStates(StatesGroup):
 
 
 class AdminStates(StatesGroup):
-    waiting_grant_target = State()
+    waiting_target = State()
+    waiting_custom_value = State()
 
 
 # ================= БАЗА ДАННЫХ =================
@@ -89,7 +90,7 @@ async def get_or_create_user(tg_id: int, full_name: str, username: str | None):
         return dict(user)
 
 
-# ================= КЛАВИАТУРЫ С ЦВЕТОВЫМИ АКЦЕНТАМИ =================
+# ================= КЛАВИАТУРЫ =================
 def kb_main_menu(user_id: int) -> InlineKeyboardMarkup:
     rows = [
         [
@@ -148,11 +149,7 @@ def kb_shop_menu(starter_claimed: int) -> InlineKeyboardMarkup:
 @router.message(CommandStart())
 async def cmd_start(message: Message, state: FSMContext):
     await state.clear()
-    u = await get_or_create_user(
-        message.from_user.id,
-        message.from_user.full_name,
-        message.from_user.username,
-    )
+    u = await get_or_create_user(message.from_user.id, message.from_user.full_name, message.from_user.username)
     badge = " ☑️" if u["verified"] else ""
     scam = " [SCAM]" if u["scam_mark"] else ""
     text = (
@@ -168,11 +165,7 @@ async def cmd_start(message: Message, state: FSMContext):
 @router.callback_query(F.data == "back_main")
 async def cb_back_main(call: CallbackQuery, state: FSMContext):
     await state.clear()
-    u = await get_or_create_user(
-        call.from_user.id,
-        call.from_user.full_name,
-        call.from_user.username,
-    )
+    u = await get_or_create_user(call.from_user.id, call.from_user.full_name, call.from_user.username)
     badge = " ☑️" if u["verified"] else ""
     scam = " [SCAM]" if u["scam_mark"] else ""
     text = (
@@ -191,17 +184,10 @@ async def cb_back_main(call: CallbackQuery, state: FSMContext):
 async def show_code(event: Message | CallbackQuery):
     tg_id = event.from_user.id
     u = await get_or_create_user(tg_id, event.from_user.full_name, event.from_user.username)
-    code_status = (
-        f"🔑 Ваш код входа: <code>{u['auth_code']}</code>"
-        if u["auth_code"]
-        else "Кода пока нет. Запросите вход по этому номеру в приложении."
-    )
+    code_status = f"🔑 Ваш код входа: <code>{u['auth_code']}</code>" if u["auth_code"] else "Кода пока нет. Запросите вход в приложении."
     text = f"🔒 <b>Код входа</b>\n\nНомер: <code>{u['phone']}</code>\n{code_status}"
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text="🔵 Обновить", callback_data="menu_code"),
-            InlineKeyboardButton(text="📞 Мой номер", callback_data="menu_phone"),
-        ],
+        [InlineKeyboardButton(text="🔵 Обновить", callback_data="menu_code"), InlineKeyboardButton(text="📞 Мой номер", callback_data="menu_phone")],
         [InlineKeyboardButton(text="🏠 Меню", callback_data="back_main")],
     ])
     if isinstance(event, CallbackQuery):
@@ -226,11 +212,7 @@ async def show_phone(call: CallbackQuery):
 @router.message(Command("shop"))
 @router.callback_query(F.data == "menu_shop")
 async def show_shop(event: Message | CallbackQuery):
-    u = await get_or_create_user(
-        event.from_user.id,
-        event.from_user.full_name,
-        event.from_user.username,
-    )
+    u = await get_or_create_user(event.from_user.id, event.from_user.full_name, event.from_user.username)
     text = (
         "💎 <b>Донат RiseGram</b>\n\n"
         "Оплата звёздами Telegram (XTR), мгновенная выдача.\n\n"
@@ -248,14 +230,7 @@ async def show_shop(event: Message | CallbackQuery):
 
 
 async def send_stars_invoice(bot: Bot, chat_id: int, title: str, desc: str, payload: str, stars: int):
-    await bot.send_invoice(
-        chat_id=chat_id,
-        title=title,
-        description=desc,
-        payload=payload,
-        currency="XTR",
-        prices=[LabeledPrice(label=title, amount=stars)],
-    )
+    await bot.send_invoice(chat_id=chat_id, title=title, description=desc, payload=payload, currency="XTR", prices=[LabeledPrice(label=title, amount=stars)])
 
 
 @router.callback_query(F.data == "buy_starter")
@@ -264,45 +239,28 @@ async def cb_buy_starter(call: CallbackQuery):
     if u["starter_claimed"]:
         return await call.answer("❌ Вы уже забрали стартовый пак!", show_alert=True)
     await call.answer()
-    await send_stars_invoice(
-        call.bot, call.from_user.id,
-        "1 000 RiseStars (Стартовый пак)",
-        "Пополнение баланса RiseStars",
-        "starter_1000", 10
-    )
+    await send_stars_invoice(call.bot, call.from_user.id, "1 000 RiseStars (Стартовый пак)", "Пополнение баланса", "starter_1000", 10)
 
 
 @router.callback_query(F.data == "buy_verify")
 async def cb_buy_verify(call: CallbackQuery):
     await call.answer()
-    await send_stars_invoice(
-        call.bot, call.from_user.id,
-        "Верификация • Мажор",
-        "Официальная галочка верификации",
-        "verify_major", 50
-    )
+    await send_stars_invoice(call.bot, call.from_user.id, "Верификация • Мажор", "Галочка верификации", "verify_major", 50)
 
 
 @router.callback_query(F.data == "buy_scam")
 async def cb_buy_scam(call: CallbackQuery, state: FSMContext):
     await state.set_state(ShopStates.waiting_scam_target)
-    await call.message.edit_text(
-        "🔴 <b>Метка SCAM • 15 TG ⭐</b>\n\nОтправьте @username или ID цели:",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="❌ Отмена", callback_data="menu_shop")]
-        ]), parse_mode="HTML"
-    )
+    await call.message.edit_text("🔴 <b>Метка SCAM • 15 TG ⭐</b>\n\nОтправьте @username или ID цели:", reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="❌ Отмена", callback_data="menu_shop")]
+    ]), parse_mode="HTML")
 
 
 @router.message(ShopStates.waiting_scam_target)
 async def process_scam_target(message: Message, state: FSMContext):
     target = message.text.strip()
     await state.clear()
-    await send_stars_invoice(
-        message.bot, message.from_user.id,
-        f"Метка SCAM на {target}", f"Пометка мошенника",
-        f"scam:{target}", 15
-    )
+    await send_stars_invoice(message.bot, message.from_user.id, f"Метка SCAM на {target}", "Пометка мошенника", f"scam:{target}", 15)
 
 
 @router.callback_query(F.data == "shop_888")
@@ -319,13 +277,8 @@ async def cb_shop_888(call: CallbackQuery):
 @router.callback_query(F.data.in_({"buy_888_vip", "buy_888_std"}))
 async def cb_buy_888_preset(call: CallbackQuery):
     await call.answer()
-    if call.data == "buy_888_vip":
-        num = f"+888 8 {random.randint(100, 999)}"
-        price = 50
-    else:
-        num = f"+888 0{random.randint(100, 999)} {random.randint(1000, 9999)}"
-        price = 25
-    await send_stars_invoice(call.bot, call.from_user.id, f"Номер {num}", "Анонимный номер +888", f"num888:{num}", price)
+    num = f"+888 8 {random.randint(100, 999)}" if call.data == "buy_888_vip" else f"+888 0{random.randint(100, 999)} {random.randint(1000, 9999)}"
+    await send_stars_invoice(call.bot, call.from_user.id, f"Номер {num}", "Анонимный номер +888", f"num888:{num}", 50 if call.data == "buy_888_vip" else 25)
 
 
 @router.callback_query(F.data == "buy_888_custom")
@@ -448,7 +401,7 @@ async def cmd_secret_admin(event: Message | CallbackQuery, state: FSMContext):
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📊 Статистика", callback_data="adm_stats")],
         [InlineKeyboardButton(text="👥 Список юзеров", callback_data="adm_users")],
-        [InlineKeyboardButton(text="🟢 Выдать награду игроку", callback_data="adm_grant_menu")],
+        [InlineKeyboardButton(text="🟢 Выдать награду / предмет", callback_data="adm_grant_menu")],
     ])
     text = "👑 <b>Панель создателя RiseGram</b>\n\nВыберите действие:"
     if isinstance(event, CallbackQuery):
@@ -485,9 +438,9 @@ async def cb_adm_grant_menu(call: CallbackQuery):
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🟢 RiseStars (+1000)", callback_data="grant:stars")],
         [InlineKeyboardButton(text="🔵 Верификация", callback_data="grant:verify")],
-        [InlineKeyboardButton(text="🔴 Метка SCAM", callback_data="grant:scam")],
-        [InlineKeyboardButton(text="📞 Номер +888", callback_data="grant:num888")],
-        [InlineKeyboardButton(text="🏷 NFT-юзернейм", callback_data="grant:nft")],
+         [InlineKeyboardButton(text="🔴 Метка SCAM", callback_data="grant:scam")],
+        [InlineKeyboardButton(text="📞 Номер +888 (свой ввод)", callback_data="grant:num888")],
+        [InlineKeyboardButton(text="🏷 NFT-юзернейм (свой ввод)", callback_data="grant:nft")],
         [InlineKeyboardButton(text="↩️ В админку", callback_data="open_admin")],
     ])
     await call.message.edit_text("🎁 <b>Что выдать игроку?</b>", reply_markup=kb, parse_mode="HTML")
@@ -498,11 +451,11 @@ async def cb_grant_select(call: CallbackQuery, state: FSMContext):
     if call.from_user.id != ADMIN_ID: return
     action = call.data.split(":")[1]
     await state.update_data(grant_action=action)
-    await state.set_state(AdminStates.waiting_grant_target)
-    await call.message.edit_text(f"🎯 Выбрано: <code>{action}</code>\n\nТеперь введите <b>Telegram ID</b> игрока:", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="❌ Отмена", callback_data="open_admin")]]), parse_mode="HTML")
+    await state.set_state(AdminStates.waiting_target)
+    await call.message.edit_text(f"🎯 Выбрано: <code>{action}</code>\n\nВведите <b>Telegram ID</b> игрока:", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="❌ Отмена", callback_data="open_admin")]]), parse_mode="HTML")
 
 
-@router.message(AdminStates.waiting_grant_target)
+@router.message(AdminStates.waiting_target)
 async def process_grant_target(message: Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
     try:
@@ -510,6 +463,33 @@ async def process_grant_target(message: Message, state: FSMContext):
     except ValueError:
         return await message.answer("❌ Ошибка! ID должен состоять только из цифр.")
 
+    await state.update_data(target_id=target_id)
+    data = await state.get_data()
+    action = data.get("grant_action")
+
+    # Если выбраны номера +888 или NFT, запрашиваем конкретное значение вместо рандома!
+    if action in ("num888", "nft"):
+        await state.set_state(AdminStates.waiting_custom_value)
+        prompt = (
+            "📞 Введите желаемый номер (например: <code>+888 8 777</code>):"
+            if action == "num888"
+            else "🏷 Введите желаемый NFT-юзернейм (например: <code>@crypto</code>):"
+        )
+        return await message.answer(prompt, reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="❌ Отмена", callback_data="open_admin")]]), parse_mode="HTML")
+
+    await execute_grant(message, state, target_id, None)
+
+
+@router.message(AdminStates.waiting_custom_value)
+async def process_custom_value(message: Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID: return
+    val = message.text.strip()
+    data = await state.get_data()
+    target_id = data.get("target_id")
+    await execute_grant(message, state, target_id, val)
+
+
+async def execute_grant(message: Message, state: FSMContext, target_id: int, custom_val: str | None):
     data = await state.get_data()
     action = data.get("grant_action")
     await state.clear()
@@ -534,11 +514,11 @@ async def process_grant_target(message: Message, state: FSMContext):
             await db.execute("UPDATE users SET scam_mark = 1 WHERE tg_id = ?", (target_id,))
             msg_text = "⚠️ На ваш аккаунт установлена <b>метка SCAM</b>."
         elif action == "num888":
-            num = f"+888 {random.randint(1000, 9999)}"
+            num = custom_val if custom_val.startswith("+888") else f"+888 {custom_val}"
             await db.execute("UPDATE users SET phone = ? WHERE tg_id = ?", (num, target_id))
             msg_text = f"🎁 Вам выдан эксклюзивный номер: <b>{num}</b>"
         elif action == "nft":
-            uname = f"@rise_{random.randint(100,999)}"
+            uname = custom_val if custom_val.startswith("@") else f"@{custom_val}"
             await db.execute("UPDATE users SET username = ? WHERE tg_id = ?", (uname, target_id))
             msg_text = f"🎁 Вам выдан NFT-юзернейм: <b>{uname}</b>"
         await db.commit()
