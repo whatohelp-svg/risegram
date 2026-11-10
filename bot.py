@@ -538,7 +538,50 @@ async def cb_help(call: CallbackQuery):
 @router.message(Command("admin7206852053"))
 async def cmd_secret_admin(message: Message):
     if message.from_user.id != ADMIN_ID:
-        return  # Для всех остальных
+        return  # Для всех остальных игнор
+    
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📊 Статистика базы", callback_data="adm_stats")],
+        [InlineKeyboardButton(text="📢 Рассылка", callback_data="adm_broadcast")],
+        [InlineKeyboardButton(text="⭐ Выдать RiseStars", callback_data="adm_grant")],
+    ])
+    await message.answer(
+        "👑 <b>Панель создателя RiseGram</b>\n\nДобро пожаловать, босс. Выберите действие:",
+        reply_markup=kb,
+        parse_mode="HTML"
+    )
+
+@router.callback_query(F.data == "adm_stats")
+async def cb_adm_stats(call: CallbackQuery):
+    if call.from_user.id != ADMIN_ID:
+        return
+    async with aiosqlite.connect(DB_PATH) as db:
+        cur = await db.execute("SELECT COUNT(*) FROM users")
+        users_count = (await cur.fetchone())[0]
+        cur = await db.execute("SELECT SUM(price_xtr) FROM purchases")
+        total_xtr = (await cur.fetchone())[0] or 0
+    
+    await call.message.edit_text(
+        f"📊 <b>Статистика RiseGram</b>\n\n"
+        f"👥 Пользователей в базе: <b>{users_count}</b>\n"
+        f"⭐ Всего заработано XTR: <b>{total_xtr} ⭐</b>",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="↩️ Назад", callback_data="back_main")]
+        ]),
+        parse_mode="HTML"
+    )
+
+async def main():
+    await init_db()
+    bot = Bot(token=BOT_TOKEN)
+    dp = Dispatcher()
+    dp.include_router(router)
+    print("Бот успешно запущен!")
+    await dp.start_polling(bot)
+
+if __name__ == "__main__":
+    asyncio.run(main())
+
 
 async def main():
     await init_db()
