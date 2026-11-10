@@ -443,8 +443,7 @@ async def cmd_secret_admin(event: Message | CallbackQuery, state: FSMContext):
     else:
         await event.answer(text, reply_markup=kb, parse_mode="HTML")
 
-
-@router.callback_query(F.data == "adm_stats"
+@router.callback_query(F.data == "adm_stats")
 async def cb_adm_stats(call: CallbackQuery):
     if call.from_user.id != ADMIN_ID: return
     async with aiosqlite.connect(DB_PATH) as db:
