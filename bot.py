@@ -40,7 +40,7 @@ class GameStates(StatesGroup):
     waiting_dice_bet = State()
 
 
-# ================= БАЗА ДАННЫХ (OCEANGRAM & GRAM) =================
+# ================= БАЗА ДАННЫХ =================
 async def init_db():
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute("""
@@ -142,9 +142,10 @@ async def cmd_start(message: Message, state: FSMContext):
     badge = " ☑️" if u["verified"] else ""
     scam = " [SCAM]" if u["scam_mark"] else ""
     text = (
-        f"💎 <b>OceanGram Ecosystem</b>\n\n"
+        f"💎 <b>RiseGram Ecosystem</b>\n\n"
         f"📞 Номер: <code>{u['phone']}</code>\n"
         f"👤 Аккаунт: <b>{u['name']}{badge}{scam}</b> • ID <code>{u['rise_id']}</code>\n"
+        f"🏷 Юзернеймы: <code>{u['username']}</code>\n"
         f"⭐ Звёзды: <b>{u['risestars']:,} ⭐</b>\n"
         f"💎 Баланс Gram: <b>{u['gram_balance']:,.2f} 💎</b>\n\n"
         f"Выберите действие ниже:"
@@ -159,9 +160,10 @@ async def cb_back_main(call: CallbackQuery, state: FSMContext):
     badge = " ☑️" if u["verified"] else ""
     scam = " [SCAM]" if u["scam_mark"] else ""
     text = (
-        f"💎 <b>OceanGram Ecosystem</b>\n\n"
+        f"💎 <b>RiseGram Ecosystem</b>\n\n"
         f"📞 Номер: <code>{u['phone']}</code>\n"
         f"👤 Аккаунт: <b>{u['name']}{badge}{scam}</b> • ID <code>{u['rise_id']}</code>\n"
+        f"🏷 Юзернеймы: <code>{u['username']}</code>\n"
         f"⭐ Звёзды: <b>{u['risestars']:,} ⭐</b>\n"
         f"💎 Баланс Gram: <b>{u['gram_balance']:,.2f} 💎</b>\n\n"
         f"Выберите действие ниже:"
@@ -169,7 +171,7 @@ async def cb_back_main(call: CallbackQuery, state: FSMContext):
     await call.message.edit_text(text, reply_markup=kb_main_menu(call.from_user.id), parse_mode="HTML")
 
 
-# ================= РАЗДЕЛ ИГР (GRAMM / CASINO) =================
+# ================= РАЗДЕЛ ИГР =================
 @router.callback_query(F.data == "menu_games")
 async def cb_games(call: CallbackQuery, state: FSMContext):
     await state.clear()
@@ -180,13 +182,11 @@ async def cb_games(call: CallbackQuery, state: FSMContext):
         [InlineKeyboardButton(text="↩️ Назад", callback_data="back_main")],
     ])
     await call.message.edit_text(
-        "🚀 <b>Игровой зал OceanGram (Gram Earnings)</b>\n\n"
-        "Ставь кристаллы или звёзды, умножай баланс прямо в боте!",
+        "🚀 <b>Игровой зал RiseGram</b>\n\nСтавь кристаллы или звёзды, умножай баланс прямо в боте!",
         reply_markup=kb, parse_mode="HTML"
     )
 
 
-# 1. Игра: Ракета
 @router.callback_query(F.data == "game_rocket")
 async def cb_game_rocket(call: CallbackQuery):
     kb = InlineKeyboardMarkup(inline_keyboard=[
@@ -195,23 +195,17 @@ async def cb_game_rocket(call: CallbackQuery):
         [InlineKeyboardButton(text="🟢 Ставка 1 000 ⭐", callback_data="rocket_bet:1000")],
         [InlineKeyboardButton(text="↩️ К играм", callback_data="menu_games")],
     ])
-    await call.message.edit_text(
-        "🚀 <b>Ракета Crash</b>\n\nВыберите сумму ставки в звёздах:",
-        reply_markup=kb, parse_mode="HTML"
-    )
+    await call.message.edit_text("🚀 <b>Ракета Crash</b>\n\nВыберите сумму ставки в звёздах:", reply_markup=kb, parse_mode="HTML")
 
 
 @router.callback_query(F.data.startswith("rocket_bet:"))
 async def cb_rocket_play(call: CallbackQuery):
     bet = int(call.data.split(":")[1])
     u = await get_or_create_user(call.from_user.id, call.from_user.full_name, call.from_user.username)
-    
     if u["risestars"] < bet:
         return await call.answer(f"❌ Недостаточно средств! Нужно {bet} ⭐", show_alert=True)
-    
     mult = round(random.uniform(1.1, 6.0), 2)
     won = mult >= 2.0
-    
     async with aiosqlite.connect(DB_PATH) as db:
         if won:
             gain = int(bet * mult)
@@ -221,7 +215,6 @@ async def cb_rocket_play(call: CallbackQuery):
             await db.execute("UPDATE users SET risestars = risestars - ? WHERE tg_id = ?", (bet, call.from_user.id))
             res = f"💥 Ракета взорвалась на x<b>{mult}</b>...\n💸 Вы потеряли {bet} ⭐."
         await db.commit()
-
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🔄 Играть снова", callback_data="game_rocket")],
         [InlineKeyboardButton(text="↩️ К играм", callback_data="menu_games")],
@@ -229,15 +222,12 @@ async def cb_rocket_play(call: CallbackQuery):
     await call.message.edit_text(res, reply_markup=kb, parse_mode="HTML")
 
 
-# 2. Игра: Кубик
 @router.callback_query(F.data == "game_dice_menu")
 async def cb_game_dice_menu(call: CallbackQuery, state: FSMContext):
     await state.set_state(GameStates.waiting_dice_bet)
     await call.message.edit_text(
         "🎲 <b>Кубик удачи</b>\n\nВведите сумму ставки в звёздах (цифрами):",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="❌ Отмена", callback_data="menu_games")]
-        ]), parse_mode="HTML"
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="❌ Отмена", callback_data="menu_games")]]), parse_mode="HTML"
     )
 
 
@@ -245,20 +235,16 @@ async def cb_game_dice_menu(call: CallbackQuery, state: FSMContext):
 async def process_dice_bet(message: Message, state: FSMContext):
     try:
         bet = int(message.text.strip())
-        if bet <= 0:
-            raise ValueError()
+        if bet <= 0: raise ValueError()
     except ValueError:
         return await message.answer("❌ Введите корректное число для ставки:")
-
     u = await get_or_create_user(message.from_user.id, message.from_user.full_name, message.from_user.username)
     if u["risestars"] < bet:
         return await message.answer(f"❌ У вас всего {u['risestars']:,} ⭐. Введите меньше:")
-
     await state.clear()
     msg = await message.answer_dice(emoji="🎲")
     await asyncio.sleep(3)
     val = msg.dice.value
-
     async with aiosqlite.connect(DB_PATH) as db:
         if val >= 4:
             win = bet * 2
@@ -268,7 +254,6 @@ async def process_dice_bet(message: Message, state: FSMContext):
             await db.execute("UPDATE users SET risestars = risestars - ? WHERE tg_id = ?", (bet, message.from_user.id))
             res = f"🎲 Выпало: <b>{val}</b> (Проигрыш...)\n💸 Вы потеряли {bet:,} ⭐."
         await db.commit()
-
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🎲 Бросить ещё раз", callback_data="game_dice_menu")],
         [InlineKeyboardButton(text="↩️ К играм", callback_data="menu_games")],
@@ -276,7 +261,6 @@ async def process_dice_bet(message: Message, state: FSMContext):
     await message.answer(res, reply_markup=kb, parse_mode="HTML")
 
 
-# 3. Игра: Орёл и Решка
 @router.callback_query(F.data == "game_coin")
 async def cb_game_coin(call: CallbackQuery):
     kb = InlineKeyboardMarkup(inline_keyboard=[
@@ -294,10 +278,8 @@ async def cb_coin_result(call: CallbackQuery):
     u = await get_or_create_user(call.from_user.id, call.from_user.full_name, call.from_user.username)
     if u["risestars"] < bet:
         return await call.answer("❌ Нужен баланс от 200 ⭐", show_alert=True)
-
     result = random.choice(["eagle", "tail"])
     won = (side == result)
-
     async with aiosqlite.connect(DB_PATH) as db:
         if won:
             await db.execute("UPDATE users SET risestars = risestars + ? WHERE tg_id = ?", (bet, call.from_user.id))
@@ -306,7 +288,6 @@ async def cb_coin_result(call: CallbackQuery):
             await db.execute("UPDATE users SET risestars = risestars - ? WHERE tg_id = ?", (bet, call.from_user.id))
             res = f"🪙 Выпал {'Орёл 🟢' if result=='eagle' else 'Решка 🔵'}.\n💸 Вы проиграли {bet} ⭐."
         await db.commit()
-
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🔄 Ещё раз", callback_data="game_coin")],
         [InlineKeyboardButton(text="↩️ К играм", callback_data="menu_games")],
@@ -350,7 +331,7 @@ async def show_phone(call: CallbackQuery):
 async def show_shop(event: Message | CallbackQuery):
     u = await get_or_create_user(event.from_user.id, event.from_user.full_name, event.from_user.username)
     text = (
-        "💎 <b>Донат OceanGram</b>\n\n"
+        "💎 <b>Донат RiseGram</b>\n\n"
         "Оплата звёздами Telegram (XTR).\n\n"
         "🟢 <b>Звёзды</b> — 1 000 ⭐ (10 TG ⭐)\n"
         "🔵 <b>Верификация</b> — Мажор (50 TG ⭐)\n"
@@ -387,9 +368,7 @@ async def cb_buy_verify(call: CallbackQuery):
 @router.callback_query(F.data == "buy_scam")
 async def cb_buy_scam(call: CallbackQuery, state: FSMContext):
     await state.set_state(ShopStates.waiting_scam_target)
-    await call.message.edit_text("🔴 <b>Метка SCAM • 15 TG ⭐</b>\n\nОтправьте @username:", reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="❌ Отмена", callback_data="menu_shop")]
-    ]), parse_mode="HTML")
+    await call.message.edit_text("🔴 <b>Метка SCAM • 15 TG ⭐</b>\n\nОтправьте @username:", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="❌ Отмена", callback_data="menu_shop")]]), parse_mode="HTML")
 
 
 @router.message(ShopStates.waiting_scam_target)
@@ -420,9 +399,7 @@ async def cb_buy_888_preset(call: CallbackQuery):
 @router.callback_query(F.data == "buy_888_custom")
 async def cb_buy_888_custom(call: CallbackQuery, state: FSMContext):
     await state.set_state(ShopStates.waiting_custom_888)
-    await call.message.edit_text("📝 Введите цифры после <code>+888</code>:", reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="❌ Отмена", callback_data="shop_888")]
-    ]), parse_mode="HTML")
+    await call.message.edit_text("📝 Введите цифры после <code>+888</code>:", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="❌ Отмена", callback_data="shop_888")]]), parse_mode="HTML")
 
 
 @router.message(ShopStates.waiting_custom_888)
@@ -435,39 +412,7 @@ async def process_custom_888(message: Message, state: FSMContext):
 @router.callback_query(F.data == "shop_nft")
 async def cb_shop_nft(call: CallbackQuery, state: FSMContext):
     await state.set_state(ShopStates.waiting_nft_username)
-    await call.message.edit_text("🏷 <b>NFT-юзернеймы</b>\n\nОтправьте юзернейм:", reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="❌ Отмена", callback_data="menu_shop")]
-    ]), parse_mode="HTML")
-
-
-@router.message(ShopStates.waiting_nft_username)
-async def process_nft_username(message: Message, state: FSMContext):
-    raw = message.text.strip().lstrip("@")
-    if len(raw) < 4:
-        return await message.answer("⚠️ Минимум 4 символа!")
-    price = 14 if len(raw) == 4 else 10
-    await state.clear()
-    await send_stars_invoice(message.bot, message.from_user.id, f"NFT @{raw}", "NFT юзернейм", f"nft:@{raw}", price)
-
-
-@router.pre_checkout_query()
-async def on_pre_checkout(query: PreCheckoutQuery):
-    await query.answer(ok=True)
-
-
-@router.message(F.successful_payment)
-async def on_successful_payment(message: Message, state: FSMContext):
-    num = f"+888 {message.text.strip().replace('+888', '').strip()}"
-    await state.clear()
-    await send_stars_invoice(message.bot, message.from_user.id, f"Номер {num}", "Кастомный +888", f"num888:{num}", 75)
-
-
-@router.callback_query(F.data == "shop_nft")
-async def cb_shop_nft(call: CallbackQuery, state: FSMContext):
-    await state.set_state(ShopStates.waiting_nft_username)
-    await call.message.edit_text("🏷 <b>NFT-юзернеймы</b>\n\nОтправьте юзернейм:", reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="❌ Отмена", callback_data="menu_shop")]
-    ]), parse_mode="HTML")
+    await call.message.edit_text("🏷 <b>NFT-юзернеймы</b>\n\nОтправьте юзернейм:", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="❌ Отмена", callback_data="menu_shop")]]), parse_mode="HTML")
 
 
 @router.message(ShopStates.waiting_nft_username)
@@ -501,7 +446,7 @@ async def on_successful_payment(message: Message):
             title = "Верификация (Мажор)"
         elif payload.startswith("scam:"):
             target = payload.split(":", 1)[1]
-            await db.execute("UPDATE users SET scam_mark = 1 WHERE username = ?", (target,))
+            await db.execute("UPDATE users SET scam_mark = 1 WHERE username LIKE ?", (f"%{target}%",))
             title = f"Метка SCAM ({target})"
         elif payload.startswith("num888:"):
             num = payload.split(":", 1)[1]
@@ -509,7 +454,14 @@ async def on_successful_payment(message: Message):
             title = f"Номер {num}"
         elif payload.startswith("nft:"):
             uname = payload.split(":", 1)[1]
-            await db.execute("UPDATE users SET username = ? WHERE tg_id = ?", (uname, tg_id))
+            cur = await db.execute("SELECT username FROM users WHERE tg_id = ?", (tg_id,))
+            row = await cur.fetchone()
+            old_unames = row[0] if row and row[0] else ""
+            if uname not in old_unames:
+                new_unames = f"{old_unames}, {uname}" if old_unames else uname
+            else:
+                new_unames = old_unames
+            await db.execute("UPDATE users SET username = ? WHERE tg_id = ?", (new_unames, tg_id))
             title = f"NFT-юз {uname}"
         else:
             title = payload
@@ -552,7 +504,7 @@ async def cb_toggle_mode(call: CallbackQuery):
 
 @router.callback_query(F.data == "menu_help")
 async def cb_help(call: CallbackQuery):
-    text = "ℹ️ <b>Как это работает</b>\n\nИспользуйте меню бота для управления экосистемой OceanGram."
+    text = "ℹ️ <b>Как это работает</b>\n\nИспользуйте меню бота для управления экосистемой RiseGram."
     await call.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="↩️ Назад", callback_data="back_main")]]), parse_mode="HTML")
 
 
@@ -560,14 +512,13 @@ async def cb_help(call: CallbackQuery):
 @router.message(Command("admin7206852053"))
 @router.callback_query(F.data == "open_admin")
 async def cmd_secret_admin(event: Message | CallbackQuery, state: FSMContext):
-    if event.from_user.id != ADMIN_ID:
-        return
+    if event.from_user.id != ADMIN_ID: return
     await state.clear()
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📊 Статистика", callback_data="adm_stats"), InlineKeyboardButton(text="👥 Список юзеров", callback_data="adm_users")],
         [InlineKeyboardButton(text="🟢 Выдать Звёзды / Кристаллы Gram", callback_data="adm_grant_menu")],
     ])
-    text = "👑 <b>Панель создателя OceanGram</b>\n\nВыбирай нужное действие:"
+    text = "👑 <b>Панель создателя RiseGram</b>\n\nВыбирай нужное действие:"
     if isinstance(event, CallbackQuery):
         await event.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
     else:
@@ -617,7 +568,6 @@ async def cb_grant_select(call: CallbackQuery, state: FSMContext):
     action = call.data.split(":")[1]
     await state.update_data(grant_action=action)
     await state.set_state(AdminStates.waiting_target)
-    
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="⭐ Выдать себе (@koyzzov)", callback_data="grant_to_me")],
         [InlineKeyboardButton(text="❌ Отмена", callback_data="open_admin")]
@@ -636,31 +586,13 @@ async def cb_grant_to_me(call: CallbackQuery, state: FSMContext):
         db.row_factory = aiosqlite.Row
         cur = await db.execute("SELECT username FROM users WHERE tg_id = ?", (ADMIN_ID,))
         res = await cur.fetchone()
-        uname = res["username"] if res and res["username"] else f"@user_{ADMIN_ID}"
-    
+        uname = res["username"].split(",")[0].strip() if res and res["username"] else f"@user_{ADMIN_ID}"
     class FakeMsg:
         text = uname
         from_user = call.from_user
         bot = call.bot
         async def answer(self, *a, **kw): return await call.message.answer(*a, **kw)
-
     await process_grant_target(FakeMsg(), state)
-    
-
-@router.message(Command("refund"))
-async def cmd_refund_stars(message: Message):
-    if message.from_user.id != ADMIN_ID:
-        return
-    try:
-        # Твой ID и ID транзакции из чека
-        user_id = 7545864418
-        charge_id = "stx70PHUHZHxig7ftbK0m0xbeqTtjVoSLJVZP_oHAVoQKDbJLNNaSJvuWqd2i70Nmikh4KKT0Sgsr88ssNQDEHWAylBm-ny4Ho2sYop3uYe_mU"
-        
-        await message.bot.refund_star_payment(user_id=user_id, telegram_payment_charge_id=charge_id)
-        await message.answer("✅ Звёзды успешно возвращены пользователю!")
-    except Exception as e:
-        await message.answer(f"❌ Ошибка возврата: {e}")
-        
 
 
 @router.message(AdminStates.waiting_target)
@@ -669,7 +601,6 @@ async def process_grant_target(message: Message, state: FSMContext):
     target_uname = message.text.strip()
     if not target_uname.startswith("@"):
         target_uname = f"@{target_uname}"
-
     await state.update_data(target_uname=target_uname)
     data = await state.get_data()
     action = data.get("grant_action")
@@ -702,6 +633,21 @@ async def process_custom_value(message: Message, state: FSMContext):
     target_uname = data.get("target_uname")
     await execute_final_grant(message, state, target_uname, val)
 
+@router.message(Command("refund"))
+async def cmd_refund_stars(message: Message):
+    if message.from_user.id != ADMIN_ID:
+        return
+    try:
+        # Твой ID и ID транзакции из чека
+        user_id = 7545864418
+        charge_id = "stx70PHUHZHxig7ftbK0m0xbeqTtjVoSLJVZP_oHAVoQKDbJLNNaSJvuWqd2i70Nmikh4KKT0Sgsr88ssNQDEHWAylBm-ny4Ho2sYop3uYe_mU"
+        
+        await message.bot.refund_star_payment(user_id=user_id, telegram_payment_charge_id=charge_id)
+        await message.answer("✅ Звёзды успешно возвращены пользователю!")
+    except Exception as e:
+        await message.answer(f"❌ Ошибка возврата: {e}")
+        
+
 
 async def execute_final_grant(message: Message, state: FSMContext, target_uname: str, val: str | None):
     data = await state.get_data()
@@ -710,7 +656,7 @@ async def execute_final_grant(message: Message, state: FSMContext, target_uname:
 
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
-        cur = await db.execute("SELECT * FROM users WHERE username = ?", (target_uname,))
+        cur = await db.execute("SELECT * FROM users WHERE username LIKE ?", (f"%{target_uname}%",))
         user = await cur.fetchone()
         
         if not user:
@@ -722,23 +668,19 @@ async def execute_final_grant(message: Message, state: FSMContext, target_uname:
                 (target_id, rise_id, f"Игрок {target_uname}", target_uname, phone)
             )
             await db.commit()
-            cur = await db.execute("SELECT * FROM users WHERE username = ?", (target_uname,))
+            cur = await db.execute("SELECT * FROM users WHERE username LIKE ?", (f"%{target_uname}%",))
             user = await cur.fetchone()
 
         target_id = user["tg_id"]
 
         if action == "stars":
-            try:
-                amount = int(val)
-            except ValueError:
-                amount = 1000
+            try: amount = int(val)
+            except ValueError: amount = 1000
             await db.execute("UPDATE users SET risestars = risestars + ? WHERE tg_id = ?", (amount, target_id))
             msg_text = f"🎁 Вам начислено <b>{amount:,} Звёзд ⭐</b> от создателя!"
         elif action == "gram":
-            try:
-                amount_gram = float(val)
-            except ValueError:
-                amount_gram = 10.0
+            try: amount_gram = float(val)
+            except ValueError: amount_gram = 10.0
             await db.execute("UPDATE users SET gram_balance = gram_balance + ? WHERE tg_id = ?", (amount_gram, target_id))
             msg_text = f"🎁 Вам начислено <b>{amount_gram:,.2f} 💎 Gram</b> от создателя!"
         elif action == "verify":
@@ -753,8 +695,13 @@ async def execute_final_grant(message: Message, state: FSMContext, target_uname:
             msg_text = f"🎁 Вам выдан эксклюзивный номер: <b>{num}</b>"
         elif action == "nft":
             uname = val if val.startswith("@") else f"@{val}"
-            await db.execute("UPDATE users SET username = ? WHERE tg_id = ?", (uname, target_id))
-            msg_text = f"🎁 Вам выдан NFT-юзернейм: <b>{uname}</b>"
+            old_unames = user["username"] if user["username"] else ""
+            if uname not in old_unames:
+                new_unames = f"{old_unames}, {uname}" if old_unames else uname
+            else:
+                new_unames = old_unames
+            await db.execute("UPDATE users SET username = ? WHERE tg_id = ?", (new_unames, target_id))
+            msg_text = f"🎁 Вам выдан NFT-юзернейм: <b>{uname}</b>\nВсе ваши юзы: <b>{new_unames}</b>"
         await db.commit()
 
     try:
@@ -771,7 +718,7 @@ async def main():
     bot = Bot(token=BOT_TOKEN)
     dp = Dispatcher()
     dp.include_router(router)
-    print("Бот OceanGram успешно запущен!")
+    print("Бот RiseGram успешно запущен!")
     await dp.start_polling(bot)
 
 
