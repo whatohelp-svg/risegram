@@ -538,4 +538,16 @@ async def cb_help(call: CallbackQuery):
 @router.message(Command("admin7206852053"))
 async def cmd_secret_admin(message: Message):
     if message.from_user.id != ADMIN_ID:
-        return  # Для всех остальн
+        return  # Для всех остальных
+
+async def main():
+    await init_db()
+    bot = Bot(token=BOT_TOKEN)
+    dp = Dispatcher()
+    dp.include_router(router)
+    print("Бот успешно запущен!")
+    await dp.start_polling(bot)
+
+if __name__ == "__main__":
+    asyncio.run(main())
+    
