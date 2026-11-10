@@ -731,12 +731,11 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-        u = await get_or_create_user(call.from_user.id, call.from_user.full_name, call.from_user.username)
+            u = await get_or_create_user(call.from_user.id, call.from_user.full_name, call.from_user.username)
     if u["starter_claimed"]:
         return await call.answer("❌ Вы уже забрали стартовый пак!", show_alert=True)
     await call.answer()
     await send_stars_invoice(call.bot, call.from_user.id, "1 000 Звёзд", "Стартовый пак", "starter_1000", 10)
-
 
 
 @router.callback_query(F.data == "buy_verify")
