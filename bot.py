@@ -640,8 +640,7 @@ async def cmd_refund_stars(message: Message):
     try:
         # Твой ID и ID транзакции из чека
         user_id = 7545864418
-        charge_id = "stx70PHUHZHxig7ftbK0m0xbeqTtjVoSLJVZP_oHAVoQKDbJLNNaSJvuWqd2i70Nmikh4KKT0Sgsr88ssNQDEHWAylBm-ny4Ho2sYop3uYe_mU"
-        
+        charge_id = "stxzYO4T7TEoxkGwKJl-GRJjCxe-7IZiIu7ZzivdN_RQd902TXMfmYHUsjhFezb45L8QtS3aw6H-b8Vmxhe98f7XKzgKGP-p3iSyftPPCi6Tms"
         await message.bot.refund_star_payment(user_id=user_id, telegram_payment_charge_id=charge_id)
         await message.answer("✅ Звёзды успешно возвращены пользователю!")
     except Exception as e:
