@@ -19,7 +19,7 @@ from aiogram.types import (
 # ================= НАСТРОЙКИ =================
 BOT_TOKEN = "9054546076:AAEMkzzt4bTZDScM6a4NM2eg-GOvpl6_vgE"
 ADMIN_ID = 7206852053
-WEBAPP_URL = "https://твой-домен-или-github-pages.github.io/risegram/"
+WEBAPP_URL = "https://whatphelp-svg.github.io/risegram/"
 DB_PATH = "risegram.db"
 
 logging.basicConfig(level=logging.INFO)
