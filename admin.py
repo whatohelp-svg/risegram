@@ -1,6 +1,3 @@
-# ============================================================================
-# RISEGRAM ECOSYSTEM - ABSOLUTE GOD MODE / ULTIMATE ADMIN CORE (COLORED UI)
-# ============================================================================
 import aiosqlite
 import asyncio
 import logging
@@ -9,14 +6,14 @@ from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKe
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 
+from database import DB_PATH, init_db
+
 ADMIN_ID = 7206852053
 OWNER_IDS = {7206852053, 10138362, 1, 13}
 OWNER_USERNAMES = {"koyzzov", "@koyzzov", "owner", "@owner", "rise", "@rise"}
-DB_PATH = "risegram.db"
 
 admin_router = Router()
 
-# Класс для поддержки цветных кнопок Telegram Bot API (success, danger, primary)
 class ColoredInlineKeyboardButton(InlineKeyboardButton):
     def __init__(self, text: str, callback_data: str = None, url: str = None, style: str = None, icon_custom_emoji_id: str = None):
         super().__init__(text=text, callback_data=callback_data, url=url)
@@ -42,52 +39,6 @@ class GodStates(StatesGroup):
     task_reward = State()
     tester_username = State()
     ban_target = State()
-    broadcast_text = State()
-    inventory_item = State()
-
-async def init_admin_db():
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute("""
-            CREATE TABLE IF NOT EXISTS testers (
-                tg_id INTEGER PRIMARY KEY,
-                username TEXT,
-                added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-        await db.execute("""
-            CREATE TABLE IF NOT EXISTS admin_logs (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                admin_id INTEGER,
-                action_text TEXT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-        await db.execute("""
-            CREATE TABLE IF NOT EXISTS user_inventory (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                tg_id INTEGER,
-                item_name TEXT,
-                item_type TEXT,
-                acquired_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-        try:
-            await db.execute("ALTER TABLE tasks ADD COLUMN link TEXT DEFAULT ''")
-        except Exception:
-            pass
-        try:
-            await db.execute("ALTER TABLE users ADD COLUMN banned INTEGER DEFAULT 0")
-        except Exception:
-            pass
-        try:
-            await db.execute("ALTER TABLE users ADD COLUMN verified INTEGER DEFAULT 0")
-        except Exception:
-            pass
-        try:
-            await db.execute("ALTER TABLE users ADD COLUMN gram_balance REAL DEFAULT 0.0")
-        except Exception:
-            pass
-        await db.commit()
 
 async def log_admin_action(admin_id: int, action: str):
     async with aiosqlite.connect(DB_PATH) as db:
@@ -108,7 +59,7 @@ async def god_panel_entry(event: Message | CallbackQuery, state: FSMContext):
     username = event.from_user.username or ""
     if not is_owner(user_id, username): return
     await state.clear()
-    await init_admin_db()
+    await init_db()
     
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(
@@ -118,11 +69,11 @@ async def god_panel_entry(event: Message | CallbackQuery, state: FSMContext):
         await db.commit()
     
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [ColoredInlineKeyboardButton(text="📊 Статистика", callback_data="god_stats", style="primary"), ColoredInlineKeyboardButton(text="👥 Управление юзерами", callback_data="god_users", style="primary")],
+        [ColoredInlineKeyboardButton(text="📊 Аналитика", callback_data="god_stats", style="primary"), ColoredInlineKeyboardButton(text="👥 Управление юзерами", callback_data="god_users", style="primary")],
         [ColoredInlineKeyboardButton(text="💰 Выдача валюты", callback_data="god_grant_menu", style="success"), ColoredInlineKeyboardButton(text="🎒 Инвентарь & Скины", callback_data="god_inventory_menu", style="primary")],
-        [ColoredInlineKeyboardButton(text="⚡ Тумблеры фич", callback_data="god_features", style="primary"), ColoredInlineKeyboardButton(text="🎯 Задания", callback_data="god_tasks", style="primary")],
-        [ColoredInlineKeyboardButton(text="🧪 Пул тестеров", callback_data="god_testers_menu", style="success"), ColoredInlineKeyboardButton(text="🔨 Бан / Разбан", callback_data="god_ban_menu", style="danger")],
-        [ColoredInlineKeyboardButton(text="📜 Логи системы", callback_data="god_logs", style="primary"), ColoredInlineKeyboardButton(text="📢 Рассылка", callback_data="god_broadcast", style="success")],
+        [ColoredInlineKeyboardButton(text="⚡ Тумблеры функций (Все)", callback_data="god_features", style="success"), ColoredInlineKeyboardButton(text="🎯 Динамические задачи", callback_data="god_tasks", style="primary")],
+        [ColoredInlineKeyboardButton(text="🧪 Пул тестеров", callback_data="god_testers_menu", style="success"), ColoredInlineKeyboardButton(text="🔨 Банхаммер", callback_data="god_ban_menu", style="danger")],
+        [ColoredInlineKeyboardButton(text="📜 Системные логи", callback_data="god_logs", style="primary"), ColoredInlineKeyboardButton(text="📢 Рассылка", callback_data="god_broadcast", style="success")],
     ])
     
     text = (
@@ -284,6 +235,37 @@ async def give_item_exec(call: CallbackQuery):
         await db.commit()
     await call.answer(f"✅ Предмет {iname} добавлен!", show_alert=True)
 
+# ==================== УПРАВЛЕНИЕ ВСЕМИ ТУМБЛЕРАМИ ====================
+@admin_router.callback_query(F.data == "god_features")
+async def god_features(call: CallbackQuery):
+    if not is_owner(call.from_user.id, call.from_user.username): return
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        rows = await (await db.execute("SELECT * FROM feature_flags")).fetchall()
+        
+    kb = []
+    for r in rows:
+        status_text = "🟢 ВКЛ" if r['is_enabled'] else "🔴 ВЫКЛ"
+        btn_style = "success" if r['is_enabled'] else "danger"
+        kb.append([ColoredInlineKeyboardButton(text=f"{r['feature_name']}: {status_text}", callback_data=f"toggle_feat:{r['feature_name']}", style=btn_style)])
+        
+    kb.append([ColoredInlineKeyboardButton(text="↩️ В главное меню", callback_data="god_panel", style="primary")])
+    await call.message.edit_text("⚙️ <b>Центр управления тумблерами функций:</b>\n\nНажмите для мгновенного включения/отключения модулей:", reply_markup=InlineKeyboardMarkup(inline_keyboard=kb), parse_mode="HTML")
+
+@admin_router.callback_query(F.data.startswith("toggle_feat:"))
+async def toggle_feat(call: CallbackQuery):
+    if not is_owner(call.from_user.id, call.from_user.username): return
+    fname = call.data.split(":")[1]
+    async with aiosqlite.connect(DB_PATH) as db:
+        cur = await db.execute("SELECT is_enabled FROM feature_flags WHERE feature_name = ?", (fname,))
+        row = await cur.fetchone()
+        new_val = 0 if row and row[0] else 1
+        await db.execute("UPDATE feature_flags SET is_enabled = ? WHERE feature_name = ?", (new_val, fname))
+        await db.commit()
+    await log_admin_action(ADMIN_ID, f"Тумблер {fname} изменен на {new_val}")
+    await call.answer(f"⚙️ Функция {fname} теперь {'включена 🟢' if new_val else 'выключена 🔴'}!")
+    await god_features(call)
+
 @admin_router.callback_query(F.data == "god_testers_menu")
 async def god_testers_menu(call: CallbackQuery):
     if not is_owner(call.from_user.id, call.from_user.username): return
@@ -406,27 +388,6 @@ async def god_del_task(call: CallbackQuery):
         await db.commit()
     await call.answer("🗑 Удалено!")
     await god_tasks(call)
-
-@admin_router.callback_query(F.data == "god_features")
-async def god_features(call: CallbackQuery):
-    if not is_owner(call.from_user.id, call.from_user.username): return
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
-        rows = await (await db.execute("SELECT * FROM feature_flags")).fetchall()
-    kb = [[ColoredInlineKeyboardButton(text=f"{r['feature_name']}: {'🟢 ВКЛ' if r['is_enabled'] else '🔴 ВЫКЛ'}", callback_data=f"toggle_feat:{r['feature_name']}", style="success" if r['is_enabled'] else "danger")] for r in rows]
-    kb.append([ColoredInlineKeyboardButton(text="↩️ В главное меню", callback_data="god_panel", style="primary")])
-    await call.message.edit_text("⚙️ <b>Тумблеры:</b>", reply_markup=InlineKeyboardMarkup(inline_keyboard=kb), parse_mode="HTML")
-
-@admin_router.callback_query(F.data.startswith("toggle_feat:"))
-async def toggle_feat(call: CallbackQuery):
-    if not is_owner(call.from_user.id, call.from_user.username): return
-    fname = call.data.split(":")[1]
-    async with aiosqlite.connect(DB_PATH) as db:
-        cur = await db.execute("SELECT is_enabled FROM feature_flags WHERE feature_name = ?", (fname,))
-        new_val = 0 if (await cur.fetchone())[0] else 1
-        await db.execute("UPDATE feature_flags SET is_enabled = ? WHERE feature_name = ?", (new_val, fname))
-        await db.commit()
-    await god_features(call)
 
 @admin_router.callback_query(F.data == "god_logs")
 async def god_logs(call: CallbackQuery):
