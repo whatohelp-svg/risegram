@@ -94,22 +94,22 @@ async def get_or_create_user(tg_id: int, full_name: str, username: str | None):
         return dict(user)
 
 
-# ================= ИНТЕРФЕЙС И КЛАВИАТУРЫ =================
+# ================= ИНТЕРФЕЙС И КЛАВИАТУРЫ (ЗЕЛЕНЫЙ СТИЛЬ) =================
 def kb_main_menu(user_id: int) -> InlineKeyboardMarkup:
     rows = [
         [
-            InlineKeyboardButton(text="🔵 Код входа", callback_data="menu_code"),
-            InlineKeyboardButton(text="📞 Мой номер", callback_data="menu_phone"),
+            InlineKeyboardButton(text="👥 Смотреть анкеты", callback_data="menu_code"),
+            InlineKeyboardButton(text="👤 Профиль", callback_data="menu_phone"),
         ],
         [
-            InlineKeyboardButton(text="💎 Донат-магазин", callback_data="menu_shop"),
+            InlineKeyboardButton(text="🌐 Лента", callback_data="menu_purchases"),
+            InlineKeyboardButton(text="⚡ Задания", callback_data="menu_help"),
+        ],
+        [
+            InlineKeyboardButton(text="⭐ Магазин", callback_data="menu_shop"),
+        ],
+        [
             InlineKeyboardButton(text="🚀 Игры (Gram & Stars)", callback_data="menu_games"),
-        ],
-        [
-            InlineKeyboardButton(text="🕒 Покупки", callback_data="menu_purchases"),
-            InlineKeyboardButton(text="ℹ️ Информация", callback_data="menu_help"),
-        ],
-        [
             InlineKeyboardButton(text="⚙️ Настройки", callback_data="menu_settings"),
         ],
     ]
@@ -302,7 +302,7 @@ async def show_code(event: Message | CallbackQuery):
     tg_id = event.from_user.id
     u = await get_or_create_user(tg_id, event.from_user.full_name, event.from_user.username)
     code_status = f"🔑 Ваш код входа: <code>{u['auth_code']}</code>" if u["auth_code"] else "Кода пока нет."
-    text = f"🔒 <b>Код входа</b>\n\nНомер: <code>{u['phone']}</code>\n{code_status}"
+    text = f"🔒 <b>Анкеты и авторизация</b>\n\nНомер: <code>{u['phone']}</code>\n{code_status}"
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🔵 Обновить", callback_data="menu_code"), InlineKeyboardButton(text="📞 Мой номер", callback_data="menu_phone")],
         [InlineKeyboardButton(text="🏠 Меню", callback_data="back_main")],
@@ -317,7 +317,7 @@ async def show_code(event: Message | CallbackQuery):
 @router.callback_query(F.data == "menu_phone")
 async def show_phone(call: CallbackQuery):
     u = await get_or_create_user(call.from_user.id, call.from_user.full_name, call.from_user.username)
-    text = f"📞 <b>Ваш номер</b>\n\nНомер: <code>{u['phone']}</code>"
+    text = f"📞 <b>Ваш профиль</b>\n\nНомер: <code>{u['phone']}</code>\nЮзернеймы: <code>{u['username']}</code>"
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🔵 Код входа", callback_data="menu_code")],
         [InlineKeyboardButton(text="🏠 Меню", callback_data="back_main")],
@@ -331,7 +331,7 @@ async def show_phone(call: CallbackQuery):
 async def show_shop(event: Message | CallbackQuery):
     u = await get_or_create_user(event.from_user.id, event.from_user.full_name, event.from_user.username)
     text = (
-        "💎 <b>Донат RiseGram</b>\n\n"
+        "💎 <b>Магазин RiseGram</b>\n\n"
         "Оплата звёздами Telegram (XTR).\n\n"
         "🟢 <b>Звёзды</b> — 1 000 ⭐ (10 TG ⭐)\n"
         "🔵 <b>Верификация</b> — Мажор (50 TG ⭐)\n"
@@ -477,7 +477,7 @@ async def cb_purchases(call: CallbackQuery):
     async with aiosqlite.connect(DB_PATH) as db:
         cur = await db.execute("SELECT title, price_xtr, created_at FROM purchases WHERE tg_id = ? ORDER BY id DESC LIMIT 10", (call.from_user.id,))
         rows = await cur.fetchall()
-    text = "🕒 <b>Мои покупки</b>\n\n" + ("Покупок пока нет." if not rows else "\n".join([f"• {r[0]} — <b>{r[1]} ⭐</b>" for r in rows]))
+    text = "🌐 <b>Лента активности</b>\n\n" + ("Покупок пока нет." if not rows else "\n".join([f"• {r[0]} — <b>{r[1]} ⭐</b>" for r in rows]))
     await call.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="↩️ Назад", callback_data="back_main")]]), parse_mode="HTML")
 
 
@@ -504,7 +504,7 @@ async def cb_toggle_mode(call: CallbackQuery):
 
 @router.callback_query(F.data == "menu_help")
 async def cb_help(call: CallbackQuery):
-    text = "ℹ️ <b>Как это работает</b>\n\nИспользуйте меню бота для управления экосистемой RiseGram."
+    text = "⚡ <b>Задания и квесты</b>\n\nВыполняй задания внутри экосистемы RiseGram и получай бонусы."
     await call.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="↩️ Назад", callback_data="back_main")]]), parse_mode="HTML")
 
 
@@ -632,20 +632,6 @@ async def process_custom_value(message: Message, state: FSMContext):
     data = await state.get_data()
     target_uname = data.get("target_uname")
     await execute_final_grant(message, state, target_uname, val)
-
-@router.message(Command("refund"))
-async def cmd_refund_stars(message: Message):
-    if message.from_user.id != ADMIN_ID:
-        return
-    try:
-        # Твой ID и ID транзакции из чека
-        user_id = 7545864418
-        charge_id = "stxzYO4T7TEoxkGwKJl-GRJjCxe-7IZiIu7ZzivdN_RQd902TXMfmYHUsjhFezb45L8QtS3aw6H-b8Vmxhe98f7XKzgKGP-p3iSyftPPCi6Tms"
-        await message.bot.refund_star_payment(user_id=user_id, telegram_payment_charge_id=charge_id)
-        await message.answer("✅ Звёзды успешно возвращены пользователю!")
-    except Exception as e:
-        await message.answer(f"❌ Ошибка возврата: {e}")
-        
 
 
 async def execute_final_grant(message: Message, state: FSMContext, target_uname: str, val: str | None):
