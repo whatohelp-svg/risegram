@@ -94,7 +94,29 @@ async def cmd_start(message: Message):
         if user and user["banned"]:
             return await message.answer("❌ Ваш аккаунт заблокирован в экосистеме RiseGram.")
             
-    await get_or_create_user(user_id, username)
+@router.message(CommandStart())
+async def cmd_start(message: Message):
+    user_id = message.from_user.id
+    full_name = message.from_user.full_name or "User"
+    username = message.from_user.username
+    
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        user = await (await db.execute("SELECT * FROM users WHERE tg_id = ?", (user_id,))).fetchone()
+        if user and user["banned"]:
+            return await message.answer("❌ Ваш аккаунт заблокирован в экосистеме RiseGram.")
+            
+    # Передаем все 3 аргумента, которые требует твоя база данных
+    await get_or_create_user(user_id, full_name, username)
+    
+    text = (
+        f"💎 <b>Добро пожаловать в RiseGram Ecosystem, @{username or 'user'}!</b>\n\n"
+        f"Экосистема абсолютного контроля и цифровых активов.\n"
+        f"Используйте навигацию ниже для доступа к игровым модам, инвентарю и кошелькам."
+    )
+    await message.answer(text, reply_markup=kb_main(user_id))
+
+
     
     text = (
         f"💎 <b>Добро пожаловать в RiseGram Ecosystem, @{username}!</b>\n\n"
