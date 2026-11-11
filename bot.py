@@ -284,6 +284,9 @@ async def set_lang(call: CallbackQuery):
 # ==================== ЗАПУСК ЭКОСИСТЕМЫ ====================
 async def main():
     await init_db()
+    # Сбрасываем зависшие вебхуки прямо перед запуском поллинга
+    await bot.delete_webhook(drop_pending_updates=True)
+    
     dp.include_router(router)
     dp.include_router(admin_router)
     
@@ -293,5 +296,4 @@ async def main():
 if __name__ == "__main__":
     asyncio.run(main())
     
-    await bot.delete_webhook(drop_pending_updates=True)
     
