@@ -18,10 +18,11 @@ from aiogram.types import (
     PreCheckoutQuery,
 )
 
-from database import init_db, get_or_create_user, is_feature_on, DB_PATH
-from admin import admin_router, ADMIN_ID
+from aiogram.client.default import DefaultBotProperties
+from aiogram.enums import ParseMode
 
-BOT_TOKEN = "9054546076:AAEMkzzt4bTZDScM6a4NM2eg-GOvpl6_vgE"
+bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
+
 
 logging.basicConfig(level=logging.INFO)
 router = Router()
