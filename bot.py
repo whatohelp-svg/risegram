@@ -5,6 +5,7 @@ import asyncio
 import logging
 import random
 import aiosqlite
+
 from aiogram import Bot, Dispatcher, F, Router
 from aiogram.filters import Command, CommandStart
 from aiogram.fsm.context import FSMContext
@@ -17,14 +18,20 @@ from aiogram.types import (
     Message,
     PreCheckoutQuery,
 )
-
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 
+# Импорты из твоих модулей
+from database import init_db, get_or_create_user, is_feature_on, DB_PATH
+from admin import admin_router, ADMIN_ID
+
+# Сначала объявляем токен
 BOT_TOKEN = "9054546076:AAEMkzzt4bTZDScM6a4NM2eg-GOvpl6_vgE"
+
+# И сразу после него инициализируем бота
 bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - [%(levelname)s] - %(message)s")
 router = Router()
 
 class GameStates(StatesGroup):
