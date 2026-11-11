@@ -293,3 +293,5 @@ async def main():
 if __name__ == "__main__":
     asyncio.run(main())
     
+    await bot.delete_webhook(drop_pending_updates=True)
+    
