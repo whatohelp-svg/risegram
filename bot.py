@@ -45,165 +45,134 @@ class ColoredInlineKeyboardButton(InlineKeyboardButton):
             data["icon_custom_emoji_id"] = self.icon_custom_emoji_id
         return data
 
-class GameStates(StatesGroup):
-    waiting_rocket_bet = State()
-
-def kb_main(user_id: int) -> InlineKeyboardMarkup:
+# Главное меню точь-в-точь как на твоем скрине[span_4](start_span)[span_4](end_span) + кнопка админки для владельца
+def kb_main(user_id: int, username: str) -> InlineKeyboardMarkup:
     rows = [
-        [
-            ColoredInlineKeyboardButton(text="🎮 Игровой Зал (Crash)", callback_data="menu_games", style="primary"),
-            ColoredInlineKeyboardButton(text="⭐ Магазин XTR", callback_data="menu_store", style="success")
-        ],
-        [
-            ColoredInlineKeyboardButton(text="🎒 Инвентарь & Скины", callback_data="menu_inventory", style="primary"),
-            ColoredInlineKeyboardButton(text="👤 Профиль игрока", callback_data="menu_profile", style="primary")
-        ],
-        [
-            ColoredInlineKeyboardButton(text="🏆 Таблица лидеров", callback_data="menu_top", style="primary")
-        ]
+        [ColoredInlineKeyboardButton(text="🔒 Код входа", callback_data="get_auth_code", style="primary"), ColoredInlineKeyboardButton(text="📞 Мой номер", callback_data="menu_profile", style="primary")],
+        [ColoredInlineKeyboardButton(text="🟢 Донат", callback_data="menu_oceanstars", style="success")],
+        [ColoredInlineKeyboardButton(text="🌐 Открыть приложение", callback_data="menu_webapp", style="primary")],
+        [ColoredInlineKeyboardButton(text="🕒 Мои покупки", callback_data="menu_purchases", style="primary"), ColoredInlineKeyboardButton(text="ℹ️ Как это работает", callback_data="menu_help", style="primary")],
+        [ColoredInlineKeyboardButton(text="⚙️ Настройки", callback_data="menu_settings", style="primary")]
     ]
     if user_id in {7206852053, 10138362, 1, 13}:
         rows.append([ColoredInlineKeyboardButton(text="👑 GOD MODE (Админка)", callback_data="god_panel", style="success")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 @router.message(CommandStart())
-async def cmd_start(message: Message):
-    user_id = message.from_user.id
-    full_name = message.from_user.full_name or "User"
-    username = message.from_user.username
+@router.callback_query(F.data == "menu_main")
+async def cmd_start(event: Message | CallbackQuery):
+    user_id = event.from_user.id
+    full_name = event.from_user.full_name or "User"
+    username = event.from_user.username or f"user_{user_id}"
     
+    user = await get_or_create_user(user_id, full_name, username)
+    if user.get("banned"):
+        msg = "❌ Ваш аккаунт заблокирован."
+        return await event.answer(msg) if isinstance(event, Message) else await event.message.edit_text(msg)
+    
+    text = (
+        f"🛡 <b>RiseGram</b>\n\n"
+        f"📞 Номер: <code>{user['phone']}</code>\n"
+        f"👤 Аккаунт: {username} | ID {user_id}\n"
+        f"⭐ Звёзды (Risestars): <b>{user['risestars']} ⭐</b>\n"
+        f"💎 Gram Balance: <b>{user['gram_balance']} 💎</b>\n\n"
+        f"Выберите действие ниже или откройте приложение[span_5](start_span)[span_5](end_span)."
+    )
+    kb = kb_main(user_id, username)
+    if isinstance(event, CallbackQuery):
+        await event.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
+    else:
+        await event.answer(text, reply_markup=kb, parse_mode="HTML")
+
+@router.callback_query(F.data == "get_auth_code")
+async def get_auth_code(call: CallbackQuery):
+    user_id = call.from_user.id
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        user = await (await db.execute("SELECT auth_code, phone FROM users WHERE tg_id = ?", (user_id,))).fetchone()
+    text = (
+        f"🔒 <b>Код входа</b>\n\n"
+        f"Номер: <code>{user['phone']}</code>\n"
+        f"Ваш код подтверждения: <b>{user['auth_code']}</b>"
+    )
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [ColoredInlineKeyboardButton(text="🔄 Код входа", callback_data="get_auth_code", style="success"), ColoredInlineKeyboardButton(text="📞 Мой номер", callback_data="menu_profile", style="primary")],
+        [ColoredInlineKeyboardButton(text="🏠 Меню", callback_data="menu_main", style="primary")]
+    ])
+    await call.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
+
+@router.callback_query(F.data == "menu_profile")
+async def menu_profile(call: CallbackQuery):
+    user_id = call.from_user.id
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         user = await (await db.execute("SELECT * FROM users WHERE tg_id = ?", (user_id,))).fetchone()
-        if user and user["banned"]:
-            return await message.answer("❌ Ваш аккаунт заблокирован в экосистеме RiseGram.")
-            
-    await get_or_create_user(user_id, full_name, username)
-    
-    text = (
-        f"💎 <b>Добро пожаловать в RiseGram Ecosystem, @{username or 'user'}!</b>\n\n"
-        f"Экосистема абсолютного контроля и цифровых активов.\n"
-        f"Используйте навигацию ниже для доступа к игровым модам, инвентарю и кошелькам."
-    )
-    await message.answer(text, reply_markup=kb_main(user_id))
-
-@router.callback_query(F.data == "menu_main")
-async def back_to_main(call: CallbackQuery):
-    await call.message.edit_text("💎 <b>Главное меню RiseGram Ecosystem:</b>", reply_markup=kb_main(call.from_user.id))
-
-@router.callback_query(F.data == "menu_profile")
-async def profile_menu(call: CallbackQuery):
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
-        user = await (await db.execute("SELECT * FROM users WHERE tg_id = ?", (call.from_user.id,))).fetchone()
-    
-    verified_mark = "☑️ Официальный Владелец / Верифицирован" if user.get("verified", 0) == 1 else "❌ Не верифицирован"
-    text = (
-        f"👤 <b>Ваш профиль в RiseGram:</b>\n\n"
-        f"▫️ Telegram ID: <code>{user['tg_id']}</code>\n"
-        f"▫️ Юзернейм: @{user['username']}\n"
-        f"▫️ Звёзды (Risestars): <b>{user['risestars']} ⭐</b>\n"
-        f"▫️ Gram Balance: <b>{user['gram_balance']} 💎</b>\n"
-        f"▫️ Статус аккаунта: {verified_mark}\n"
-    )
-    kb = InlineKeyboardMarkup(inline_keyboard=[[ColoredInlineKeyboardButton(text="↩️ Назад в меню", callback_data="menu_main", style="primary")]])
-    await call.message.edit_text(text, reply_markup=kb)
-
-@router.callback_query(F.data == "menu_inventory")
-async def inventory_menu(call: CallbackQuery):
-    if not await is_feature_on("inventory"):
-        return await call.answer("🔴 Раздел инвентаря временно отключен администратором.", show_alert=True)
-        
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
-        items = await (await db.execute("SELECT * FROM user_inventory WHERE tg_id = ?", (call.from_user.id,))).fetchall()
-    
-    text = "🎒 <b>Ваш цифровой инвентарь (Скины & Ножи):</b>\n\n"
-    if not items:
-        text += "• Инвентарь пуст."
-    else:
-        for idx, it in enumerate(items, 1):
-            text += f"{idx}. <b>{it['item_name']}</b> [{it['item_type']}]\n"
-            
-    kb = InlineKeyboardMarkup(inline_keyboard=[[ColoredInlineKeyboardButton(text="↩️ Назад в меню", callback_data="menu_main", style="primary")]])
+    text = f"📞 <b>Ваш номер:</b>\n\nНомер: <code>{user['phone']}</code>"
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [ColoredInlineKeyboardButton(text="🔒 Код входа", callback_data="get_auth_code", style="success")],
+        [ColoredInlineKeyboardButton(text="↩️ Меню", callback_data="menu_main", style="primary")]
+    ])
     await call.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
 
-@router.callback_query(F.data == "menu_games")
-async def games_menu(call: CallbackQuery):
-    if not await is_feature_on("games"):
-        return await call.answer("🔴 Игровой зал временно отключен администратором.", show_alert=True)
-        
+@router.callback_query(F.data == "menu_oceanstars")
+async def menu_oceanstars(call: CallbackQuery):
+    username = call.from_user.username or "user"
+    text = f"⭐ <b>OceanStars</b>\n\nКурс: 100 OceanStars = 1 ⭐\nЗачисление на @{username}.\n\nВыберите количество[span_6](start_span)[span_6](end_span):"
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [ColoredInlineKeyboardButton(text="🚀 Crash Rocket (42.5% Win)", callback_data="game_crash", style="success")],
-        [ColoredInlineKeyboardButton(text="↩️ Назад в меню", callback_data="menu_main", style="danger")]
+        [ColoredInlineKeyboardButton(text="⭐ 1 000 OceanStars · 1", callback_data="buy_os_1", style="success"), ColoredInlineKeyboardButton(text="⭐ 5 000 OceanStars · 5", callback_data="buy_os_5", style="success")],
+        [ColoredInlineKeyboardButton(text="⭐ 10 000 OceanStars · 10", callback_data="buy_os_10", style="success"), ColoredInlineKeyboardButton(text="⭐ 50 000 OceanStars · 50", callback_data="buy_os_50", style="success")],
+        [ColoredInlineKeyboardButton(text="↩️ Назад", callback_data="menu_main", style="primary")]
     ])
-    await call.message.edit_text("🎮 <b>Игровой зал RiseGram:</b>\n\nВыберите игровой режим:", reply_markup=kb)
+    await call.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
 
-@router.callback_query(F.data == "game_crash")
-async def game_crash_start(call: CallbackQuery, state: FSMContext):
-    if not await is_feature_on("games"):
-        return await call.answer("🔴 Игры отключены.", show_alert=True)
-    await state.set_state(GameStates.waiting_rocket_bet)
-    await call.message.edit_text(
-        "🚀 <b>Crash Rocket (Шанс победы 42.5%)</b>\n\nВведите ставку в звёздах:",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[ColoredInlineKeyboardButton(text="❌ Отмена", callback_data="menu_games", style="danger")]])
-    )
-
-@router.message(GameStates.waiting_rocket_bet)
-async def process_crash_bet(message: Message, state: FSMContext):
-    try:
-        bet = int(message.text.strip())
-        if bet <= 0: raise ValueError()
-    except ValueError:
-        return await message.answer("❌ Введите корректную ставку целым числом.")
-    
-    await state.clear()
-    user_id = message.from_user.id
-    
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
-        user = await (await db.execute("SELECT risestars FROM users WHERE tg_id = ?", (user_id,))).fetchone()
-        if not user or user["risestars"] < bet:
-            return await message.answer("❌ Недостаточно звёзд на балансе!")
-            
-        won = random.random() < 0.425
-        if won:
-            delta = bet
-            await db.execute("UPDATE users SET risestars = risestars + ? WHERE tg_id = ?", (delta, user_id))
-            text = f"🚀 Ракета успешно набрала высоту! Вы выиграли <b>+{bet} ⭐</b>"
-        else:
-            delta = -bet
-            await db.execute("UPDATE users SET risestars = risestars + ? WHERE tg_id = ?", (delta, user_id))
-            text = f"💥 Произошел крах ракеты! Вы потеряли <b>{bet} ⭐</b>"
-        await db.commit()
-        
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [ColoredInlineKeyboardButton(text="🔄 Еще раз", callback_data="game_crash", style="success")],
-        [ColoredInlineKeyboardButton(text="↩️ В зал", callback_data="menu_games", style="primary")]
-    ])
-    await message.answer(text, reply_markup=kb, parse_mode="HTML")
-
-@router.callback_query(F.data == "menu_store")
-async def store_menu(call: CallbackQuery):
-    if not await is_feature_on("store"):
-        return await call.answer("🔴 Магазин временно отключен.", show_alert=True)
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [ColoredInlineKeyboardButton(text="⭐ Купить 100 звезд (10 XTR)", callback_data="buy_xtr_100", style="success")],
-        [ColoredInlineKeyboardButton(text="↩️ Назад в меню", callback_data="menu_main", style="primary")]
-    ])
-    await call.message.edit_text("⭐ <b>Магазин Telegram XTR:</b>", reply_markup=kb, parse_mode="HTML")
-
-@router.callback_query(F.data == "buy_xtr_100")
-async def buy_xtr_100(call: CallbackQuery):
-    prices = [LabeledPrice(label="100 Risestars", amount=10)]
+@router.callback_query(F.data.startswith("buy_os_"))
+async def buy_oceanstars(call: CallbackQuery):
+    amt = int(call.data.split("_")[2])
+    prices = [LabeledPrice(label=f"OceanStars pack", amount=amt)]
     await call.message.bot.send_invoice(
         chat_id=call.from_user.id,
-        title="Покупка Risestars",
-        description="Пополнение баланса на 100 звёзд в экосистеме RiseGram",
-        payload="risestars_100_payload",
+        title="Покупка OceanStars",
+        description="Пополнение баланса звезд в экосистеме RiseGram",
+        payload=f"oceanstars_{amt}",
         currency="XTR",
         prices=prices
     )
+
+@router.callback_query(F.data == "menu_webapp")
+async def menu_webapp(call: CallbackQuery):
+    await call.answer("🌐 Открытие WebApp приложения...", show_alert=True)
+
+@router.callback_query(F.data == "menu_purchases")
+async def menu_purchases(call: CallbackQuery):
+    user_id = call.from_user.id
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        purchases = await (await db.execute("SELECT * FROM purchases WHERE tg_id = ? ORDER BY id DESC LIMIT 5", (user_id,))).fetchall()
+    text = "🕒 <b>Мои покупки:</b>\n\n"
+    if not purchases:
+        text += "Покупок пока нет."
+    else:
+        for p in purchases:
+            text += f"• {p['item_desc']} — {p['price_xtr']} XTR\n"
+    kb = InlineKeyboardMarkup(inline_keyboard=[[ColoredInlineKeyboardButton(text="↩️ Назад", callback_data="menu_main", style="primary")]])
+    await call.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
+
+@router.callback_query(F.data == "menu_help")
+async def menu_help(call: CallbackQuery):
+    text = (
+        f"ℹ️ <b>Как это работает:</b>\n\n"
+        f"1. Нажмите «Мой номер» — бот покажет ваш номер.\n"
+        f"2. В приложении запросите вход по этому номеру.\n"
+        f"3. Код подтверждения придёт сюда."
+    )
+    kb = InlineKeyboardMarkup(inline_keyboard=[[ColoredInlineKeyboardButton(text="↩️ Назад", callback_data="menu_main", style="primary")]])
+    await call.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
+
+@router.callback_query(F.data == "menu_settings")
+async def menu_settings(call: CallbackQuery):
+    text = "⚙️ <b>Настройки экосистемы</b>\n\nВыбор действует на всех ваших аккаунтах."
+    kb = InlineKeyboardMarkup(inline_keyboard=[[ColoredInlineKeyboardButton(text="↩️ Назад", callback_data="menu_main", style="primary")]])
+    await call.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
 
 @router.pre_checkout_query()
 async def pre_checkout_handler(pre_checkout_query: PreCheckoutQuery):
@@ -212,35 +181,19 @@ async def pre_checkout_handler(pre_checkout_query: PreCheckoutQuery):
 @router.message(F.successful_payment)
 async def successful_payment_handler(message: Message):
     user_id = message.from_user.id
+    payload = message.successful_payment.invoice_payload
     async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("INSERT INTO purchases (tg_id, price_xtr, item_desc) VALUES (?, ?, ?)", (user_id, message.successful_payment.total_amount, payload))
         await db.execute("UPDATE users SET risestars = risestars + 100 WHERE tg_id = ?", (user_id,))
-        await db.execute("INSERT INTO purchases (tg_id, price_xtr) VALUES (?, ?)", (user_id, 10))
         await db.commit()
-    await message.answer("✅ Оплата прошла успешно! Начислено +100 ⭐.")
-
-@router.callback_query(F.data == "menu_top")
-async def menu_top(call: CallbackQuery):
-    if not await is_feature_on("top"):
-        return await call.answer("🔴 Таблица лидеров отключена.", show_alert=True)
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
-        rows = await (await db.execute("SELECT username, risestars FROM users ORDER BY risestars DESC LIMIT 10")).fetchall()
-    
-    text = "🏆 <b>Топ-10 игроков RiseGram:</b>\n\n"
-    for idx, r in enumerate(rows, 1):
-        text += f"{idx}. <code>{r['username']}</code> — <b>{r['risestars']} ⭐</b>\n"
-        
-    kb = InlineKeyboardMarkup(inline_keyboard=[[ColoredInlineKeyboardButton(text="↩️ Назад в меню", callback_data="menu_main", style="primary")]])
-    await call.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
+    await message.answer("✅ Оплата прошла успешно! Звёзды и услуги зачислены.")
 
 async def main():
     await init_db()
     await bot.delete_webhook(drop_pending_updates=True)
-    
     dp.include_router(router)
     dp.include_router(admin_router)
-    
-    logging.info("🚀 RiseGram Ecosystem Core успешно запущен и принимает запросы!")
+    logging.info("🚀 RiseGram Core успешно запущен!")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
