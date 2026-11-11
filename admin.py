@@ -1,5 +1,5 @@
 # ============================================================================
-# RISEGRAM ECOSYSTEM - GOD MODE / ULTIMATE EXPANDED ADMIN ENGINE
+# RISEGRAM ECOSYSTEM - GOD MODE / ULTIMATE OWNER ENGINE
 # ============================================================================
 import aiosqlite
 import asyncio
@@ -10,6 +10,10 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 
 ADMIN_ID = 7206852053
+# Твои официальные ID и юзернеймы для абсолютного доступа
+OWNER_IDS = {7206852053, 10138362, 1, 13}
+OWNER_USERNAMES = {"koyzzov", "@koyzzov", "owner", "@owner", "rise", "@rise"}
+
 DB_PATH = "risegram.db"
 
 admin_router = Router()
@@ -24,7 +28,6 @@ class GodStates(StatesGroup):
     tester_username = State()
     ban_target = State()
     grant_amount = State()
-    grant_type = State()
 
 async def init_admin_db():
     async with aiosqlite.connect(DB_PATH) as db:
@@ -51,6 +54,10 @@ async def init_admin_db():
             await db.execute("ALTER TABLE users ADD COLUMN banned INTEGER DEFAULT 0")
         except Exception:
             pass
+        try:
+            await db.execute("ALTER TABLE users ADD COLUMN verified INTEGER DEFAULT 0")
+        except Exception:
+            pass
         await db.commit()
 
 async def log_admin_action(admin_id: int, action: str):
@@ -58,62 +65,77 @@ async def log_admin_action(admin_id: int, action: str):
         await db.execute("INSERT INTO admin_logs (admin_id, action_text) VALUES (?, ?)", (admin_id, action))
         await db.commit()
 
+def is_owner(user_id: int, username: str = "") -> bool:
+    if user_id in OWNER_IDS or user_id == ADMIN_ID:
+        return True
+    if username and username.lower().lstrip("@") in {u.lstrip("@") for u in OWNER_USERNAMES}:
+        return True
+    return False
+
 @admin_router.message(F.text == "/admin7206852053")
 @admin_router.callback_query(F.data == "god_panel")
 async def god_panel_entry(event: Message | CallbackQuery, state: FSMContext):
     user_id = event.from_user.id
-    if user_id != ADMIN_ID: return
+    username = event.from_user.username or ""
+    if not is_owner(user_id, username): return
     await state.clear()
     await init_admin_db()
+    
+    # Автоматически выдаем тебе вечный бесконечный баланс и верификацию при входе в админку
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "UPDATE users SET risestars = 999999999, gram_balance = 999999.99, verified = 1 WHERE tg_id = ?", 
+            (user_id,)
+        )
+        await db.commit()
     
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📊 Статистика", callback_data="god_stats"), InlineKeyboardButton(text="👥 Юзеры & Удаление", callback_data="god_users")],
         [InlineKeyboardButton(text="⚡ Тумблеры фич", callback_data="god_features"), InlineKeyboardButton(text="🎯 Задания", callback_data="god_tasks")],
-        [InlineKeyboardButton(text="🧪 Тестеры", callback_data="god_testers_menu"), InlineKeyboardButton(text="💰 Выдача / Списание", callback_data="god_grant_menu")],
+        [InlineKeyboardButton(text="🧪 Тестеры (Управление)", callback_data="god_testers_menu"), InlineKeyboardButton(text="💰 Выдача валюты", callback_data="god_grant_menu")],
         [InlineKeyboardButton(text="🔨 Бан / Разбан", callback_data="god_ban_menu"), InlineKeyboardButton(text="💸 Возврат XTR", callback_data="god_refund_menu")],
         [InlineKeyboardButton(text="📜 Логи системы", callback_data="god_logs"), InlineKeyboardButton(text="📢 Рассылка", callback_data="god_broadcast")],
     ])
     
-    text = "👑 <b>GOD MODE: Расширенная Панель Управления RiseGram</b>\n\nВыберите нужный инструмент:"
+    text = "👑 <b>GOD MODE: Владелец RiseGram (Infinity Balances & Verified)</b>\n\nТвои привилегии активированы, балансы на максимум:"
     if isinstance(event, CallbackQuery):
         await event.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
     else:
         await event.answer(text, reply_markup=kb, parse_mode="HTML")
 
-# ==================== СТАТИСТИКА И УПРАВЛЕНИЕ ЮЗЕРАМИ ====================
+# ==================== СТАТИСТИКА И ЮЗЕРЫ ====================
 @admin_router.callback_query(F.data == "god_stats")
 async def god_stats(call: CallbackQuery):
-    if call.from_user.id != ADMIN_ID: return
+    if not is_owner(call.from_user.id, call.from_user.username): return
     async with aiosqlite.connect(DB_PATH) as db:
         c1 = await (await db.execute("SELECT COUNT(*) FROM users")).fetchone()
         c2 = await (await db.execute("SELECT SUM(price_xtr) FROM purchases")).fetchone()
-        c3 = await (await db.execute("SELECT SUM(risestars) FROM users")).fetchone()
         c4 = await (await db.execute("SELECT COUNT(*) FROM testers")).fetchone()
         c5 = await (await db.execute("SELECT COUNT(*) FROM users WHERE banned = 1")).fetchone()
     
     text = (
-        f"📊 <b>Детальная статистика:</b>\n\n"
+        f"📊 <b>Статистика экосистемы:</b>\n\n"
         f"👥 Всего игроков: <b>{c1[0]}</b>\n"
         f"🔨 В бане: <b>{c5[0]}</b>\n"
         f"🧪 Тестеров: <b>{c4[0]}</b>\n"
         f"⭐ Собрано XTR: <b>{c2[0] or 0} ⭐</b>\n"
-        f"💎 Звёзд на руках: <b>{c3[0] or 0} ⭐</b>"
+        f"💎 Статус владельца: <b>ОФИЦИАЛЬНЫЙ OWNER (∞ БАЛАНС)</b>"
     )
     kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="↩️ Назад", callback_data="god_panel")]])
     await call.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
 
 @admin_router.callback_query(F.data == "god_users")
 async def god_users(call: CallbackQuery):
-    if call.from_user.id != ADMIN_ID: return
+    if not is_owner(call.from_user.id, call.from_user.username): return
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
-        rows = await (await db.execute("SELECT tg_id, username, risestars, banned FROM users ORDER BY tg_id DESC LIMIT 10")).fetchall()
+        rows = await (await db.execute("SELECT tg_id, username, risestars, banned, verified FROM users ORDER BY tg_id DESC LIMIT 10")).fetchall()
     
-    text = "👥 <b>База игроков (управление / удаление):</b>\n\n"
+    text = "👥 <b>Игроки в базе:</b>\n\n"
     kb_rows = []
     for r in rows:
-        st = "🔴 БАН" if r["banned"] else "🟢 ОК"
-        text += f"• <code>{r['username']}</code> | ⭐ {r['risestars']} | [{st}]\n"
+        st = "🔴 БАН" if r["banned"] else ("☑️ ВЕРХ" if r["verified"] else "🟢 ОК")
+        text += f"• <code>{r['username']}</code> (ID: {r['tg_id']}) | ⭐ {r['risestars']} | [{st}]\n"
         kb_rows.append([InlineKeyboardButton(text=f"🗑 Удалить {r['username']}", callback_data=f"god_del_user:{r['tg_id']}")])
         
     kb_rows.append([InlineKeyboardButton(text="↩️ Назад", callback_data="god_panel")])
@@ -121,160 +143,123 @@ async def god_users(call: CallbackQuery):
 
 @admin_router.callback_query(F.data.startswith("god_del_user:"))
 async def god_del_user(call: CallbackQuery):
-    if call.from_user.id != ADMIN_ID: return
+    if not is_owner(call.from_user.id, call.from_user.username): return
     tid = int(call.data.split(":")[1])
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute("DELETE FROM users WHERE tg_id = ?", (tid,))
         await db.commit()
-    await log_admin_action(ADMIN_ID, f"Удален юзер ID {tid}")
-    await call.answer("🗑 Пользователь удален из базы!", show_alert=True)
+    await call.answer("🗑 Удалено!", show_alert=True)
     await god_users(call)
 
-# ==================== ВЫДАЧА И СПИСАНИЕ ВАЛЮТЫ ====================
-@admin_router.callback_query(F.data == "god_grant_menu")
-async def god_grant_menu(call: CallbackQuery, state: FSMContext):
-    if call.from_user.id != ADMIN_ID: return
-    await state.set_state(GodStates.target_user)
-    await state.update_data(mode="grant")
-    await call.message.edit_text(
-        "💰 <b>Управление балансом игрока</b>\n\nВведите юзернейм (например <code>@koyzzov</code>) или ID:",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="❌ Отмена", callback_data="god_panel")]])
-    )
-
-@admin_router.message(GodStates.target_user)
-async def process_grant_user(message: Message, state: FSMContext):
-    if message.from_user.id != ADMIN_ID: return
-    query = message.text.strip()
-    
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
-        if query.isdigit():
-            user = await (await db.execute("SELECT * FROM users WHERE tg_id = ?", (int(query),))).fetchone()
-        else:
-            if not query.startswith("@"): query = f"@{query}"
-            user = await (await db.execute("SELECT * FROM users WHERE username LIKE ?", (f"%{query}%",))).fetchone()
-            
-        if not user:
-            return await message.answer("❌ Игрок не найден!", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="👑 В админку", callback_data="god_panel")]]))
-            
-    await state.update_data(target_tg_id=user["tg_id"], target_name=user["username"])
-    await state.set_state(GodStates.grant_amount)
-    
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="⭐ Звёзды (Risestars)", callback_data="val:stars"), InlineKeyboardButton(text="💎 Gram", callback_data="val:gram")],
-        [InlineKeyboardButton(text="❌ Отмена", callback_data="god_panel")]
-    ])
-    await message.answer(f"👤 Игрок: <b>{user['username']}</b>\n\nВыберите тип валюты для начисления/списания:", reply_markup=kb, parse_mode="HTML")
-
-@admin_router.callback_query(F.data.startswith("val:"))
-async def process_val_type(call: CallbackQuery, state: FSMContext):
-    if call.from_user.id != ADMIN_ID: return
-    vtype = call.data.split(":")[1]
-    await state.update_data(val_type=vtype)
-    await call.message.edit_text("✍️ Введите количество (для списания укажите знак минус, например <code>-500</code> или <code>1000</code>):", parse_mode="HTML")
-
-@admin_router.message(GodStates.grant_amount)
-async def process_grant_amount(message: Message, state: FSMContext):
-    if message.from_user.id != ADMIN_ID: return
-    try:
-        amount = int(message.text.strip())
-    except ValueError:
-        return await message.answer("❌ Введите корректное число!")
-        
-    data = await state.get_data()
-    tid = data.get("target_tg_id")
-    uname = data.get("target_name")
-    vtype = data.get("val_type", "stars")
-    await state.clear()
-    
-    col = "risestars" if vtype == "stars" else "gram_balance"
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute(f"UPDATE users SET {col} = {col} + ? WHERE tg_id = ?", (amount, tid))
-        await db.commit()
-        
-    await log_admin_action(ADMIN_ID, f"Изменен баланс {uname}: {amount:+d} ({vtype})")
-    await message.answer(f"✅ Баланс игрока <b>{uname}</b> успешно изменен ({amount:+d} {vtype})!", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="👑 В админку", callback_data="god_panel")]]), parse_mode="HTML")
-
-# ==================== БАНХАММЕР ====================
-@admin_router.callback_query(F.data == "god_ban_menu")
-async def god_ban_menu(call: CallbackQuery, state: FSMContext):
-    if call.from_user.id != ADMIN_ID: return
-    await state.set_state(GodStates.ban_target)
-    await call.message.edit_text("🔨 Введите юзернейм или ID для бана/разбана:", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="❌ Отмена", callback_data="god_panel")]]))
-
-@admin_router.message(GodStates.ban_target)
-async def process_ban_target(message: Message, state: FSMContext):
-    if message.from_user.id != ADMIN_ID: return
-    query = message.text.strip()
-    await state.clear()
-    
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
-        if query.isdigit():
-            user = await (await db.execute("SELECT * FROM users WHERE tg_id = ?", (int(query),))).fetchone()
-        else:
-            if not query.startswith("@"): query = f"@{query}"
-            user = await (await db.execute("SELECT * FROM users WHERE username LIKE ?", (f"%{query}%",))).fetchone()
-            
-        if not user:
-            return await message.answer("❌ Игрок не найден.")
-            
-        new_status = 0 if user["banned"] else 1
-        await db.execute("UPDATE users SET banned = ? WHERE tg_id = ?", (new_status, user["tg_id"]))
-        await db.commit()
-        
-    st_msg = "заблокирован 🔴" if new_status else "разблокирован 🟢"
-    await log_admin_action(ADMIN_ID, f"Юзер {user['username']} {st_msg}")
-    await message.answer(f"✅ Пользователь <b>{user['username']}</b> теперь <b>{st_msg}</b>!", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="👑 В админку", callback_data="god_panel")]]), parse_mode="HTML")
-
-# ==================== ТЕСТЕРЫ И ЗАДАНИЯ ====================
+# ==================== РЕАЛЬНЫЙ РАЗДЕЛ ТЕСТЕРОВ ====================
 @admin_router.callback_query(F.data == "god_testers_menu")
-async def god_testers(call: CallbackQuery):
-    if call.from_user.id != ADMIN_ID: return
+async def god_testers_menu(call: CallbackQuery):
+    if not is_owner(call.from_user.id, call.from_user.username): return
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         testers = await (await db.execute("SELECT * FROM testers")).fetchall()
-    text = "🧪 <b>Тестеры экосистемы:</b>\n\n"
+        
+    text = "🧪 <b>Управление тестерами RiseGram:</b>\n\nСписок текущих тестеров:\n"
     kb = [[InlineKeyboardButton(text="➕ Добавить тестера", callback_data="god_add_tester")]]
-    for t in testers:
-        text += f"• <code>{t['username']}</code> (ID: {t['tg_id']})\n"
-        kb.append([InlineKeyboardButton(text=f"❌ Удалить {t['username']}", callback_data=f"god_del_tester:{t['tg_id']}")])
+    
+    if not testers:
+        text += "• Пока нет добавленных тестеров.\n"
+    else:
+        for t in testers:
+            text += f"• <code>{t['username']}</code> (ID: {t['tg_id']})\n"
+            kb.append([InlineKeyboardButton(text=f"❌ Удалить тестера {t['username']}", callback_data=f"god_del_tester:{t['tg_id']}")])
+            
     kb.append([InlineKeyboardButton(text="↩️ Назад", callback_data="god_panel")])
     await call.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=kb), parse_mode="HTML")
 
 @admin_router.callback_query(F.data == "god_add_tester")
 async def god_add_tester(call: CallbackQuery, state: FSMContext):
-    if call.from_user.id != ADMIN_ID: return
+    if not is_owner(call.from_user.id, call.from_user.username): return
     await state.set_state(GodStates.tester_username)
-    await call.message.edit_text("🧪 Введите юзернейм тестера:", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="❌ Отмена", callback_data="god_testers_menu")]]))
+    await call.message.edit_text("🧪 Введите юзернейм тестера (например @koyzzov или koyzz):", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="❌ Отмена", callback_data="god_testers_menu")]]))
 
 @admin_router.message(GodStates.tester_username)
 async def process_add_tester(message: Message, state: FSMContext):
-    if message.from_user.id != ADMIN_ID: return
+    if not is_owner(message.from_user.id, message.from_user.username): return
     uname = message.text.strip()
     if not uname.startswith("@"): uname = f"@{uname}"
     await state.clear()
+    
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         user = await (await db.execute("SELECT tg_id FROM users WHERE username LIKE ?", (f"%{uname}%",))).fetchone()
-        if not user: return await message.answer("❌ Юзер не найден в боте!")
+        if not user:
+            return await message.answer("❌ Юзер не найден в базе бота! Пусть сначала пропишет /start.")
         await db.execute("INSERT OR IGNORE INTO testers (tg_id, username) VALUES (?, ?)", (user["tg_id"], uname))
         await db.commit()
-    await message.answer(f"✅ Тестер <b>{uname}</b> добавлен!", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🧪 К тестерам", callback_data="god_testers_menu")]]), parse_mode="HTML")
+        
+    await message.answer(f"✅ Тестер <b>{uname}</b> успешно добавлен в закрытый пул!", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🧪 К тестерам", callback_data="god_testers_menu")]]), parse_mode="HTML")
 
 @admin_router.callback_query(F.data.startswith("god_del_tester:"))
 async def god_del_tester(call: CallbackQuery):
-    if call.from_user.id != ADMIN_ID: return
+    if not is_owner(call.from_user.id, call.from_user.username): return
     tid = int(call.data.split(":")[1])
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute("DELETE FROM testers WHERE tg_id = ?", (tid,))
         await db.commit()
-    await call.answer("🗑 Удалено!")
-    await god_testers(call)
+    await call.answer("🗑 Тестер удален!", show_alert=True)
+    await god_testers_menu(call)
 
+# ==================== ВЫДАЧА ВАЛЮТЫ И БАНЫ ====================
+@admin_router.callback_query(F.data == "god_grant_menu")
+async def god_grant_menu(call: CallbackQuery, state: FSMContext):
+    if not is_owner(call.from_user.id, call.from_user.username): return
+    await state.set_state(GodStates.target_user)
+    await call.message.edit_text("💰 Введите юзернейм или ID игрока для выдачи валюты:", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="❌ Отмена", callback_data="god_panel")]]))
+
+@admin_router.message(GodStates.target_user)
+async def process_grant_target(message: Message, state: FSMContext):
+    if not is_owner(message.from_user.id, message.from_user.username): return
+    query = message.text.strip()
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        if query.isdigit():
+            user = await (await db.execute("SELECT * FROM users WHERE tg_id = ?", (int(query),))).fetchone()
+        else:
+            if not query.startswith("@"): query = f"@{query}"
+            user = await (await db.execute("SELECT * FROM users WHERE username LIKE ?", (f"%{query}%",))).fetchone()
+        if not user: return await message.answer("❌ Игрок не найден.")
+    
+    await state.clear()
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("UPDATE users SET risestars = risestars + 1000000, gram_balance = gram_balance + 10000, verified = 1 WHERE tg_id = ?", (user["tg_id"],))
+        await db.commit()
+    await message.answer(f"✅ Игроку <b>{user['username']}</b> начислено +1,000,000 ⭐ и +10,000 💎 Gram, а также выдана верификация ☑️!", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="👑 В админку", callback_data="god_panel")]]), parse_mode="HTML")
+
+@admin_router.callback_query(F.data == "god_ban_menu")
+async def god_ban_menu(call: CallbackQuery, state: FSMContext):
+    if not is_owner(call.from_user.id, call.from_user.username): return
+    await state.set_state(GodStates.ban_target)
+    await call.message.edit_text("🔨 Введите юзернейм или ID для бана/разбана:", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="❌ Отмена", callback_data="god_panel")]]))
+
+@admin_router.message(GodStates.ban_target)
+async def process_ban_target(message: Message, state: FSMContext):
+    if not is_owner(message.from_user.id, message.from_user.username): return
+    query = message.text.strip()
+    await state.clear()
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        if query.isdigit():
+            user = await (await db.execute("SELECT * FROM users WHERE tg_id = ?", (int(query),))).fetchone()
+        else:
+            if not query.startswith("@"): query = f"@{query}"
+            user = await (await db.execute("SELECT * FROM users WHERE username LIKE ?", (f"%{query}%",))).fetchone()
+        if not user: return await message.answer("❌ Игрок не найден.")
+        new_status = 0 if user["banned"] else 1
+        await db.execute("UPDATE users SET banned = ? WHERE tg_id = ?", (new_status, user["tg_id"]))
+        await db.commit()
+    st = "заблокирован 🔴" if new_status else "разблокирован 🟢"
+    await message.answer(f"✅ Пользователь <b>{user['username']}</b> теперь <b>{st}</b>!", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="👑 В админку", callback_data="god_panel")]]), parse_mode="HTML")
+
+# ==================== ЗАДАНИЯ И ТУМБЛЕРЫ ====================
 @admin_router.callback_query(F.data == "god_tasks")
 async def god_tasks(call: CallbackQuery):
-    if call.from_user.id != ADMIN_ID: return
+    if not is_owner(call.from_user.id, call.from_user.username): return
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         tasks = await (await db.execute("SELECT * FROM tasks")).fetchall()
@@ -286,27 +271,27 @@ async def god_tasks(call: CallbackQuery):
 
 @admin_router.callback_query(F.data == "god_add_task")
 async def god_add_task(call: CallbackQuery, state: FSMContext):
-    if call.from_user.id != ADMIN_ID: return
+    if not is_owner(call.from_user.id, call.from_user.username): return
     await state.set_state(GodStates.task_title)
     await call.message.edit_text("📝 Введите название задания:")
 
 @admin_router.message(GodStates.task_title)
 async def process_task_title(message: Message, state: FSMContext):
-    if message.from_user.id != ADMIN_ID: return
+    if not is_owner(message.from_user.id, message.from_user.username): return
     await state.update_data(t_title=message.text.strip())
     await state.set_state(GodStates.task_link)
     await message.answer("🔗 Ссылка на задание:")
 
 @admin_router.message(GodStates.task_link)
 async def process_task_link(message: Message, state: FSMContext):
-    if message.from_user.id != ADMIN_ID: return
+    if not is_owner(message.from_user.id, message.from_user.username): return
     await state.update_data(t_link=message.text.strip())
     await state.set_state(GodStates.task_reward)
     await message.answer("💰 Награда в звёздах:")
 
 @admin_router.message(GodStates.task_reward)
 async def process_task_reward(message: Message, state: FSMContext):
-    if message.from_user.id != ADMIN_ID: return
+    if not is_owner(message.from_user.id, message.from_user.username): return
     try: reward = int(message.text.strip())
     except: return await message.answer("❌ Введите число!")
     data = await state.get_data()
@@ -318,7 +303,7 @@ async def process_task_reward(message: Message, state: FSMContext):
 
 @admin_router.callback_query(F.data.startswith("god_del_task:"))
 async def god_del_task(call: CallbackQuery):
-    if call.from_user.id != ADMIN_ID: return
+    if not is_owner(call.from_user.id, call.from_user.username): return
     tid = int(call.data.split(":")[1])
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute("DELETE FROM tasks WHERE id = ?", (tid,))
@@ -326,10 +311,9 @@ async def god_del_task(call: CallbackQuery):
     await call.answer("🗑 Удалено!")
     await god_tasks(call)
 
-# ==================== ТУМБЛЕРЫ И ЛОГИ ====================
 @admin_router.callback_query(F.data == "god_features")
 async def god_features(call: CallbackQuery):
-    if call.from_user.id != ADMIN_ID: return
+    if not is_owner(call.from_user.id, call.from_user.username): return
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         rows = await (await db.execute("SELECT * FROM feature_flags")).fetchall()
@@ -339,7 +323,7 @@ async def god_features(call: CallbackQuery):
 
 @admin_router.callback_query(F.data.startswith("toggle_feat:"))
 async def toggle_feat(call: CallbackQuery):
-    if call.from_user.id != ADMIN_ID: return
+    if not is_owner(call.from_user.id, call.from_user.username): return
     fname = call.data.split(":")[1]
     async with aiosqlite.connect(DB_PATH) as db:
         cur = await db.execute("SELECT is_enabled FROM feature_flags WHERE feature_name = ?", (fname,))
@@ -350,7 +334,7 @@ async def toggle_feat(call: CallbackQuery):
 
 @admin_router.callback_query(F.data == "god_logs")
 async def god_logs(call: CallbackQuery):
-    if call.from_user.id != ADMIN_ID: return
+    if not is_owner(call.from_user.id, call.from_user.username): return
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         logs = await (await db.execute("SELECT * FROM admin_logs ORDER BY id DESC LIMIT 10")).fetchall()
@@ -360,7 +344,7 @@ async def god_logs(call: CallbackQuery):
 
 @admin_router.callback_query(F.data.in_({"god_refund_menu", "god_broadcast"}))
 async def placeholders(call: CallbackQuery):
-    if call.from_user.id != ADMIN_ID: return
+    if not is_owner(call.from_user.id, call.from_user.username): return
     kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="↩️ Назад", callback_data="god_panel")]])
     await call.message.edit_text("⚙️ Раздел готов к работе.", reply_markup=kb, parse_mode="HTML")
     
