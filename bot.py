@@ -51,7 +51,8 @@ class Flow(StatesGroup):
     nft_name = State()
     transfer_target = State()
     transfer_amount = State()
-    crash_bet = State()
+    game_bet = State()
+    market_price = State()
     migrate_number = State()
 
 
@@ -135,7 +136,7 @@ async def main_text(user: dict) -> str:
     return (
         f"💼 <b>{config.BRAND}</b>\n\n"
         f"📞 <b>Номер:</b> <code>{esc(user['phone'])}</code>\n"
-        f"👤 <b>Аккаунт:</b> {esc(user.get('name') or 'User')} · ID <code>{user['tg_id']}</code>{await badges(user)}\n"
+        f"👤 <b>Аккаунт:</b> {esc(user.get('name') or 'User')} · ID <code>{user['rise_id']}</code>{await badges(user)}\n"
         f"⭐ {config.CURRENCY_NAME}: <b>{fmt_num(user['risestars'])}</b> · 💎 Gram: <b>{fmt_num(user['gram_balance'], 2)}</b>\n\n"
         f"Выберите действие ниже или откройте приложение."
     )
@@ -239,7 +240,7 @@ HELP_TEXT = (
     "Всё купленное действует внутри экосистемы RiseGram, а не в официальном Telegram.\n\n"
     "/start — меню\n/shop — донат\n/code — код входа\n"
     f"/doxnumber — номер +1 с бонусом {config.CURRENCY_NAME}\n/migrate — привязать старый номер\n"
-    "/top — топ игроков\n/bonus — ежедневный бонус\n/games — Crash Rocket\n/send — перевод"
+    "/top — топ игроков\n/bonus — ежедневный бонус\n/games — Crash Rocket и Хай-Лоу\n/market — маркет\n/send — перевод"
 )
 
 
@@ -289,7 +290,7 @@ async def cb_more(call: CallbackQuery):
         kb(
             [btn("👤 Профиль", "more:profile"), btn("🗂 Мои NFT и номера", "my:items")],
             [btn("🎮 Игры", "games:hub", style="success"), btn("🏆 Топ", "more:top")],
-            [btn("🎯 Задания", "more:tasks"), btn("🎒 Инвентарь", "more:inv")],
+            [btn("🎯 Задания", "more:tasks"), btn("🛒 Маркет", "market:hub", style="success")],
             [btn("💸 Перевод", "more:send"), btn("🎁 Бонус", "more:bonus")],
             back_row(),
         ),
@@ -300,7 +301,6 @@ async def cb_more(call: CallbackQuery):
 async def cb_profile(call: CallbackQuery, user: dict):
     nft_u = len(await db.list_nft(user["tg_id"], "username"))
     nft_n = len(await db.list_nft(user["tg_id"], "number"))
-    skins = len(await db.list_skins(user["tg_id"]))
     text = (
         "👤 <b>Профиль</b>\n\n"
         f"Имя: {esc(user.get('name'))}\n"
@@ -310,7 +310,7 @@ async def cb_profile(call: CallbackQuery, user: dict):
         f"Номер: <code>{esc(user['phone'])}</code>\n\n"
         f"⭐ {config.CURRENCY_NAME}: <b>{fmt_num(user['risestars'])}</b>\n"
         f"💎 Gram: <b>{fmt_num(user['gram_balance'], 2)}</b>\n\n"
-        f"🏷 NFT-юзернеймов: {nft_u} · 📞 номеров: {nft_n} · 🎒 предметов: {skins}\n"
+        f"🏷 NFT-юзернеймов: {nft_u} · 📞 номеров: {nft_n}\n"
         f"📅 В экосистеме с {esc((user.get('created_at') or '')[:10])}"
     )
     await show(call, text, kb([btn("🗂 Мои NFT и номера", "my:items")], back_row("menu:more")))
@@ -831,7 +831,7 @@ async def cb_nft(call: CallbackQuery, state: FSMContext):
         call,
         "🏷 <b>NFT-юзернеймы</b>\n\nКоллекционный @username на ваш аккаунт.\n\n"
         f"4 буквы — {config.NFT_PRICE_SHORT} ⭐\n5 и больше — {config.NFT_PRICE_LONG} ⭐\n\n"
-        "Отправьте желаемый юзернейм, например <code>@rise</code>.",
+        "Отправьте желаемый юзернейм, например <code>@nova</code>.\n\n🚫 Юзернеймы с «rise» (rise, risegram, risestars и всё, что начинается на rise) купить нельзя.",
         cancel_kb("donat:hub"),
     )
 
@@ -844,6 +844,9 @@ async def msg_nft_name(message: Message, state: FSMContext, user: dict):
             f"❌ Юзернейм: {config.NFT_MIN_LEN}–{config.NFT_MAX_LEN} символов, латиница, цифры и _, "
             "начинается с буквы, без «__» и «_» в конце. Ещё раз:"
         )
+        return
+    if config.is_reserved_username(name):
+        await message.answer("🚫 Этот юзернейм зарезервирован, его купить нельзя. Введите другой:")
         return
     if await db.username_taken(name) or await db.reserved_by_other("username", name, user["tg_id"]):
         await message.answer(f"❌ @{esc(name)} занят или зарезервирован. Попробуйте другой:")
@@ -1067,14 +1070,16 @@ async def items_screen(event, user: dict):
     names = await db.list_nft(user["tg_id"], "username")
     text = "🗂 <b>Мои NFT и номера</b>\n\n"
     rows = []
+    listed = await db.listed_item_ids(user["tg_id"])
     if not nums and not names:
         text += "Пока пусто. Купить можно в разделе «Донат»."
     if names:
         text += "<b>Юзернеймы</b>\n"
         for n in names:
             on = db.norm_username(user.get("active_username")) == n["value"]
-            text += f"{'🟢' if on else '⚪'} @{esc(n['value'])}\n"
-            if not on:
+            lock = " 🛒 на маркете" if n["id"] in listed else ""
+            text += f"{'🟢' if on else '⚪'} @{esc(n['value'])}{lock}\n"
+            if not on and n["id"] not in listed:
                 rows.append([btn(f"Выбрать @{n['value']}", f"my:un:{n['id']}")])
         if user.get("active_username"):
             rows.append([btn("Убрать активный юзернейм", "my:un:0")])
@@ -1083,9 +1088,11 @@ async def items_screen(event, user: dict):
         text += "<b>Номера</b>\n"
         for n in nums:
             on = user.get("phone_digits") == n["value"]
-            text += f"{'🟢' if on else '⚪'} <code>{esc(db.fmt_number(n['value']))}</code>\n"
-            if not on:
+            lock = " 🛒 на маркете" if n["id"] in listed else ""
+            text += f"{'🟢' if on else '⚪'} <code>{esc(db.fmt_number(n['value']))}</code>{lock}\n"
+            if not on and n["id"] not in listed:
                 rows.append([btn(f"Сделать текущим {db.fmt_number(n['value'])}", f"my:ph:{n['id']}")])
+    rows.append([btn("🛒 Маркет", "market:hub")])
     await show(event, text, kb(*rows[:20], back_row("menu:more")))
 
 
@@ -1105,6 +1112,9 @@ async def cb_my_username(call: CallbackQuery, user: dict):
         if not it or it["tg_id"] != user["tg_id"] or it["item_type"] != "username":
             await call.answer("Не найдено.", show_alert=True)
             return
+        if await db.listing_for_item(item_id):
+            await call.answer("Юзернейм выставлен на маркете. Сначала снимите лот.", show_alert=True)
+            return
         await db.set_active_username(user["tg_id"], it["value"])
         user["active_username"] = it["value"]
     await items_screen(call, user)
@@ -1115,6 +1125,9 @@ async def cb_my_phone(call: CallbackQuery, user: dict):
     it = await db.get_nft(int(call.data.split(":")[2]))
     if not it or it["tg_id"] != user["tg_id"] or it["item_type"] != "number":
         await call.answer("Не найдено.", show_alert=True)
+        return
+    if await db.listing_for_item(it["id"]):
+        await call.answer("Номер выставлен на маркете. Сначала снимите лот.", show_alert=True)
         return
     if not await db.set_phone(user["tg_id"], it["value"]):
         await call.answer("Не удалось сменить номер.", show_alert=True)
@@ -1175,7 +1188,7 @@ async def msg_migrate(message: Message, state: FSMContext, user: dict):
         await message.answer("❌ Номер не найден в списке переноса или уже привязан.")
 
 
-# ═══════════════════════════ топ, бонус, инвентарь ══════════════════════════
+# ═══════════════════════════ топ, бонус ══════════════════════════
 
 
 async def top_screen(event):
@@ -1224,19 +1237,6 @@ async def cmd_bonus(message: Message, user: dict):
 @router.callback_query(F.data == "more:bonus")
 async def cb_bonus(call: CallbackQuery, user: dict):
     await bonus_do(call, user)
-
-
-@router.callback_query(F.data == "more:inv")
-async def cb_inv(call: CallbackQuery, user: dict):
-    if not await need_feature(call, "inventory"):
-        return
-    items = await db.list_skins(user["tg_id"], 30)
-    text = "🎒 <b>Инвентарь</b>\n\n"
-    if not items:
-        text += "Пока пусто. Предметы выдаёт администрация за активность."
-    for it in items:
-        text += f"{config.RARITY_EMOJI.get(it['rarity'], '⚪')} {esc(it['item_name'])} «{esc(it['skin'])}»\n"
-    await show(call, text, kb(back_row("menu:more")))
 
 
 # ═══════════════════════════ задания ════════════════════════════════════════
@@ -1361,19 +1361,42 @@ async def msg_transfer_amount(message: Message, state: FSMContext, user: dict):
     await safe_send(message.bot, to, f"💸 {esc(db.shown_username(user))} отправил(а) вам <b>{fmt_num(amount)} {config.CURRENCY_NAME}</b>.")
 
 
-# ═══════════════════════════ Crash Rocket (на Gram 💎, не за Stars) ═════════
-# Игра идёт только на внутренней валюте Gram: её нельзя купить за Stars и нельзя вывести.
-# Точка краша честная: P(crash >= x) = (1 - edge) / x, ожидаемый возврат = 96%.
+# ═══════════════════════════ Игры: Crash Rocket и Хай-Лоу ═══════════════════
+# Ставки: 💎 Gram или ⭐ RiseStars. Это внутренние валюты экосистемы, вывода денег нет.
+# Шансы честные и открытые: возврат игроку ≈ 96% (house edge задаётся в config.py).
+
+CUR = {"gram": ("💎", "Gram", "gram_balance"), "stars": ("⭐", "RiseStars", "risestars")}
+GAME_TITLES = {"crash": "🚀 Crash Rocket", "hl": "🃏 Хай-Лоу"}
 
 crash_tasks: dict[int, asyncio.Task] = {}
 crash_live: dict[int, dict] = {}
+hl_tasks: dict[int, asyncio.Task] = {}
+hl_live: dict[int, dict] = {}
+starting: set[int] = set()
 
 
-def crash_point() -> float:
-    r = secrets.randbelow(10**9) / 10**9
-    if r < config.CRASH_HOUSE_EDGE:
-        return 1.0
-    return min(config.CRASH_MAX_MULTIPLIER, math.floor((1 - config.CRASH_HOUSE_EDGE) / (1 - r) * 100) / 100)
+def cur_sym(c: str) -> str:
+    return CUR.get(c, CUR["gram"])[0]
+
+
+def cur_name(c: str) -> str:
+    return CUR.get(c, CUR["gram"])[1]
+
+
+def cur_col(c: str) -> str:
+    return CUR.get(c, CUR["gram"])[2]
+
+
+def money(c: str, x: float) -> str:
+    return f"{fmt_num(x)} {cur_sym(c)}"
+
+
+def bet_limits(c: str) -> tuple[float, float]:
+    return config.GAME_LIMITS.get(c, config.GAME_LIMITS["gram"])
+
+
+def in_game(uid: int) -> bool:
+    return uid in crash_live or uid in hl_live or uid in starting
 
 
 async def games_hub(event, user: dict):
@@ -1382,16 +1405,27 @@ async def games_hub(event, user: dict):
     st = await db.game_stats(user["tg_id"])
     text = (
         "🎮 <b>Игровой зал</b>\n\n"
-        "🚀 <b>Crash Rocket</b> — ставка в 💎 Gram, заберите выигрыш до краха ракеты.\n"
-        "Играют на Gram: его нельзя купить за ⭐ и вывести, это просто игра.\n\n"
-        f"Баланс: <b>{fmt_num(user['gram_balance'], 2)} 💎</b>\n"
+        "🚀 <b>Crash Rocket</b> — заберите выигрыш до того, как ракета упадёт.\n"
+        "🃏 <b>Хай-Лоу</b> — угадывайте, будет ли следующая карта выше или ниже.\n\n"
+        "Ставки: 💎 Gram или ⭐ RiseStars. Это внутриигровые валюты, вывода нет. "
+        f"Шансы честные, возврат игроку ≈ {round((1 - config.CRASH_HOUSE_EDGE) * 100)}%.\n\n"
+        f"💎 <b>{fmt_num(user['gram_balance'])}</b> · ⭐ <b>{fmt_num(user['risestars'])}</b>\n"
         f"Сыграно: {st['played']} · побед: {st['wins']}"
     )
-    await show(event, text, kb([btn("🚀 Играть", "crash:new", style="success")], [btn("🎁 Получить Gram (бонус)", "more:bonus")], back_row("menu:more")))
+    await show(
+        event,
+        text,
+        kb(
+            [btn("🚀 Crash Rocket", "game:pick:crash", style="success"), btn("🃏 Хай-Лоу", "game:pick:hl", style="primary")],
+            [btn("🎁 Ежедневный бонус", "more:bonus")],
+            back_row("menu:more"),
+        ),
+    )
 
 
 @router.message(Command("games"))
-async def cmd_games(message: Message, user: dict):
+async def cmd_games(message: Message, state: FSMContext, user: dict):
+    await state.clear()
     await games_hub(message, user)
 
 
@@ -1400,56 +1434,114 @@ async def cb_games(call: CallbackQuery, user: dict):
     await games_hub(call, user)
 
 
-@router.callback_query(F.data == "crash:new")
-async def cb_crash_new(call: CallbackQuery, user: dict, state: FSMContext):
+@router.callback_query(F.data.startswith("game:pick:"))
+async def cb_game_pick(call: CallbackQuery, user: dict):
     if not await need_feature(call, "games"):
         return
-    if user["tg_id"] in crash_live:
+    game = call.data.split(":")[2]
+    if game not in GAME_TITLES:
+        return
+    if in_game(user["tg_id"]):
         await call.answer("У вас уже идёт игра.", show_alert=True)
         return
-    await state.set_state(Flow.crash_bet)
     await show(
         call,
-        f"🚀 <b>Crash Rocket</b>\n\nВведите ставку в 💎 (от {fmt_num(config.CRASH_MIN_BET)} до {fmt_num(config.CRASH_MAX_BET)}).\n"
-        f"Баланс: <b>{fmt_num(user['gram_balance'], 2)} 💎</b>",
+        f"{GAME_TITLES[game]}\n\nВыберите валюту ставки:\n"
+        f"💎 Gram: <b>{fmt_num(user['gram_balance'])}</b>\n⭐ RiseStars: <b>{fmt_num(user['risestars'])}</b>",
+        kb(
+            [btn("💎 Gram", f"game:bet:{game}:gram", style="primary"), btn("⭐ RiseStars", f"game:bet:{game}:stars", style="success")],
+            back_row("games:hub"),
+        ),
+    )
+
+
+@router.callback_query(F.data.startswith("game:bet:"))
+async def cb_game_bet(call: CallbackQuery, user: dict, state: FSMContext):
+    if not await need_feature(call, "games"):
+        return
+    parts = call.data.split(":")
+    game, cur = parts[2], parts[3]
+    if game not in GAME_TITLES or cur not in CUR:
+        return
+    if in_game(user["tg_id"]):
+        await call.answer("У вас уже идёт игра.", show_alert=True)
+        return
+    lo, hi = bet_limits(cur)
+    await state.set_state(Flow.game_bet)
+    await state.update_data(game=game, cur=cur)
+    await show(
+        call,
+        f"{GAME_TITLES[game]} · {cur_sym(cur)} {cur_name(cur)}\n\n"
+        f"Введите ставку от {fmt_num(lo)} до {fmt_num(hi)} {cur_sym(cur)}.\n"
+        f"Баланс: <b>{money(cur, user[cur_col(cur)])}</b>",
         cancel_kb("games:hub"),
     )
 
 
-def crash_kb(gid: int, win: float | None = None):
-    label = f"💰 Забрать {fmt_num(win, 2)} 💎" if win is not None else "💰 Забрать"
-    return kb([btn(label, f"crash:cash:{gid}", style="success")])
-
-
-@router.message(StateFilter(Flow.crash_bet), F.text)
-async def msg_crash_bet(message: Message, state: FSMContext, user: dict):
+@router.message(StateFilter(Flow.game_bet), F.text)
+async def msg_game_bet(message: Message, state: FSMContext, user: dict):
     if not await need_feature(message, "games"):
+        return
+    data = await state.get_data()
+    game, cur = data.get("game"), data.get("cur")
+    if game not in GAME_TITLES or cur not in CUR:
+        await state.clear()
+        await message.answer("Сессия устарела. Откройте /games заново.")
         return
     try:
         bet = round(float(message.text.replace(" ", "").replace(",", ".")), 2)
     except ValueError:
         await message.answer("Введите число.")
         return
-    if not math.isfinite(bet) or not config.CRASH_MIN_BET <= bet <= config.CRASH_MAX_BET:
-        await message.answer(f"Ставка от {fmt_num(config.CRASH_MIN_BET)} до {fmt_num(config.CRASH_MAX_BET)}.")
+    lo, hi = bet_limits(cur)
+    if not math.isfinite(bet) or not lo <= bet <= hi:
+        await message.answer(f"Ставка от {fmt_num(lo)} до {fmt_num(hi)} {cur_sym(cur)}.")
         return
     uid = user["tg_id"]
-    if uid in crash_live:
+    if in_game(uid):
         await message.answer("У вас уже идёт игра.")
         return
-    cp = crash_point()
-    gid = await db.start_game(uid, "crash", bet, cp)
-    if gid is None:
-        await message.answer("❌ Недостаточно 💎 Gram.")
-        return
     await state.clear()
-    msg = await message.answer(f"🚀 Ракета взлетает… ×1.00\nСтавка: {fmt_num(bet, 2)} 💎", reply_markup=crash_kb(gid, bet))
-    crash_live[uid] = {"gid": gid, "bet": bet, "cp": cp, "t0": time.monotonic(), "msg": msg, "done": False}
-    crash_tasks[uid] = asyncio.create_task(run_crash(message.bot, uid))
+    starting.add(uid)
+    try:
+        if game == "crash":
+            await start_crash(message, uid, bet, cur)
+        else:
+            await start_hl(message, uid, bet, cur)
+    finally:
+        starting.discard(uid)
+
+
+# ─── Crash Rocket ───────────────────────────────────────────────────────────
+
+
+def crash_point() -> float:
+    """P(crash >= x) = (1 - edge) / x, ожидаемый возврат при любой цели = 1 - edge."""
+    r = secrets.randbelow(10**9) / 10**9
+    if r < config.CRASH_HOUSE_EDGE:
+        return 1.0
+    return min(config.CRASH_MAX_MULTIPLIER, math.floor((1 - config.CRASH_HOUSE_EDGE) / (1 - r) * 100) / 100)
 
 
 def mult_at(t: float) -> float:
     return min(config.CRASH_MAX_MULTIPLIER, math.floor(math.exp(min(config.CRASH_GROWTH_PER_SECOND * t, 20.0)) * 100) / 100)
+
+
+def crash_kb(gid: int, win: float, cur: str):
+    return kb([btn(f"💰 Забрать {money(cur, win)}", f"crash:cash:{gid}", style="success")])
+
+
+async def start_crash(message: Message, uid: int, bet: float, cur: str):
+    cp = crash_point()
+    gid = await db.start_game(uid, "crash", bet, cp, cur)
+    if gid is None:
+        await message.answer(f"❌ Недостаточно {cur_name(cur)}.")
+        return
+    msg = await message.answer(
+        f"🚀 Ракета взлетает… ×1.00\nСтавка: {money(cur, bet)}", reply_markup=crash_kb(gid, bet, cur)
+    )
+    crash_live[uid] = {"gid": gid, "bet": bet, "cur": cur, "cp": cp, "t0": time.monotonic(), "msg": msg, "done": False}
+    crash_tasks[uid] = asyncio.create_task(run_crash(message.bot, uid))
 
 
 async def finish_crash(uid: int, won: bool, mult: float):
@@ -1457,21 +1549,23 @@ async def finish_crash(uid: int, won: bool, mult: float):
     if not g or g["done"]:
         return
     g["done"] = True
+    cur = g["cur"]
     payout = round(g["bet"] * mult, 2) if won else 0.0
     ok = await db.settle_game(g["gid"], won, payout)
     crash_live.pop(uid, None)
     if not ok:
         return
     user = await db.get_user(uid)
-    bal = fmt_num(user["gram_balance"], 2) if user else "—"
+    bal = money(cur, user[cur_col(cur)]) if user else "—"
     if won:
-        text = f"✅ Забрали на ×{mult:.2f}! Выигрыш <b>{fmt_num(payout, 2)} 💎</b>\nБаланс: {bal} 💎"
+        text = f"✅ Забрали на ×{mult:.2f}! Выигрыш <b>{money(cur, payout)}</b>\nБаланс: {bal}"
     else:
-        text = f"💥 Ракета упала на ×{g['cp']:.2f}. Ставка {fmt_num(g['bet'], 2)} 💎 потеряна.\nБаланс: {bal} 💎"
+        text = f"💥 Ракета упала на ×{g['cp']:.2f}. Ставка {money(cur, g['bet'])} потеряна.\nБаланс: {bal}"
+    markup = kb([btn("🚀 Ещё раз", "game:pick:crash", style="success")], [btn("🎮 Игры", "games:hub")])
     try:
-        await g["msg"].edit_text(text, reply_markup=kb([btn("🚀 Ещё раз", "crash:new", style="success")], [btn("🏠 Меню", "menu:main")]))
+        await g["msg"].edit_text(text, reply_markup=markup)
     except TelegramBadRequest:
-        await g["msg"].answer(text)
+        await g["msg"].answer(text, reply_markup=markup)
 
 
 async def run_crash(bot: Bot, uid: int):
@@ -1482,15 +1576,14 @@ async def run_crash(bot: Bot, uid: int):
             g = crash_live.get(uid)
             if not g or g["done"]:
                 return
-            t = time.monotonic() - g["t0"]
-            m = mult_at(t)
+            m = mult_at(time.monotonic() - g["t0"])
             if m >= g["cp"]:
                 await finish_crash(uid, False, g["cp"])
                 return
             try:
                 await g["msg"].edit_text(
-                    f"🚀 Ракета летит… <b>×{m:.2f}</b>\nСтавка: {fmt_num(g['bet'], 2)} 💎",
-                    reply_markup=crash_kb(g["gid"], g["bet"] * m),
+                    f"🚀 Ракета летит… <b>×{m:.2f}</b>\nСтавка: {money(g['cur'], g['bet'])}",
+                    reply_markup=crash_kb(g["gid"], g["bet"] * m, g["cur"]),
                 )
             except TelegramRetryAfter as e:
                 await asyncio.sleep(e.retry_after)
@@ -1503,7 +1596,7 @@ async def run_crash(bot: Bot, uid: int):
         g = crash_live.pop(uid, None)
         if g and not g["done"]:
             await db.execute("UPDATE games SET status='refunded', finished_at=? WHERE id=? AND status='active'", (db.now(), g["gid"]))
-            await db.add_balance(uid, "gram_balance", g["bet"])
+            await db.add_balance(uid, cur_col(g["cur"]), g["bet"])
     finally:
         crash_tasks.pop(uid, None)
 
@@ -1520,6 +1613,409 @@ async def cb_crash_cash(call: CallbackQuery):
         await finish_crash(uid, False, g["cp"])
         return
     await finish_crash(uid, True, m)
+
+
+# ─── Хай-Лоу ────────────────────────────────────────────────────────────────
+# Карта 1..13 (A..K) тянется равновероятно. Угадал «выше/ниже» — множитель растёт на (1 - edge) / шанс.
+# Одинаковая карта = проигрыш (она входит в расчёт шанса). Можно забрать выигрыш на любом шаге.
+
+RANKS = ["A", "2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K"]
+SUITS = ["♠", "♥", "♦", "♣"]
+
+
+def card_str(rank: int, suit: str) -> str:
+    return f"{RANKS[rank - 1]}{suit}"
+
+
+def hl_p(rank: int, direction: str) -> float:
+    return (13 - rank) / 13 if direction == "hi" else (rank - 1) / 13
+
+
+def hl_next_mult(mult: float, p: float) -> float:
+    return min(config.HL_MAX_MULTIPLIER, math.floor(mult * (1 - config.HL_HOUSE_EDGE) / p * 100) / 100)
+
+
+def hl_cash_value(g: dict) -> float:
+    return round(g["bet"] * g["mult"], 2)
+
+
+def hl_text(g: dict) -> str:
+    return (
+        "🃏 <b>Хай-Лоу</b>\n\n"
+        f"Карта: <b>{card_str(g['rank'], g['suit'])}</b>\n"
+        f"Угадано подряд: {g['steps']} · множитель <b>×{g['mult']:.2f}</b>\n"
+        f"Ставка: {money(g['cur'], g['bet'])} · забрать сейчас: <b>{money(g['cur'], hl_cash_value(g))}</b>\n\n"
+        f"{esc(' → '.join(g['history'][-8:]))}\n\n"
+        "<i>Такая же карта — проигрыш. Угадали — рискуйте дальше или заберите.</i>"
+    )
+
+
+def hl_kb(g: dict):
+    row = []
+    for d, label, style in (("hi", "⬆️ Выше", "success"), ("lo", "⬇️ Ниже", "primary")):
+        p = hl_p(g["rank"], d)
+        if p > 0:
+            row.append(btn(f"{label} ×{hl_next_mult(g['mult'], p):.2f}", f"hl:go:{g['gid']}:{d}", style=style))
+    cash = "💰 Забрать ставку" if g["steps"] == 0 else f"💰 Забрать {money(g['cur'], hl_cash_value(g))}"
+    return kb(row, [btn(cash, f"hl:cash:{g['gid']}")])
+
+
+async def start_hl(message: Message, uid: int, bet: float, cur: str):
+    gid = await db.start_game(uid, "highlow", bet, 0.0, cur)
+    if gid is None:
+        await message.answer(f"❌ Недостаточно {cur_name(cur)}.")
+        return
+    g = {
+        "gid": gid, "bet": bet, "cur": cur, "rank": secrets.randbelow(13) + 1, "suit": random.choice(SUITS),
+        "mult": 1.0, "steps": 0, "done": False, "busy": False, "last": time.monotonic(),
+    }
+    g["history"] = [card_str(g["rank"], g["suit"])]
+    hl_live[uid] = g
+    hl_tasks[uid] = asyncio.create_task(hl_watchdog(uid, gid))
+    g["msg"] = await message.answer(hl_text(g), reply_markup=hl_kb(g))
+
+
+async def finish_hl(uid: int, won: bool, note: str = ""):
+    g = hl_live.get(uid)
+    if not g or g["done"]:
+        return
+    g["done"] = True
+    cur = g["cur"]
+    if won and g["steps"] == 0:
+        ok = await db.settle_game(g["gid"], True, g["bet"], status="refunded")
+        text = f"↩️ Ставка возвращена: {money(cur, g['bet'])}."
+    elif won:
+        payout = hl_cash_value(g)
+        ok = await db.settle_game(g["gid"], True, payout)
+        text = f"✅ Забрали на ×{g['mult']:.2f}! Выигрыш <b>{money(cur, payout)}</b>" + (f" ({esc(note)})" if note else "")
+    else:
+        ok = await db.settle_game(g["gid"], False, 0.0)
+        text = f"💥 Выпала {card_str(g['rank'], g['suit'])}: не угадали. Ставка {money(cur, g['bet'])} потеряна."
+    hl_live.pop(uid, None)
+    t = hl_tasks.pop(uid, None)
+    if t and t is not asyncio.current_task():
+        t.cancel()
+    if not ok:
+        return
+    user = await db.get_user(uid)
+    text += f"\nБаланс: {money(cur, user[cur_col(cur)]) if user else '—'}"
+    markup = kb([btn("🃏 Ещё раз", "game:pick:hl", style="success")], [btn("🎮 Игры", "games:hub")])
+    try:
+        await g["msg"].edit_text(text, reply_markup=markup)
+    except TelegramBadRequest:
+        await g["msg"].answer(text, reply_markup=markup)
+
+
+async def hl_watchdog(uid: int, gid: int):
+    """Забытая игра закрывается сама: выплата по текущему множителю (или возврат ставки, если шагов не было)."""
+    try:
+        while True:
+            await asyncio.sleep(30)
+            g = hl_live.get(uid)
+            if not g or g["gid"] != gid or g["done"]:
+                return
+            if time.monotonic() - g["last"] > config.HL_IDLE_SECONDS:
+                await finish_hl(uid, True, note="игра простаивала, выигрыш забран автоматически")
+                return
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        log.exception("hl watchdog failed uid=%s", uid)
+
+
+@router.callback_query(F.data.startswith("hl:go:"))
+async def cb_hl_go(call: CallbackQuery):
+    uid = call.from_user.id
+    parts = call.data.split(":")
+    g = hl_live.get(uid)
+    if not g or g["done"] or g["gid"] != int(parts[2]) or parts[3] not in ("hi", "lo"):
+        await call.answer("Игра уже закончилась.")
+        return
+    d = parts[3]
+    p = hl_p(g["rank"], d)
+    if g["busy"] or p <= 0:
+        return
+    g["busy"] = True
+    try:
+        old = g["rank"]
+        g["rank"], g["suit"] = secrets.randbelow(13) + 1, random.choice(SUITS)
+        g["last"] = time.monotonic()
+        g["history"].append(card_str(g["rank"], g["suit"]))
+        if not (g["rank"] > old if d == "hi" else g["rank"] < old):
+            await finish_hl(uid, False)
+            return
+        g["mult"] = hl_next_mult(g["mult"], p)
+        g["steps"] += 1
+        if g["mult"] >= config.HL_MAX_MULTIPLIER:
+            await finish_hl(uid, True, note="достигнут максимальный множитель")
+            return
+        try:
+            await g["msg"].edit_text(hl_text(g), reply_markup=hl_kb(g))
+        except TelegramBadRequest:
+            pass
+    finally:
+        g["busy"] = False
+
+
+@router.callback_query(F.data.startswith("hl:cash:"))
+async def cb_hl_cash(call: CallbackQuery):
+    uid = call.from_user.id
+    g = hl_live.get(uid)
+    if not g or g["done"] or g["gid"] != int(call.data.split(":")[2]):
+        await call.answer("Игра уже закончилась.")
+        return
+    if g["busy"]:
+        return
+    g["busy"] = True
+    await finish_hl(uid, True)
+
+
+# ═══════════════════════════ Маркет (за RiseStars) ══════════════════════════
+# Игроки продают друг другу NFT-юзернеймы и анонимные номера +888. Цены в RiseStars,
+# комиссия берётся с продавца. Покупка — одна транзакция в базе (деньги, предмет, лот).
+
+
+def item_label(item_type: str, value: str) -> str:
+    return f"@{value}" if item_type == "username" else db.fmt_number(value)
+
+
+def item_kind(item_type: str) -> str:
+    return "NFT-юзернейм" if item_type == "username" else "Анонимный номер +888"
+
+
+def seller_label(L: dict) -> str:
+    name = L.get("seller_active") or L.get("seller_username")
+    tag = "@" + db.norm_username(name) if name else f"id{L['seller_id']}"
+    return tag + (" ✅" if L.get("seller_verified") else "")
+
+
+def rs_text(x: float) -> str:
+    return f"{fmt_num(x)} RiseStars"
+
+
+async def market_hub(event, user: dict):
+    if not await need_feature(event, "market"):
+        return
+    n_names = await db.market_count("username")
+    n_nums = await db.market_count("number")
+    mine = len(await db.my_listings(user["tg_id"]))
+    text = (
+        "🛒 <b>Маркет</b>\n\n"
+        "Игроки продают друг другу NFT-юзернеймы и анонимные номера +888 за RiseStars.\n"
+        f"Комиссия {fmt_num(config.MARKET_FEE_PERCENT)}% удерживается с продавца.\n\n"
+        f"Ваш баланс: <b>{rs_text(user['risestars'])}</b>"
+    )
+    await show(
+        event,
+        text,
+        kb(
+            [btn(f"🏷 Юзернеймы ({n_names})", "market:list:username:0", style="primary"), btn(f"📞 Номера ({n_nums})", "market:list:number:0", style="primary")],
+            [btn("➕ Выставить", "market:sell", style="success"), btn(f"📦 Мои лоты ({mine})", "market:mine")],
+            back_row("menu:more"),
+        ),
+    )
+
+
+@router.message(Command("market"))
+async def cmd_market(message: Message, state: FSMContext, user: dict):
+    await state.clear()
+    await market_hub(message, user)
+
+
+@router.callback_query(F.data == "market:hub")
+async def cb_market_hub(call: CallbackQuery, user: dict):
+    await market_hub(call, user)
+
+
+@router.callback_query(F.data.startswith("market:list:"))
+async def cb_market_list(call: CallbackQuery, user: dict):
+    if not await need_feature(call, "market"):
+        return
+    parts = call.data.split(":")
+    typ = parts[2]
+    page = int(parts[3]) if len(parts) > 3 and parts[3].isdigit() else 0
+    if typ not in ("username", "number"):
+        return
+    per = config.MARKET_PAGE
+    total = await db.market_count(typ)
+    rows_db = await db.market_page(typ, per, page * per)
+    title = "🏷 Юзернеймы" if typ == "username" else "📞 Номера +888"
+    text = f"🛒 <b>{title}</b> ({total}) · сначала дешёвые\n\n"
+    rows = []
+    for L in rows_db:
+        text += f"• {esc(item_label(L['item_type'], L['value']))} — {rs_text(L['price'])} · {esc(seller_label(L))}\n"
+        rows.append([btn(f"{item_label(L['item_type'], L['value'])} · {fmt_num(L['price'])} RS", f"market:item:{L['id']}")])
+    if not rows_db:
+        text += "Пока никто ничего не продаёт."
+    nav = []
+    if page > 0:
+        nav.append(btn("◀️", f"market:list:{typ}:{page - 1}"))
+    if (page + 1) * per < total:
+        nav.append(btn("▶️", f"market:list:{typ}:{page + 1}"))
+    text += "\n<i>RS = RiseStars</i>"
+    await show(call, text, kb(*rows, nav, back_row("market:hub")))
+
+
+@router.callback_query(F.data.regexp(r"^market:item:\d+$"))
+async def cb_market_item(call: CallbackQuery, user: dict):
+    L = await db.get_listing(int(call.data.split(":")[2]))
+    if not L or L["status"] != "active":
+        await call.answer("Лот уже продан или снят.", show_alert=True)
+        await market_hub(call, user)
+        return
+    text = (
+        f"🛒 <b>{esc(item_label(L['item_type'], L['value']))}</b>\n\n"
+        f"Тип: {item_kind(L['item_type'])}\nПродавец: {esc(seller_label(L))}\n"
+        f"Цена: <b>{rs_text(L['price'])}</b>\n\nВаш баланс: {rs_text(user['risestars'])}"
+    )
+    if L["seller_id"] == user["tg_id"]:
+        rows = [[btn("🗑 Снять с продажи", f"market:cancel:{L['id']}", style="danger")]]
+    else:
+        rows = [[btn(f"✅ Купить · {fmt_num(L['price'])} RS", f"market:buy:{L['id']}", style="success")]]
+    await show(call, text, kb(*rows, back_row(f"market:list:{L['item_type']}:0")))
+
+
+@router.callback_query(F.data.regexp(r"^market:buy:\d+$"))
+async def cb_market_buy(call: CallbackQuery, user: dict):
+    if not await need_feature(call, "market"):
+        return
+    L = await db.get_listing(int(call.data.split(":")[2]))
+    if not L or L["status"] != "active":
+        await call.answer("Лот уже продан или снят.", show_alert=True)
+        await market_hub(call, user)
+        return
+    if L["seller_id"] == user["tg_id"]:
+        await call.answer("Это ваш лот.", show_alert=True)
+        return
+    if user["risestars"] < L["price"]:
+        await call.answer(f"Не хватает RiseStars: нужно {fmt_num(L['price'])}.", show_alert=True)
+        return
+    await show(
+        call,
+        f"Купить <b>{esc(item_label(L['item_type'], L['value']))}</b> за <b>{rs_text(L['price'])}</b>?\n"
+        "Предмет сразу попадёт в «Мои NFT и номера».",
+        kb([btn("✅ Да, купить", f"market:buyok:{L['id']}", style="success")], [btn("✖️ Нет", f"market:item:{L['id']}")]),
+    )
+
+
+@router.callback_query(F.data.regexp(r"^market:buyok:\d+$"))
+async def cb_market_buyok(call: CallbackQuery, user: dict):
+    if not await need_feature(call, "market"):
+        return
+    ok, msg, info = await db.buy_listing(user["tg_id"], int(call.data.split(":")[2]))
+    if not ok:
+        await call.answer(msg, show_alert=True)
+        await market_hub(call, user)
+        return
+    label = item_label(info["item_type"], info["value"])
+    await show(
+        call,
+        f"✅ Покупка завершена: <b>{esc(label)}</b> за {rs_text(info['price'])}.\nОткройте «Мои NFT и номера», чтобы выбрать его активным.",
+        kb([btn("🗂 Мои NFT и номера", "my:items", style="success")], back_row("market:hub")),
+    )
+    await safe_send(
+        call.bot,
+        info["seller_id"],
+        f"💰 Ваш лот <b>{esc(label)}</b> куплен за {rs_text(info['price'])}.\n"
+        f"Комиссия {rs_text(info['fee'])}, вам зачислено <b>{rs_text(info['payout'])}</b>.",
+    )
+
+
+async def sellable_items(user: dict) -> list[dict]:
+    uid = user["tg_id"]
+    listed = await db.listed_item_ids(uid)
+    active_un = db.norm_username(user.get("active_username"))
+    out = []
+    for it in await db.list_nft(uid):
+        if it["id"] in listed:
+            continue
+        if it["item_type"] == "username" and it["value"] != active_un:
+            out.append(it)
+        elif it["item_type"] == "number" and it["value"].startswith("888") and it["value"] != user.get("phone_digits"):
+            out.append(it)
+    return out
+
+
+@router.callback_query(F.data == "market:sell")
+async def cb_market_sell(call: CallbackQuery, user: dict):
+    if not await need_feature(call, "market"):
+        return
+    items = await sellable_items(user)
+    if not items:
+        text = (
+            "➕ <b>Выставить на продажу</b>\n\nНечего продавать. На маркете можно продать NFT-юзернеймы и номера +888, "
+            "кроме активного юзернейма и текущего номера: сначала переключитесь на другой в «Мои NFT и номера»."
+        )
+        await show(call, text, kb([btn("🗂 Мои NFT и номера", "my:items")], back_row("market:hub")))
+        return
+    rows = [[btn(f"{item_label(i['item_type'], i['value'])}", f"market:pick:{i['id']}")] for i in items[:15]]
+    await show(call, "➕ <b>Выставить на продажу</b>\n\nВыберите предмет:", kb(*rows, back_row("market:hub")))
+
+
+@router.callback_query(F.data.regexp(r"^market:pick:\d+$"))
+async def cb_market_pick(call: CallbackQuery, user: dict, state: FSMContext):
+    it = await db.get_nft(int(call.data.split(":")[2]))
+    if not it or it["tg_id"] != user["tg_id"]:
+        await call.answer("Предмет не найден.", show_alert=True)
+        return
+    await state.set_state(Flow.market_price)
+    await state.update_data(item_id=it["id"])
+    await show(
+        call,
+        f"💰 <b>{esc(item_label(it['item_type'], it['value']))}</b>\n\nВведите цену в RiseStars "
+        f"(от {fmt_num(config.MARKET_MIN_PRICE)}). Комиссия маркета {fmt_num(config.MARKET_FEE_PERCENT)}%, "
+        f"вы получите {fmt_num(100 - config.MARKET_FEE_PERCENT)}% от цены.",
+        cancel_kb("market:sell"),
+    )
+
+
+@router.message(StateFilter(Flow.market_price), F.text)
+async def msg_market_price(message: Message, state: FSMContext, user: dict):
+    try:
+        price = round(float(message.text.replace(" ", "").replace(",", ".")), 2)
+    except ValueError:
+        await message.answer("Введите число.")
+        return
+    if not math.isfinite(price):
+        await message.answer("Введите число.")
+        return
+    data = await state.get_data()
+    await state.clear()
+    ok, msg, lid = await db.create_listing(user["tg_id"], int(data.get("item_id") or 0), price)
+    if not ok:
+        await message.answer("❌ " + msg, reply_markup=kb(back_row("market:hub")))
+        return
+    L = await db.get_listing(lid)
+    await message.answer(
+        f"✅ <b>{esc(item_label(L['item_type'], L['value']))}</b> выставлен за {rs_text(L['price'])}.",
+        reply_markup=kb([btn("📦 Мои лоты", "market:mine")], back_row("market:hub")),
+    )
+
+
+@router.callback_query(F.data == "market:mine")
+async def cb_market_mine(call: CallbackQuery, user: dict):
+    active = await db.my_listings(user["tg_id"])
+    sold = await db.my_listings(user["tg_id"], "sold", 5)
+    text = "📦 <b>Мои лоты</b>\n\n"
+    rows = []
+    for L in active:
+        text += f"• {esc(item_label(L['item_type'], L['value']))} — {rs_text(L['price'])}\n"
+        rows.append([btn(f"🗑 Снять {item_label(L['item_type'], L['value'])}"[:60], f"market:cancel:{L['id']}", style="danger")])
+    if not active:
+        text += "Активных лотов нет.\n"
+    if sold:
+        text += "\n<b>Недавно продано</b>\n" + "\n".join(
+            f"✅ {esc(item_label(L['item_type'], L['value']))} — {rs_text(L['price'])}" for L in sold
+        )
+    await show(call, text, kb(*rows[:15], back_row("market:hub")))
+
+
+@router.callback_query(F.data.regexp(r"^market:cancel:\d+$"))
+async def cb_market_cancel(call: CallbackQuery, user: dict):
+    L = await db.cancel_listing(user["tg_id"], int(call.data.split(":")[2]))
+    await call.answer("Лот снят с продажи." if L else "Лот уже продан или снят.")
+    await cb_market_mine(call, user)
+
 
 
 # ═══════════════════════════ запуск ═════════════════════════════════════════
@@ -1561,7 +2057,7 @@ async def main():
     finally:
         if runner:
             await runner.cleanup()
-        for t in list(crash_tasks.values()):
+        for t in list(crash_tasks.values()) + list(hl_tasks.values()):
             t.cancel()
         await bot.session.close()
 

@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import math
+import re
 
 from aiogram import Bot, F, Router
 from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError, TelegramRetryAfter
@@ -23,8 +24,6 @@ from ui import btn, esc, fmt_num, kb, safe_send, show
 log = logging.getLogger("risegram.admin")
 
 PAGE = 8
-GOD_RISESTARS = 999_999_999
-GOD_GRAM = 999_999.99
 
 
 class OwnerOnly(Filter):
@@ -69,17 +68,6 @@ async def audit(text: str):
     await db.log_admin_action(config.OWNER_ID, text)
 
 
-async def ensure_owner_init(user: dict):
-    """Первый вход: бесконечные балансы и верификация. Потом баланс не трогаем."""
-    if await db.get_meta("owner_init") == "1":
-        return
-    await db.set_balance(user["tg_id"], "risestars", GOD_RISESTARS)
-    await db.set_balance(user["tg_id"], "gram_balance", GOD_GRAM)
-    await db.set_verified(user["tg_id"], True)
-    await db.set_meta("owner_init", "1")
-    await audit("Первый вход в GOD MODE: выданы балансы владельцу")
-
-
 def user_line(u: dict) -> str:
     flags = ("🚫" if u.get("banned") else "") + ("✅" if u.get("verified") else "")
     return f"{esc(db.shown_username(u))} · <code>{u['tg_id']}</code> {flags}".strip()
@@ -93,12 +81,13 @@ async def parse_target(text: str) -> dict | None:
 
 
 async def home_screen(event, user: dict):
-    await ensure_owner_init(user)
+    await db.ensure_owner()
     me = await db.get_user(user["tg_id"])
     maint = await db.get_meta("maintenance") == "1"
     pending = await db.scalar("SELECT COUNT(*) FROM scam_requests WHERE status='pending'")
     text = (
         f"💎 <b>{config.BRAND} Ecosystem — GOD MODE</b>\n\n"
+        f"{config.BRAND} ID: <b>{me['rise_id']}</b>\n"
         f"⭐ {config.CURRENCY_NAME}: <b>{fmt_num(me['risestars'])}</b>\n"
         f"💎 Gram: <b>{fmt_num(me['gram_balance'], 2)}</b>\n"
         f"☑️ Статус: <b>Официальный владелец</b>\n"
@@ -107,9 +96,9 @@ async def home_screen(event, user: dict):
     scam_label = f"⚠️ SCAM-заявки ({pending})" if pending else "⚠️ SCAM-заявки"
     markup = kb(
         [btn("📊 Аналитика", "adm:stats", style="primary"), btn("👥 Юзеры", "adm:users:0", style="primary")],
-        [btn("💰 Выдача валюты", "adm:grant", style="success"), btn("🎒 Инвентарь и скины", "adm:inv", style="success")],
+        [btn("💰 Выдача валюты", "adm:grant", style="success"), btn("🏷 Выдать юзернеймы", "adm:inv", style="success")],
         [btn("⚡ Тумблеры функций", "adm:feat", style="success"), btn("🔨 Банхаммер", "adm:ban", style="danger")],
-        [btn("🎯 Задания", "adm:tasks"), btn(scam_label, "adm:scam:0", style="danger" if pending else None)],
+        [btn("🎯 Задания", "adm:tasks"), btn("🛒 Маркет", "adm:mkt:0"), btn(scam_label, "adm:scam:0", style="danger" if pending else None)],
         [btn("🧾 Покупки", "adm:buys:0"), btn("📣 Рассылка", "adm:cast")],
         [btn("🧪 Тестеры", "adm:testers"), btn("📞 Перенос номеров", "adm:legacy")],
         [btn("📜 Системные логи", "adm:logs:0"), btn(("🟢 Техработы: выключить" if maint else "🛠 Техработы: включить"), "adm:maint")],
@@ -139,6 +128,7 @@ async def screen_stats(call: CallbackQuery):
         f"💎 Эмиссия Gram: {fmt_num(s['gram_emission'], 2)}\n\n"
         f"🏷 NFT-юзернеймов: {s['nft_usernames']} · 📞 номеров продано: {s['numbers_sold']}\n"
         f"⚠️ SCAM на проверке: {s['scam_pending']}\n"
+        f"🛒 Маркет: активных {s['market_active']} · продано {s['market_sold']} на {fmt_num(s['market_volume'])} RiseStars\n"
         f"🎮 Игр сыграно: {s['games_total']} (активных {s['games_active']}) · 🎯 заданий: {s['tasks']}"
     )
     await show(call, text, kb([btn("🔄 Обновить", "adm:stats")], home_row()))
@@ -163,7 +153,6 @@ async def screen_user(event, uid: int, note: str = ""):
         await show(event, "❌ Игрок не найден.", kb(home_row()))
         return
     nfts = len(await db.list_nft(uid))
-    skins = len(await db.list_skins(uid))
     st = await db.game_stats(uid)
     spent = await db.scalar("SELECT SUM(price_xtr) FROM purchases WHERE tg_id=? AND status='done'", (uid,))
     text = (
@@ -173,7 +162,7 @@ async def screen_user(event, uid: int, note: str = ""):
         f"Номер: <code>{esc(u['phone'])}</code>\n"
         f"Активный юзернейм: {esc(u.get('active_username') or '—')}\n\n"
         f"⭐ {config.CURRENCY_NAME}: <b>{fmt_num(u['risestars'])}</b> · 💎 <b>{fmt_num(u['gram_balance'], 2)}</b>\n"
-        f"🏷 NFT/номера: {nfts} · 🎒 предметов: {skins}\n"
+        f"🏷 NFT/номера: {nfts}\n"
         f"💳 Потратил: {fmt_num(spent)} ⭐ · 🎮 игр: {st['played']}\n"
         f"📅 Регистрация: {esc((u.get('created_at') or '')[:16])}\n"
         f"👁 Был: {esc((u.get('last_seen') or '')[:16])}"
@@ -186,7 +175,7 @@ async def screen_user(event, uid: int, note: str = ""):
         [btn("⭐ RiseStars ±", f"adm:g:{uid}:stars", style="success"), btn("💎 Gram ±", f"adm:g:{uid}:gram", style="success")],
         [btn(ban_label, f"adm:uban:{uid}", style="success" if u["banned"] else "danger"), btn(ver_label, f"adm:uver:{uid}")],
         [btn("📞 Сменить номер", f"adm:unum:{uid}"), btn("🏷 Выдать юзернейм", f"adm:uun:{uid}")],
-        [btn("🎒 Скины", f"adm:skins:{uid}"), btn("🗂 NFT/номера", f"adm:nfts:{uid}")],
+        [btn("🗂 NFT/номера", f"adm:nfts:{uid}")],
         [btn("🔑 Выдать код входа", f"adm:ucode:{uid}"), btn("✉️ Написать", f"adm:umsg:{uid}")],
         [btn("🗑 Удалить игрока", f"adm:udel:{uid}", style="danger")],
         [btn("↩️ К списку", "adm:users:0")],
@@ -197,27 +186,20 @@ async def screen_user(event, uid: int, note: str = ""):
 # ═══════════════════════════ инвентарь, NFT, задания, SCAM, покупки ═════════
 
 
-async def screen_skins(event, uid: int, note: str = ""):
-    u = await db.get_user(uid)
-    if not u:
-        await show(event, "❌ Игрок не найден.", kb(home_row()))
-        return
-    items = await db.list_skins(uid, 10)
-    text = f"🎒 <b>Скины {esc(db.shown_username(u))}</b>\n\n"
+async def screen_market(event, page: int, note: str = ""):
+    total = await db.market_count()
+    rows_db = await db.market_page(None, PAGE, page * PAGE)
+    text = f"🛒 <b>Маркет</b> ({total} активных лотов)\n\n"
     if note:
         text = note + "\n\n" + text
     rows = []
-    for it in items:
-        text += f"{config.RARITY_EMOJI.get(it['rarity'], '⚪')} {esc(it['item_name'])} «{esc(it['skin'])}»\n"
-        rows.append([btn(f"🗑 {it['item_name']} «{it['skin']}»"[:60], f"adm:skdel:{it['id']}:{uid}", style="danger")])
-    if not items:
-        text += "Пусто.\n"
-    text += "\nВыдать из каталога:"
-    for i, (cat, name, skin, rarity) in enumerate(config.SKIN_CATALOG):
-        rows.append([btn(f"{config.RARITY_EMOJI[rarity]} {name} «{skin}»", f"adm:skadd:{uid}:{i}", style="success")])
-    rows.append([btn("✏️ Свой предмет", f"adm:skcustom:{uid}")])
-    rows.append([btn("↩️ К игроку", f"adm:u:{uid}")])
-    await show(event, text, kb(*rows))
+    for L in rows_db:
+        label = f"@{L['value']}" if L["item_type"] == "username" else db.fmt_number(L["value"])
+        text += f"#{L['id']} {esc(label)} — {fmt_num(L['price'])} RS · продавец <code>{L['seller_id']}</code>\n"
+        rows.append([btn(f"🗑 Снять #{L['id']} {label}"[:60], f"adm:mktdel:{L['id']}:{page}", style="danger")])
+    if not rows_db:
+        text += "Лотов нет."
+    await show(event, text, kb(*rows, pager("adm:mkt", page, total), home_row()))
 
 
 async def screen_nfts(event, uid: int, note: str = ""):
@@ -473,6 +455,8 @@ async def apply_balance(bot: Bot, uid: int, cur: str, delta: float) -> str:
     u = await db.get_user(uid)
     if not u:
         return "❌ Игрок не найден."
+    if uid == config.OWNER_ID:
+        return "♾ У владельца бесконечные балансы, менять их не нужно."
     if delta < 0 and -delta > u[col]:
         await db.set_balance(uid, col, 0)
         new = 0.0
@@ -510,7 +494,7 @@ async def on_input(message: Message, state: FSMContext, user: dict):
         out += "\n".join(f"• {user_line(u)}" for u in rows_db) or "Ничего не найдено."
         await message.answer(out, reply_markup=kb(*rows, home_row()))
         return
-    if act in ("grant_target", "skin_target", "inv_target", "ban_target"):
+    if act in ("grant_target", "inv_target", "ban_target"):
         t = await parse_target(text)
         if not t:
             return await again("❌ Игрок не найден. Ещё раз (@юзернейм, ID или номер):")
@@ -529,7 +513,7 @@ async def on_input(message: Message, state: FSMContext, user: dict):
                 f"✅ {user_line(t)}: {'разбанен' if t['banned'] else 'забанен'}.", reply_markup=kb([btn("👤 Карточка", f"adm:u:{t['tg_id']}")], home_row())
             )
         else:
-            await screen_skins(message, t["tg_id"])
+            await ask_usernames(message, state, t)
         return
 
     # ── валюта ──
@@ -551,30 +535,36 @@ async def on_input(message: Message, state: FSMContext, user: dict):
         await audit(f"Номер {data['uid']} → {d}")
         return await done("✅ Номер изменён." if ok else "❌ Не удалось.", kb([btn("👤 Карточка", f"adm:u:{data['uid']}")], home_row()))
     if act == "uun":
-        name = db.norm_username(text)
-        if not (4 <= len(name) <= 32) or not name.replace("_", "").isalnum():
-            return await again("❌ Юзернейм: 4–32 символа, латиница/цифры/_:")
-        if await db.username_taken(name):
-            return await again("❌ Юзернейм занят:")
-        await db.add_nft(data["uid"], "username", name, 0)
-        await db.set_active_username(data["uid"], name)
-        await audit(f"Юзернейм @{name} → {data['uid']}")
-        return await done(f"✅ @{esc(name)} выдан и активирован.", kb([btn("👤 Карточка", f"adm:u:{data['uid']}")], home_row()))
+        names = parse_usernames(text)
+        if not names:
+            return await again("❌ Пришлите один или несколько юзернеймов через пробел, запятую или с новой строки (до 30):")
+        uid = data["uid"]
+        u = await db.get_user(uid)
+        if not u:
+            return await done("❌ Игрок не найден.")
+        given, skipped = [], []
+        for n in names:
+            if not NAME_RE.match(n) or "__" in n or n.endswith("_"):
+                skipped.append(f"@{n} — неверный формат")
+            elif await db.username_taken(n, ignore_reserved=True, exclude_user=uid):
+                skipped.append(f"@{n} — занят")
+            elif await db.add_nft(uid, "username", n, 0):
+                given.append(n)
+            else:
+                skipped.append(f"@{n} — уже у игрока")
+        if given and not db.norm_username((await db.get_user(uid)).get("active_username")):
+            await db.set_active_username(uid, given[0])
+        if given:
+            await audit(f"Юзернеймы {', '.join('@' + g for g in given)} → {uid}")
+            await safe_send(bot, uid, "🎁 Вам выдали NFT-юзернеймы: " + ", ".join(f"<b>@{esc(g)}</b>" for g in given) + ".\nВыбрать активный можно в «Мои NFT и номера».")
+        out = f"✅ Выдано ({len(given)}): " + (", ".join("@" + esc(g) for g in given) or "—")
+        if skipped:
+            out += "\n⚠️ Пропущено:\n" + "\n".join(esc(x) for x in skipped)
+        return await done(out, kb([btn("👤 Карточка", f"adm:u:{uid}")], home_row()))
     if act == "umsg":
         ok = await safe_send(bot, data["uid"], f"✉️ <b>Сообщение от администрации</b>\n\n{esc(text)}")
         await audit(f"Сообщение игроку {data['uid']}")
         return await done("✅ Отправлено." if ok else "❌ Не доставлено (игрок заблокировал бота).", kb([btn("👤 Карточка", f"adm:u:{data['uid']}")], home_row()))
-    if act == "skcustom":
-        parts = [p.strip() for p in text.split("|")]
-        if len(parts) < 3 or not all(parts[:3]):
-            return await again("❌ Формат: <code>Категория | Название | Скин | редкость</code>\nПример: <code>Нож | Knife: Butterfly | Black Window | legendary</code>")
-        rarity = (parts[3].lower() if len(parts) > 3 else "common")
-        if rarity not in config.RARITY_EMOJI:
-            rarity = "common"
-        await db.add_skin(data["uid"], parts[0][:30], parts[1][:50], parts[2][:50], rarity)
-        await audit(f"Скин {parts[1]} «{parts[2]}» → {data['uid']}")
-        return await done("✅ Предмет выдан.", kb([btn("🎒 Скины", f"adm:skins:{data['uid']}")], home_row()))
-
     # ── задания ──
     if act == "t_title":
         if not 3 <= len(text) <= 60:
@@ -671,6 +661,28 @@ _bg: set[asyncio.Task] = set()
 
 
 # ═══════════════════════════ роутер кнопок ══════════════════════════════════
+
+
+NAME_RE = re.compile(r"^[a-z][a-z0-9_]{3,31}$")
+
+
+def parse_usernames(text: str) -> list[str]:
+    seen: list[str] = []
+    for tok in re.split(r"[\s,;]+", text or ""):
+        n = db.norm_username(tok)
+        if n and n not in seen:
+            seen.append(n)
+    return seen[:30]
+
+
+async def ask_usernames(message, state: FSMContext, t: dict):
+    await state.set_state(Adm.input)
+    await state.update_data(act="uun", uid=t["tg_id"])
+    await message.answer(
+        f"🏷 Юзернеймы для {user_line(t)}:\n\nПришлите один или несколько (до 30) через пробел, запятую или с новой строки. "
+        "Занятые и «rise…» тоже можно выдать: ограничение действует только на покупку.",
+        reply_markup=kb(cancel_row()),
+    )
 
 
 def num(parts: list[str], i: int, default: int = 0) -> int:
@@ -777,30 +789,15 @@ async def adm_cb(call: CallbackQuery, state: FSMContext, user: dict):
 
     # ── инвентарь и NFT ──
     if route == "inv":
-        return await ask(call, state, "inv_target", "🎒 <b>Инвентарь и скины</b>\n\nВведите @юзернейм, ID или номер игрока:")
-    if route == "skins":
-        return await screen_skins(call, num(parts, 2))
-    if route == "skadd":
-        uid, idx = num(parts, 2), num(parts, 3, -1)
-        if not await db.get_user(uid) or not 0 <= idx < len(config.SKIN_CATALOG):
-            return await call.answer("Не найдено.", show_alert=True)
-        cat, name, skin, rarity = config.SKIN_CATALOG[idx]
-        await db.add_skin(uid, cat, name, skin, rarity)
-        await audit(f"Скин {name} «{skin}» → {uid}")
-        await safe_send(bot, uid, f"🎁 Вы получили предмет: <b>{esc(name)} «{esc(skin)}»</b>!")
-        return await screen_skins(call, uid, "✅ Выдано.")
-    if route == "skdel":
-        await db.delete_skin(num(parts, 2))
-        await audit(f"Удалён скин #{num(parts, 2)} у {num(parts, 3)}")
-        return await screen_skins(call, num(parts, 3), "🗑 Удалено.")
-    if route == "skcustom":
-        uid = num(parts, 2)
-        return await ask(
-            call, state, "skcustom",
-            "✏️ Формат: <code>Категория | Название | Скин | редкость</code>\nРедкость: common, rare, epic, legendary, mythic.\n"
-            "Пример: <code>Нож | Knife: Butterfly | Black Window | legendary</code>",
-            f"adm:skins:{uid}", uid=uid,
-        )
+        return await ask(call, state, "inv_target", "🏷 <b>Выдача NFT-юзернеймов</b>\n\nВведите @юзернейм, ID или номер игрока:")
+    if route == "mkt":
+        return await screen_market(call, num(parts, 2))
+    if route == "mktdel":
+        L = await db.cancel_listing(0, num(parts, 2), admin=True)
+        if L:
+            await audit(f"Лот #{L['id']} снят админом")
+            await safe_send(bot, L["seller_id"], "🛠 Администрация сняла ваш лот с маркета.")
+        return await screen_market(call, num(parts, 3), "🗑 Лот снят." if L else "Лот уже закрыт.")
     if route == "nfts":
         return await screen_nfts(call, num(parts, 2))
     if route == "nftdel":

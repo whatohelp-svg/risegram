@@ -24,6 +24,8 @@ def esc(value) -> str:
 def fmt_num(x: float | int | None, decimals: int | None = None) -> str:
     """1234567.5 -> '1 234 567,5'. Целые без дробной части."""
     x = float(x or 0)
+    if abs(x) >= 1e12:
+        return "∞"
     if decimals is None:
         decimals = 0 if abs(x - round(x)) < 1e-9 else 2
     s = f"{x:,.{decimals}f}".replace(",", " ")

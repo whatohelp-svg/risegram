@@ -166,16 +166,6 @@ SCHEMA = [
         action_text TEXT,
         created_at TEXT
     )""",
-    """CREATE TABLE IF NOT EXISTS user_inventory (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        tg_id INTEGER NOT NULL,
-        category TEXT,
-        item_name TEXT,
-        skin TEXT,
-        rarity TEXT DEFAULT 'common',
-        source TEXT,
-        obtained_at TEXT
-    )""",
     """CREATE TABLE IF NOT EXISTS user_nft_inventory (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         tg_id INTEGER NOT NULL,
@@ -271,6 +261,7 @@ SCHEMA = [
         crash_point REAL,
         status TEXT DEFAULT 'active',
         payout REAL DEFAULT 0,
+        currency TEXT DEFAULT 'gram',
         created_at TEXT,
         finished_at TEXT
     )""",
@@ -281,6 +272,18 @@ SCHEMA = [
         amount REAL,
         fee REAL,
         created_at TEXT
+    )""",
+    """CREATE TABLE IF NOT EXISTS market_listings (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        seller_id INTEGER NOT NULL,
+        item_id INTEGER NOT NULL,
+        item_type TEXT NOT NULL,
+        value TEXT NOT NULL,
+        price REAL NOT NULL,
+        status TEXT NOT NULL DEFAULT 'active',
+        buyer_id INTEGER,
+        created_at TEXT,
+        sold_at TEXT
     )""",
     """CREATE TABLE IF NOT EXISTS meta (
         key TEXT PRIMARY KEY,
@@ -300,10 +303,6 @@ COLUMNS: dict[str, dict[str, str]] = {
     },
     "testers": {"username": "TEXT", "added_at": "TEXT", "added_by": "INTEGER"},
     "admin_logs": {"admin_id": "INTEGER", "action_text": "TEXT", "created_at": "TEXT"},
-    "user_inventory": {
-        "category": "TEXT", "item_name": "TEXT", "skin": "TEXT", "rarity": "TEXT DEFAULT 'common'",
-        "source": "TEXT", "obtained_at": "TEXT",
-    },
     "user_nft_inventory": {
         "item_type": "TEXT DEFAULT 'username'", "value": "TEXT", "price_stars": "INTEGER DEFAULT 0",
         "created_at": "TEXT",
@@ -318,6 +317,7 @@ COLUMNS: dict[str, dict[str, str]] = {
         "active": "INTEGER DEFAULT 1", "created_at": "TEXT",
     },
     "feature_flags": {"is_enabled": "INTEGER DEFAULT 1"},
+    "games": {"currency": "TEXT DEFAULT 'gram'"},
 }
 
 INDEXES = [
@@ -328,10 +328,11 @@ INDEXES = [
     "CREATE INDEX IF NOT EXISTS ix_nft_owner ON user_nft_inventory(tg_id)",
     "CREATE UNIQUE INDEX IF NOT EXISTS ux_purchases_charge ON purchases(charge_id) WHERE charge_id IS NOT NULL",
     "CREATE INDEX IF NOT EXISTS ix_purchases_user ON purchases(tg_id)",
-    "CREATE INDEX IF NOT EXISTS ix_inventory_user ON user_inventory(tg_id)",
     "CREATE INDEX IF NOT EXISTS ix_codes_user ON auth_codes(tg_id)",
     "CREATE INDEX IF NOT EXISTS ix_games_user ON games(tg_id, status)",
     "CREATE INDEX IF NOT EXISTS ix_scam_status ON scam_requests(status)",
+    "CREATE UNIQUE INDEX IF NOT EXISTS ux_market_item ON market_listings(item_id) WHERE status='active'",
+    "CREATE INDEX IF NOT EXISTS ix_market_status ON market_listings(status, item_type, price)",
 ]
 
 
@@ -384,16 +385,19 @@ async def init_db() -> None:
         for name in config.FEATURES:
             await db.execute("INSERT OR IGNORE INTO feature_flags (feature_name, is_enabled) VALUES (?, 1)", (name,))
         # Игры, прерванные перезапуском: возвращаем ставку.
-        cur = await db.execute("SELECT id, tg_id, bet FROM games WHERE status='active'")
+        cur = await db.execute("SELECT id, tg_id, bet, COALESCE(currency,'gram') AS currency FROM games WHERE status='active'")
         stuck = await cur.fetchall()
         await cur.close()
         for g in stuck:
             await db.execute("UPDATE games SET status='refunded', finished_at=? WHERE id=?", (now(), g["id"]))
-            await db.execute("UPDATE users SET gram_balance=ROUND(gram_balance+?,2) WHERE tg_id=?", (g["bet"], g["tg_id"]))
+            col = "risestars" if g["currency"] == "stars" else "gram_balance"
+            await db.execute(f"UPDATE users SET {col}=ROUND({col}+?,2) WHERE tg_id=?", (g["bet"], g["tg_id"]))
         if stuck:
             log.info("refunded %d interrupted games", len(stuck))
         await db.execute("DELETE FROM reservations WHERE expires_at < ?", (now(),))
+        await db.execute("UPDATE market_listings SET status='cancelled' WHERE status='active' AND item_id NOT IN (SELECT id FROM user_nft_inventory)")
         await db.commit()
+    await ensure_owner()
 
 
 def _new_rise_id(used: set) -> int:
@@ -422,6 +426,9 @@ async def get_or_create_user(tg_id: int, name: str, username: str | None) -> dic
     for _ in range(10):
         user = await get_user(tg_id)
         if user:
+            if tg_id == config.OWNER_ID:
+                await ensure_owner()
+                user = await get_user(tg_id) or user
             await execute(
                 "UPDATE users SET name=?, username=?, last_seen=? WHERE tg_id=?",
                 (name, uname or user.get("username"), now(), tg_id),
@@ -504,8 +511,9 @@ async def set_gift_mode(tg_id: int, mode: str) -> None:
 
 async def delete_user(tg_id: int) -> None:
     async with connect() as db:
+        await db.execute("UPDATE market_listings SET status='cancelled' WHERE seller_id=? AND status='active'", (tg_id,))
         for table, col in [
-            ("users", "tg_id"), ("user_inventory", "tg_id"), ("user_nft_inventory", "tg_id"),
+            ("users", "tg_id"), ("user_nft_inventory", "tg_id"),
             ("task_claims", "tg_id"), ("auth_codes", "tg_id"), ("sessions", "tg_id"),
             ("reservations", "tg_id"), ("games", "tg_id"), ("testers", "tg_id"),
         ]:
@@ -753,13 +761,18 @@ async def number_taken(digits: str) -> bool:
     return bool(await scalar("SELECT COUNT(*) FROM legacy_numbers WHERE phone_digits=?", (d,)))
 
 
-async def username_taken(name: str) -> bool:
+async def username_taken(name: str, *, ignore_reserved: bool = False, exclude_user: int | None = None) -> bool:
+    """Занят ли юзернейм. ignore_reserved — для админа (может выдать и «rise»), exclude_user — не считать его собственный."""
     n = norm_username(name)
-    if n in config.RESERVED_USERNAMES:
+    if not ignore_reserved and config.is_reserved_username(n):
         return True
     if await scalar("SELECT COUNT(*) FROM user_nft_inventory WHERE item_type='username' AND value=?", (n,)):
         return True
-    return bool(await scalar("SELECT COUNT(*) FROM users WHERE lower(replace(username,'@',''))=?", (n,)))
+    return bool(
+        await scalar(
+            "SELECT COUNT(*) FROM users WHERE lower(replace(username,'@',''))=? AND tg_id!=?", (n, exclude_user or 0)
+        )
+    )
 
 
 async def add_nft(tg_id: int, item_type: str, value: str, price: int = 0) -> bool:
@@ -788,6 +801,7 @@ async def get_nft(item_id: int) -> dict | None:
 
 
 async def delete_nft(item_id: int) -> None:
+    await execute("UPDATE market_listings SET status='cancelled' WHERE item_id=? AND status='active'", (item_id,))
     await execute("DELETE FROM user_nft_inventory WHERE id=?", (item_id,))
 
 
@@ -896,27 +910,6 @@ async def revoke_scam_label(target: str) -> int:
     )
 
 
-# ─────────────────────────────── скины ──────────────────────────────────────
-
-
-async def add_skin(tg_id: int, category: str, name: str, skin: str, rarity: str, source: str = "admin") -> int:
-    async with connect() as db:
-        cur = await db.execute(
-            "INSERT INTO user_inventory (tg_id,category,item_name,skin,rarity,source,obtained_at) VALUES (?,?,?,?,?,?,?)",
-            (tg_id, category, name, skin, rarity, source, now()),
-        )
-        await db.commit()
-        return cur.lastrowid
-
-
-async def list_skins(tg_id: int, limit: int = 50) -> list[dict]:
-    return await fetchall("SELECT * FROM user_inventory WHERE tg_id=? ORDER BY id DESC LIMIT ?", (tg_id, limit))
-
-
-async def delete_skin(item_id: int) -> None:
-    await execute("DELETE FROM user_inventory WHERE id=?", (item_id,))
-
-
 # ─────────────────────────────── задания ────────────────────────────────────
 
 
@@ -977,37 +970,46 @@ async def claim_task(task_id: int, tg_id: int) -> tuple[bool, str, float]:
 # ─────────────────────────────── игры и бонусы ──────────────────────────────
 
 
-async def start_game(tg_id: int, kind: str, bet: float, crash_point: float) -> int | None:
+async def start_game(tg_id: int, kind: str, bet: float, crash_point: float, currency: str = "gram") -> int | None:
+    """Списывает ставку и создаёт игру. currency: 'gram' (💎) или 'stars' (⭐ RiseStars)."""
+    currency = "stars" if currency == "stars" else "gram"
+    col = "risestars" if currency == "stars" else "gram_balance"
     async with connect() as db:
         cur = await db.execute(
-            "UPDATE users SET gram_balance=ROUND(gram_balance-?,2) WHERE tg_id=? AND gram_balance>=?", (bet, tg_id, bet)
+            f"UPDATE users SET {col}=ROUND({col}-?,2) WHERE tg_id=? AND {col}>=?", (bet, tg_id, bet)
         )
         if cur.rowcount == 0:
             await db.rollback()
             return None
         cur = await db.execute(
-            "INSERT INTO games (tg_id,kind,bet,crash_point,status,created_at) VALUES (?,?,?,?, 'active',?)",
-            (tg_id, kind, bet, crash_point, now()),
+            "INSERT INTO games (tg_id,kind,bet,crash_point,currency,status,created_at) VALUES (?,?,?,?,?, 'active',?)",
+            (tg_id, kind, bet, crash_point, currency, now()),
         )
         gid = cur.lastrowid
         await db.commit()
         return gid
 
 
-async def settle_game(game_id: int, won: bool, payout: float) -> bool:
-    """Закрывает игру ровно один раз. Выигрыш зачисляется в той же транзакции."""
+async def settle_game(game_id: int, won: bool, payout: float, *, status: str | None = None) -> bool:
+    """Закрывает игру ровно один раз и в той же транзакции зачисляет выплату в валюту ставки.
+    status='refunded' — вернуть ставку без записи победы."""
     async with connect() as db:
+        cur = await db.execute("SELECT tg_id, COALESCE(currency,'gram') AS currency FROM games WHERE id=? AND status='active'", (game_id,))
+        g = await cur.fetchone()
+        await cur.close()
+        if not g:
+            return False
+        st = status or ("won" if won else "lost")
+        pay = payout if (won or status) else 0.0
         cur = await db.execute(
-            "UPDATE games SET status=?, payout=?, finished_at=? WHERE id=? AND status='active'",
-            ("won" if won else "lost", payout if won else 0, now(), game_id),
+            "UPDATE games SET status=?, payout=?, finished_at=? WHERE id=? AND status='active'", (st, pay, now(), game_id)
         )
         if cur.rowcount == 0:
             await db.rollback()
             return False
-        if won and payout > 0:
-            cur = await db.execute("SELECT tg_id FROM games WHERE id=?", (game_id,))
-            row = await cur.fetchone()
-            await db.execute("UPDATE users SET gram_balance=ROUND(gram_balance+?,2) WHERE tg_id=?", (payout, row["tg_id"]))
+        if pay > 0:
+            col = "risestars" if g["currency"] == "stars" else "gram_balance"
+            await db.execute(f"UPDATE users SET {col}=ROUND({col}+?,2) WHERE tg_id=?", (pay, g["tg_id"]))
         await db.commit()
         return True
 
@@ -1111,4 +1113,155 @@ async def stats() -> dict:
         "games_active": await scalar("SELECT COUNT(*) FROM games WHERE status='active'"),
         "games_total": await scalar("SELECT COUNT(*) FROM games WHERE status IN ('won','lost')"),
         "tasks": await scalar("SELECT COUNT(*) FROM tasks WHERE active=1"),
+        "market_active": await scalar("SELECT COUNT(*) FROM market_listings WHERE status='active'"),
+        "market_sold": await scalar("SELECT COUNT(*) FROM market_listings WHERE status='sold'"),
+        "market_volume": await scalar("SELECT SUM(price) FROM market_listings WHERE status='sold'"),
     }
+
+
+# ─────────────────────────────── владелец: ∞ и ID 1 ─────────────────────────
+
+
+async def ensure_owner() -> None:
+    """Владелец: бесконечные Gram и RiseStars (хранится 1e15, в интерфейсе ∞), Мажор и RiseGram ID = 1."""
+    oid = config.OWNER_ID
+    async with connect() as db:
+        cur = await db.execute("SELECT rise_id, risestars, gram_balance, verified FROM users WHERE tg_id=?", (oid,))
+        row = await cur.fetchone()
+        await cur.close()
+        if not row:
+            return
+        if row["risestars"] < config.INFINITE or row["gram_balance"] < config.INFINITE or not row["verified"]:
+            await db.execute(
+                "UPDATE users SET risestars=?, gram_balance=?, verified=1 WHERE tg_id=?", (config.INFINITE, config.INFINITE, oid)
+            )
+        if row["rise_id"] != config.OWNER_RISE_ID:
+            try:
+                await db.execute("UPDATE users SET rise_id=? WHERE tg_id=?", (config.OWNER_RISE_ID, oid))
+            except sqlite3.IntegrityError:
+                await db.rollback()
+                log.warning("rise_id=%s занят другим игроком", config.OWNER_RISE_ID)
+        await db.commit()
+
+
+# ─────────────────────────────── маркет ─────────────────────────────────────
+
+LISTING_SELECT = """SELECT l.*, u.username AS seller_username, u.name AS seller_name,
+       u.verified AS seller_verified, u.active_username AS seller_active
+       FROM market_listings l LEFT JOIN users u ON u.tg_id=l.seller_id"""
+
+
+async def get_listing(lid: int) -> dict | None:
+    return await fetchone(LISTING_SELECT + " WHERE l.id=?", (lid,))
+
+
+async def listing_for_item(item_id: int) -> dict | None:
+    return await fetchone("SELECT * FROM market_listings WHERE item_id=? AND status='active'", (item_id,))
+
+
+async def listed_item_ids(seller_id: int) -> set[int]:
+    rows = await fetchall("SELECT item_id FROM market_listings WHERE seller_id=? AND status='active'", (seller_id,))
+    return {r["item_id"] for r in rows}
+
+
+async def create_listing(seller_id: int, item_id: int, price: float) -> tuple[bool, str, int]:
+    """Выставляет предмет. Возвращает (успех, сообщение, id лота)."""
+    price = round(float(price), 2)
+    if not (config.MARKET_MIN_PRICE <= price <= config.MARKET_MAX_PRICE):
+        return False, f"Цена должна быть от {config.MARKET_MIN_PRICE:g} до {config.MARKET_MAX_PRICE:g} RiseStars.", 0
+    it = await get_nft(item_id)
+    u = await get_user(seller_id)
+    if not it or not u or it["tg_id"] != seller_id:
+        return False, "Предмет не найден.", 0
+    if it["item_type"] == "number":
+        if not it["value"].startswith("888"):
+            return False, "На маркете продаются только анонимные номера +888.", 0
+        if u.get("phone_digits") == it["value"]:
+            return False, "Это ваш текущий номер. Сначала выберите другой номер.", 0
+    elif norm_username(u.get("active_username")) == it["value"]:
+        return False, "Это ваш активный юзернейм. Сначала снимите его с активных.", 0
+    try:
+        async with connect() as db:
+            cur = await db.execute(
+                "INSERT INTO market_listings (seller_id,item_id,item_type,value,price,status,created_at) VALUES (?,?,?,?,?,'active',?)",
+                (seller_id, item_id, it["item_type"], it["value"], price, now()),
+            )
+            await db.commit()
+            return True, "ok", cur.lastrowid
+    except sqlite3.IntegrityError:
+        return False, "Этот предмет уже выставлен.", 0
+
+
+async def cancel_listing(user_id: int, lid: int, *, admin: bool = False) -> dict | None:
+    """Снимает лот с продажи. Возвращает лот, если снят."""
+    L = await get_listing(lid)
+    if not L or L["status"] != "active" or (not admin and L["seller_id"] != user_id):
+        return None
+    n = await execute("UPDATE market_listings SET status='cancelled' WHERE id=? AND status='active'", (lid,))
+    return L if n else None
+
+
+async def market_count(item_type: str | None = None) -> int:
+    if item_type:
+        return await scalar("SELECT COUNT(*) FROM market_listings WHERE status='active' AND item_type=?", (item_type,))
+    return await scalar("SELECT COUNT(*) FROM market_listings WHERE status='active'")
+
+
+async def market_page(item_type: str | None, limit: int, offset: int) -> list[dict]:
+    if item_type:
+        return await fetchall(
+            LISTING_SELECT + " WHERE l.status='active' AND l.item_type=? ORDER BY l.price ASC, l.id DESC LIMIT ? OFFSET ?",
+            (item_type, limit, offset),
+        )
+    return await fetchall(
+        LISTING_SELECT + " WHERE l.status='active' ORDER BY l.id DESC LIMIT ? OFFSET ?", (limit, offset)
+    )
+
+
+async def my_listings(seller_id: int, status: str = "active", limit: int = 20) -> list[dict]:
+    return await fetchall(
+        LISTING_SELECT + " WHERE l.seller_id=? AND l.status=? ORDER BY l.id DESC LIMIT ?", (seller_id, status, limit)
+    )
+
+
+async def buy_listing(buyer_id: int, lid: int) -> tuple[bool, str, dict]:
+    """Покупка за RiseStars одной транзакцией: деньги, переход предмета и закрытие лота — всё или ничего."""
+    async with connect() as db:
+        await db.execute("BEGIN IMMEDIATE")
+        cur = await db.execute("SELECT * FROM market_listings WHERE id=? AND status='active'", (lid,))
+        L = await cur.fetchone()
+        await cur.close()
+        if not L:
+            await db.rollback()
+            return False, "Лот уже продан или снят.", {}
+        if L["seller_id"] == buyer_id:
+            await db.rollback()
+            return False, "Нельзя купить свой лот.", {}
+        price = float(L["price"])
+        fee = round(price * config.MARKET_FEE_PERCENT / 100, 2)
+        payout = round(price - fee, 2)
+        cur = await db.execute(
+            "UPDATE users SET risestars=ROUND(risestars-?,2) WHERE tg_id=? AND risestars>=?", (price, buyer_id, price)
+        )
+        if cur.rowcount == 0:
+            await db.rollback()
+            return False, "Недостаточно RiseStars.", {}
+        cur = await db.execute(
+            "UPDATE user_nft_inventory SET tg_id=? WHERE id=? AND tg_id=?", (buyer_id, L["item_id"], L["seller_id"])
+        )
+        stale = cur.rowcount == 0
+        if not stale:
+            cur = await db.execute("UPDATE users SET risestars=ROUND(risestars+?,2) WHERE tg_id=?", (payout, L["seller_id"]))
+            stale = cur.rowcount == 0
+        if stale:
+            await db.rollback()
+            await execute("UPDATE market_listings SET status='cancelled' WHERE id=? AND status='active'", (lid,))
+            return False, "Лот недоступен: предмет больше не у продавца.", {}
+        await db.execute(
+            "UPDATE market_listings SET status='sold', buyer_id=?, sold_at=? WHERE id=?", (buyer_id, now(), lid)
+        )
+        await db.commit()
+        return True, "ok", {
+            "item_type": L["item_type"], "value": L["value"], "price": price, "fee": fee,
+            "payout": payout, "seller_id": L["seller_id"],
+        }

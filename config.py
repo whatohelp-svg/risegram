@@ -70,9 +70,9 @@ REAL_RUB_PER_100_STARS = 1.39            # «Настоящие рубли»: 10
 AUTH_CODE_LENGTH = 5
 AUTH_CODE_TTL_SECONDS = 300
 
-# ── Игры и бонусы (играют на Gram 💎 — его нельзя купить за Stars) ──────────
-CRASH_MIN_BET = 1.0
-CRASH_MAX_BET = 1000.0
+# ── Игры и бонусы (ставки в 💎 Gram или ⭐ RiseStars) ───────────────────
+# Лимиты ставок: gram = 💎 Gram, stars = ⭐ RiseStars (внутренние валюты, вывода нет)
+GAME_LIMITS = {"gram": (1.0, 1000.0), "stars": (10.0, 100000.0)}
 CRASH_HOUSE_EDGE = 0.04                  # RTP 96%, честное распределение
 CRASH_MAX_MULTIPLIER = 100.0
 CRASH_TICK_SECONDS = 1.0
@@ -89,7 +89,6 @@ TRANSFER_FEE_PERCENT = 0.0
 FEATURES = {
     "games": "Игровой зал (Crash Rocket)",
     "store": "Донат-магазин",
-    "inventory": "Инвентарь и скины",
     "auth_numbers": "Номера и коды входа",
     "nft_usernames": "NFT-юзернеймы",
     "verification": "Верификация «Мажор»",
@@ -98,16 +97,26 @@ FEATURES = {
     "transfers": "Переводы RiseStars",
     "tasks": "Задания",
     "bonus": "Ежедневный бонус",
+    "market": "Маркет",
 }
 
-# ── Каталог скинов для админки (StandKnife / StandRise) ─────────────────────
-SKIN_CATALOG = [
-    ("Нож", "Knife: Butterfly", "Black Window", "legendary"),
-    ("Винтовка", "M4A1", "Kitsune", "epic"),
-    ("Нож", "Knife: Karambit", "Deep Rise", "epic"),
-    ("Пистолет", "Deagle", "Sunrise", "rare"),
-]
+# ── Хай-Лоу ─────────────────────────────────────────────────────────────────
+HL_HOUSE_EDGE = 0.04                     # множитель шага = (1 - edge) / шанс угадать
+HL_MAX_MULTIPLIER = 100.0
+HL_IDLE_SECONDS = 600                    # забытая игра автоматически закрывается с выплатой текущего множителя
 
-RARITY_EMOJI = {
-    "common": "⚪", "rare": "🔵", "epic": "🟣", "legendary": "🟠", "mythic": "🔴",
-}
+# ── Маркет (цены в RiseStars) ───────────────────────────────────────────────
+MARKET_FEE_PERCENT = 5.0                 # комиссия берётся с продавца
+MARKET_MIN_PRICE = 10.0
+MARKET_MAX_PRICE = 1_000_000_000.0
+MARKET_PAGE = 6
+
+# ── Владелец: ∞ балансы и ID 1 ──────────────────────────────────────────────
+INFINITE = 1e15                          # в интерфейсе значения от 1e12 показываются как ∞
+OWNER_RISE_ID = 1
+
+
+def is_reserved_username(name: str | None) -> bool:
+    """Юзернеймы, которые купить нельзя: служебные, всё на «rise…», всё с risegram / risestars."""
+    n = (name or "").strip().lstrip("@").lower()
+    return n in RESERVED_USERNAMES or n.startswith("rise") or "risegram" in n or "risestars" in n
