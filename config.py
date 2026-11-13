@@ -72,6 +72,7 @@ AUTH_CODE_TTL_SECONDS = 300
 
 # ── Игры и бонусы (ставки в 💎 Gram или ⭐ RiseStars) ───────────────────
 # Лимиты ставок: gram = 💎 Gram, stars = ⭐ RiseStars (внутренние валюты, вывода нет)
+GAME_LIMITS = {"gram": (1.0, 1000.0), "stars": (10.0, 100000.0)}
 CRASH_HOUSE_EDGE = 0.04                  # RTP 96%, честное распределение
 CRASH_MAX_MULTIPLIER = 100.0
 CRASH_TICK_SECONDS = 1.0
@@ -113,7 +114,6 @@ MARKET_PAGE = 6
 # ── Владелец: ∞ балансы и ID 1 ──────────────────────────────────────────────
 INFINITE = 1e15                          # в интерфейсе значения от 1e12 показываются как ∞
 OWNER_RISE_ID = 1
-GAME_LIMITS = {"gram": (1.0, 1000.0), "stars": (1.0, INFINITE)}   # RiseStars: от 1 до ∞ (ограничено только балансом)
 
 
 def is_reserved_username(name: str | None) -> bool:

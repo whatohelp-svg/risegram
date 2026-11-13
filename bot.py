@@ -90,7 +90,7 @@ class GuardMiddleware(BaseMiddleware):
         data["user"] = user
         is_owner = tg_user.id == config.OWNER_ID
         if user.get("banned") and not is_owner:
-            await _reply_block(event, "❌ Вы были заблокированы, так как вы многочисленно нарушали правило. Обратитесь в поддержку если считаете что это ошибка @koyyzzov.")
+            await _reply_block(event, "❌ Ваш аккаунт заблокирован.")
             return
         if not is_owner and await db.get_meta("maintenance") == "1":
             await _reply_block(event, "🛠 Технические работы. Загляните позже.")
