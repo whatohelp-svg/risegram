@@ -42,7 +42,7 @@ class Adm(StatesGroup):
     cast_confirm = State()
 
 
-# ═══════════════════════════ вспомогательное ════════════════════════════════
+# ════════════════════════════ вспомогательное ════════════════════════════════
 
 
 def home_row():
@@ -77,7 +77,7 @@ async def parse_target(text: str) -> dict | None:
     return await db.find_user(text)
 
 
-# ═══════════════════════════ главный экран ══════════════════════════════════
+# ════════════════════════════ главный экран ══════════════════════════════
 
 
 async def home_screen(event, user: dict):
@@ -113,7 +113,7 @@ async def cmd_admin(message: Message, state: FSMContext, user: dict):
     await home_screen(message, user)
 
 
-# ═══════════════════════════ экраны ═════════════════════════════════════════
+# ════════════════════════════ экраны ══════════════════════════════════════
 
 
 async def screen_stats(call: CallbackQuery):
@@ -175,7 +175,7 @@ async def screen_user(event, uid: int, note: str = ""):
         [btn("⭐ RiseStars ±", f"adm:g:{uid}:stars", style="success"), btn("💎 Gram ±", f"adm:g:{uid}:gram", style="success")],
         [btn(ban_label, f"adm:uban:{uid}", style="success" if u["banned"] else "danger"), btn(ver_label, f"adm:uver:{uid}")],
         [btn("📞 Сменить номер", f"adm:unum:{uid}"), btn("🏷 Выдать юзернейм", f"adm:uun:{uid}")],
-        [btn("🗂 NFT/номера", f"adm:nfts:{uid}")],
+        [btn("📞 Выдать +888", f"adm:uph:{uid}"), btn("🗂 NFT/номера", f"adm:nfts:{uid}")],
         [btn("🔑 Выдать код входа", f"adm:ucode:{uid}"), btn("✉️ Написать", f"adm:umsg:{uid}")],
         [btn("🗑 Удалить игрока", f"adm:udel:{uid}", style="danger")],
         [btn("↩️ К списку", "adm:users:0")],
@@ -183,7 +183,7 @@ async def screen_user(event, uid: int, note: str = ""):
     await show(event, text, markup)
 
 
-# ═══════════════════════════ инвентарь, NFT, задания, SCAM, покупки ═════════
+# ════════════════════════════ маркет, NFT, задания, SCAM, покупки ═════════
 
 
 async def screen_market(event, page: int, note: str = ""):
@@ -432,7 +432,7 @@ async def screen_logs(call: CallbackQuery, page: int):
     await show(call, text, kb(pager("adm:logs", page, total), home_row()))
 
 
-# ═══════════════════════════ ввод текста (FSM) ══════════════════════════════
+# ════════════════════════════ ввод текста (FSM) ══════════════════════════════
 
 
 async def ask(call: CallbackQuery, state: FSMContext, act: str, prompt: str, back: str = "adm:home", **data):
@@ -561,6 +561,42 @@ async def on_input(message: Message, state: FSMContext, user: dict):
         if skipped:
             out += "\n⚠️ Пропущено:\n" + "\n".join(esc(x) for x in skipped)
         return await done(out, kb([btn("👤 Карточка", f"adm:u:{uid}")], home_row()))
+    if act == "uph":
+        nums: list[str] = []
+        for chunk in re.split(r"[\n,;]+", text):
+            chunk = chunk.strip()
+            if not chunk:
+                continue
+            # «8881234 8880001» через пробел — это разные номера; «+888 0123 4567» с пробелами — один
+            parts_ = chunk.split()
+            cands = parts_ if all(len(db.digits_of(p)) >= 7 for p in parts_) else [chunk]
+            for c in cands:
+                d = db.digits_of(c)
+                if d and d not in nums:
+                    nums.append(d)
+        nums = nums[:30]
+        if not nums:
+            return await again("❌ Пришлите номера +888 (цифры, 7–15):")
+        uid = data["uid"]
+        if not await db.get_user(uid):
+            return await done("❌ Игрок не найден.")
+        given, skipped = [], []
+        for d in nums:
+            if not d.startswith("888") or not 7 <= len(d) <= 15:
+                skipped.append(f"{d} — не +888 или длина не 7–15")
+            elif await db.number_taken(d):
+                skipped.append(f"{db.fmt_number(d)} — занят")
+            elif await db.add_nft(uid, "number", d, 0):
+                given.append(d)
+            else:
+                skipped.append(f"{db.fmt_number(d)} — не удалось")
+        if given:
+            await audit(f"Номера {', '.join(given)} → {uid}")
+            await safe_send(bot, uid, "🎁 Вам выдали анонимные номера: " + ", ".join(f"<b>{esc(db.fmt_number(g))}</b>" for g in given) + ".\nВыбрать текущий можно в «Мои NFT и номера».")
+        out = f"✅ Выдано ({len(given)}): " + (", ".join(esc(db.fmt_number(g)) for g in given) or "—")
+        if skipped:
+            out += "\n⚠️ Пропущено:\n" + "\n".join(esc(x) for x in skipped)
+        return await done(out, kb([btn("👤 Карточка", f"adm:u:{uid}")], home_row()))
     if act == "umsg":
         ok = await safe_send(bot, data["uid"], f"✉️ <b>Сообщение от администрации</b>\n\n{esc(text)}")
         await audit(f"Сообщение игроку {data['uid']}")
@@ -660,7 +696,7 @@ async def run_broadcast(bot: Bot, text: str):
 _bg: set[asyncio.Task] = set()
 
 
-# ═══════════════════════════ роутер кнопок ══════════════════════════════════
+# ════════════════════════════ роутер кнопок ══════════════════════════════
 
 
 NAME_RE = re.compile(r"^[a-z][a-z0-9_]{3,31}$")
@@ -732,7 +768,7 @@ async def adm_cb(call: CallbackQuery, state: FSMContext, user: dict):
         return await ask(call, state, "usearch", "🔎 Введите часть имени, @юзернейм или ID:", "adm:users:0")
     if route == "u":
         return await screen_user(call, num(parts, 2))
-    if route in ("uban", "uver", "udel", "udelok", "ucode", "unum", "uun", "umsg"):
+    if route in ("uban", "uver", "udel", "udelok", "ucode", "unum", "uun", "uph", "umsg"):
         uid = num(parts, 2)
         u = await db.get_user(uid)
         if not u:
@@ -766,6 +802,14 @@ async def adm_cb(call: CallbackQuery, state: FSMContext, user: dict):
             await db.delete_user(uid)
             await audit(f"Удалён игрок {db.shown_username(u)} ({uid})")
             return await show(call, "🗑 Игрок удалён.", kb([btn("👥 Юзеры", "adm:users:0")], home_row()))
+        if route == "uph":
+            return await ask(
+                call, state, "uph",
+                f"📞 Номера +888 для {user_line(u)}:\n\nПришлите один или несколько (до 30) через пробел, запятую или с новой строки, "
+                "например <code>8881234 8880001</code> или <code>+888 0123 4567</code> (один номер в строке, если с пробелами). "
+                "Номера попадут в «Мои NFT и номера»; сделать текущим игрок может сам.",
+                back, uid=uid,
+            )
         if route == "unum":
             return await ask(call, state, "unum", f"📞 Новый номер для {user_line(u)} (цифры, например <code>8887777</code>):", back, uid=uid)
         if route == "uun":
@@ -787,7 +831,7 @@ async def adm_cb(call: CallbackQuery, state: FSMContext, user: dict):
             f"adm:u:{uid}", uid=uid, cur=cur,
         )
 
-    # ── инвентарь и NFT ──
+    # ── выдача юзернеймов, маркет и NFT ──
     if route == "inv":
         return await ask(call, state, "inv_target", "🏷 <b>Выдача NFT-юзернеймов</b>\n\nВведите @юзернейм, ID или номер игрока:")
     if route == "mkt":
