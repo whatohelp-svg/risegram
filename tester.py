@@ -35,7 +35,9 @@ async def is_tester(tg_id: int) -> bool:
 
 
 class TesterAccess(Filter):
-    """Пускает владельца и тестеров. Проверка по числовому ID, юзернеймам не доверяем."""
+    """Пускает владельца и тестеров. Проверка по числовому ID, юзернеймам не доверяем.
+
+    Ставится ПОСЛЕ дешёвых фильтров (команда, префикс callback), чтобы не ходить в базу на каждое сообщение."""
 
     async def __call__(self, event: Message | CallbackQuery) -> bool:
         u = event.from_user
@@ -49,8 +51,8 @@ class TesterFlow(StatesGroup):
 
 
 tester_router = Router(name="tester")
-tester_router.message.filter(TesterAccess(), F.chat.type == "private")
-tester_router.callback_query.filter(TesterAccess(), F.message.chat.type == "private")
+tester_router.message.filter(F.chat.type == "private")
+tester_router.callback_query.filter(F.message.chat.type == "private")
 
 
 # ════════════════════════════ экраны ═════════════════════════════════════════
@@ -154,13 +156,13 @@ async def screen_inventory(call: CallbackQuery, user: dict):
 # ════════════════════════════ хендлеры ═══════════════════════════════════════
 
 
-@tester_router.message(Command("tester"))
+@tester_router.message(Command("tester"), TesterAccess())
 async def cmd_tester(message: Message, state: FSMContext, user: dict):
     await state.clear()
     await screen_home(message, user)
 
 
-@tester_router.callback_query(F.data.startswith("tst:"))
+@tester_router.callback_query(F.data.startswith("tst:"), TesterAccess())
 async def cb_tester(call: CallbackQuery, state: FSMContext, user: dict):
     action = (call.data or "").split(":")[1]
     await state.clear()
@@ -187,7 +189,7 @@ async def cb_tester(call: CallbackQuery, state: FSMContext, user: dict):
     await call.answer("Неизвестное действие.")
 
 
-@tester_router.message(StateFilter(TesterFlow.bug), F.text, ~F.text.startswith("/"))
+@tester_router.message(StateFilter(TesterFlow.bug), F.text, ~F.text.startswith("/"), TesterAccess())
 async def msg_bug(message: Message, state: FSMContext, user: dict):
     text = (message.text or "").strip()
     if not 5 <= len(text) <= 1000:
