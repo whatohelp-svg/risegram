@@ -88,6 +88,10 @@ class GuardMiddleware(BaseMiddleware):
                 _last_click.clear()
         user = await db.get_or_create_user(tg_user.id, tg_user.full_name or "User", tg_user.username)
         data["user"] = user
+        if isinstance(event, Message) and event.successful_payment:
+            # Деньги уже списаны Telegram: товар выдаём всегда, даже при бане или техработах,
+            # иначе человек заплатил бы и ничего не получил (и возврата тоже не было бы).
+            return await handler(event, data)
         is_owner = tg_user.id == config.OWNER_ID
         if user.get("banned") and not is_owner:
             await _reply_block(event, "❌ Ваш аккаунт заблокирован.")
@@ -331,7 +335,8 @@ async def send_stars_invoice(bot: Bot, chat_id: int, *, title: str, description:
 
 
 def parse_int(text: str) -> int | None:
-    t = (text or "").replace(" ", "").replace("_", "").replace(",", "").replace(" ", "")
+    # пробелы, подчёркивания, запятые и неразрывные пробелы (в т.ч. узкие) — просто разделители тысяч
+    t = (text or "").replace(" ", "").replace("_", "").replace(",", "").replace("\u00a0", "").replace("\u202f", "")
     return int(t) if t.isdigit() else None
 
 
@@ -947,6 +952,10 @@ async def validate_order(uid: int, payload: str, total: int) -> str | None:
 
 @router.pre_checkout_query()
 async def on_pre_checkout(q: PreCheckoutQuery):
+    # На техработах оплату не принимаем: pre_checkout не проходит через GuardMiddleware, поэтому проверяем здесь.
+    if q.from_user.id != config.OWNER_ID and await db.get_meta("maintenance") == "1":
+        await q.answer(ok=False, error_message="Технические работы. Оплатите чуть позже.")
+        return
     err = await validate_order(q.from_user.id, q.invoice_payload, q.total_amount)
     if err:
         await q.answer(ok=False, error_message=err)
@@ -1065,6 +1074,9 @@ async def cb_purchases(call: CallbackQuery, user: dict):
     await show(call, text, kb(back_row()))
 
 
+ITEMS_SHOWN = 30  # сколько юзернеймов и номеров показывать списком: у Telegram лимит 4096 символов на сообщение
+
+
 async def items_screen(event, user: dict):
     nums = await db.list_nft(user["tg_id"], "number")
     names = await db.list_nft(user["tg_id"], "username")
@@ -1075,23 +1087,27 @@ async def items_screen(event, user: dict):
         text += "Пока пусто. Купить можно в разделе «Донат»."
     if names:
         text += "<b>Юзернеймы</b>\n"
-        for n in names:
+        for n in names[:ITEMS_SHOWN]:
             on = db.norm_username(user.get("active_username")) == n["value"]
             lock = " 🛒 на маркете" if n["id"] in listed else ""
             text += f"{'🟢' if on else '⚪'} @{esc(n['value'])}{lock}\n"
             if not on and n["id"] not in listed:
                 rows.append([btn(f"Выбрать @{n['value']}", f"my:un:{n['id']}")])
+        if len(names) > ITEMS_SHOWN:
+            text += f"…и ещё {len(names) - ITEMS_SHOWN}\n"
         if user.get("active_username"):
             rows.append([btn("Убрать активный юзернейм", "my:un:0")])
         text += "\n"
     if nums:
         text += "<b>Номера</b>\n"
-        for n in nums:
+        for n in nums[:ITEMS_SHOWN]:
             on = user.get("phone_digits") == n["value"]
             lock = " 🛒 на маркете" if n["id"] in listed else ""
             text += f"{'🟢' if on else '⚪'} <code>{esc(db.fmt_number(n['value']))}</code>{lock}\n"
             if not on and n["id"] not in listed:
                 rows.append([btn(f"Сделать текущим {db.fmt_number(n['value'])}", f"my:ph:{n['id']}")])
+        if len(nums) > ITEMS_SHOWN:
+            text += f"…и ещё {len(nums) - ITEMS_SHOWN}\n"
     rows.append([btn("🛒 Маркет", "market:hub")])
     await show(event, text, kb(*rows[:20], back_row("menu:more")))
 
@@ -1129,6 +1145,11 @@ async def cb_my_phone(call: CallbackQuery, user: dict):
     if await db.listing_for_item(it["id"]):
         await call.answer("Номер выставлен на маркете. Сначала снимите лот.", show_alert=True)
         return
+    old = user.get("phone_digits")
+    if old and old != it["value"]:
+        # Прежний номер сохраняем в инвентаре, иначе он пропадёт насовсем (как при покупке номера).
+        # Если он там уже есть, add_nft вернёт False — это нормально.
+        await db.add_nft(user["tg_id"], "number", old, 0)
     if not await db.set_phone(user["tg_id"], it["value"]):
         await call.answer("Не удалось сменить номер.", show_alert=True)
         return
