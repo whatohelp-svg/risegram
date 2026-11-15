@@ -71,7 +71,11 @@ async def core_verify(phone: str, code: str) -> tuple[int, dict]:
 
 
 def _key_ok(request: web.Request) -> bool:
-    return bool(config.API_SECRET) and hmac.compare_digest(request.headers.get("X-API-Key", ""), config.API_SECRET)
+    if not config.API_SECRET:
+        return False
+    # сравниваем байты: hmac.compare_digest со строками падает (TypeError → 500) на не-ASCII в заголовке
+    got = request.headers.get("X-API-Key", "").encode("utf-8", "replace")
+    return hmac.compare_digest(got, config.API_SECRET.encode("utf-8"))
 
 
 async def _json(request: web.Request) -> dict:
