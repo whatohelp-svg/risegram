@@ -170,7 +170,7 @@ async def screen_user(event, uid: int, note: str = ""):
     if note:
         text = f"{note}\n\n" + text
     ban_label = "✅ Разбанить" if u["banned"] else "🔨 Забанить"
-    ver_label = "❎ Снять Мажор" if u["verified"] else "✅ Выдать Мажор"
+    ver_label = "❎ Снять верификацию RiseGram" if u["verified"] else "✅ Выдать верификацию RiseGram"
     markup = kb(
         [btn("⭐ RiseStars ±", f"adm:g:{uid}:stars", style="success"), btn("💎 Gram ±", f"adm:g:{uid}:gram", style="success")],
         [btn(ban_label, f"adm:uban:{uid}", style="success" if u["banned"] else "danger"), btn(ver_label, f"adm:uver:{uid}")],
@@ -782,7 +782,7 @@ async def adm_cb(call: CallbackQuery, state: FSMContext, user: dict):
             return await screen_user(call, uid, "✅ Готово.")
         if route == "uver":
             await db.set_verified(uid, not u["verified"])
-            await audit(f"Мажор {'снят' if u['verified'] else 'выдан'}: {uid}")
+            await audit(f"Верификация RiseGram {'снята' if u['verified'] else 'выдана'}: {uid}")
             return await screen_user(call, uid, "✅ Готово.")
         if route == "ucode":
             code = await db.issue_auth_code(uid)
