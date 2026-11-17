@@ -12,6 +12,8 @@
 """
 from __future__ import annotations
 
+from pathlib import Path
+
 import hmac
 import logging
 import time
@@ -111,6 +113,13 @@ async def h_me(request: web.Request):
     return web.json_response({"ok": True, "user": public_user(user)})
 
 
+async def h_index(request: web.Request):
+    index_path = Path(__file__).with_name("index.html")
+    if not index_path.is_file():
+        return web.Response(text="RiseGram UI not found", status=404)
+    return web.FileResponse(index_path)
+
+
 async def h_health(request: web.Request):
     return web.json_response({"ok": True})
 
@@ -122,6 +131,7 @@ async def start_api(bot) -> web.AppRunner | None:
     app = web.Application(client_max_size=64 * 1024)
     app["bot"] = bot
     app.add_routes([
+        web.get("/", h_index),
         web.post("/api/auth/request", h_request),
         web.post("/api/auth/verify", h_verify),
         web.get("/api/me", h_me),
