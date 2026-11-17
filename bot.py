@@ -130,7 +130,7 @@ async def need_feature(event, name: str) -> bool:
 async def badges(user: dict) -> str:
     parts = []
     if user.get("verified"):
-        parts.append("✅ Мажор")
+        parts.append("☑️ Верификация RiseGram")
     if await db.is_scam_target(user.get("username")) or await db.is_scam_target(user.get("active_username")):
         parts.append("⚠️ SCAM")
     return (" · " + " · ".join(parts)) if parts else ""
