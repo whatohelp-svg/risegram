@@ -5,15 +5,15 @@ ARG ALPINE_IMAGE=alpine:3.22@sha256:14358309a308569c32bdc37e2e0e9694be33a9d99e68
 FROM --platform=$BUILDPLATFORM ${GO_IMAGE} AS build-base
 ARG TARGETOS
 ARG TARGETARCH
-RUN apk add --no-cache ca-certificates git patch
+RUN apk add --no-cache ca-certificates git python3
 WORKDIR /src
 COPY server/mtproto/go.mod server/mtproto/go.sum ./
 RUN go mod download
 COPY server/mtproto/cmd/ ./cmd/
 COPY server/mtproto/deploy/ ./deploy/
 COPY server/mtproto/internal/ ./internal/
-COPY server/patches/advertise-port.patch /tmp/advertise-port.patch
-RUN patch -p1 < /tmp/advertise-port.patch
+COPY server/patches/patch_mtproto.py /tmp/patch_mtproto.py
+RUN python3 /tmp/patch_mtproto.py
 ENV CGO_ENABLED=0
 
 FROM build-base AS build-server
