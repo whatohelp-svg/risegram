@@ -69,10 +69,15 @@ async def core_request_code(bot, phone: str) -> tuple[int, dict]:
     # Deliberately identical response for unknown, banned and disabled accounts.
     if not user or user["banned"] or not await db.is_feature_on("auth_numbers"):
         return 200, {"ok": True}
+    # tg_id is the internal RiseGram key; Telegram is only the private delivery channel.
+    chat_id = await db.telegram_chat_id(user["tg_id"])
+    if not chat_id:
+        log.warning("login number has no Telegram delivery chat for Rise ID %s", user.get("rise_id"))
+        return 200, {"ok": True}
     code = await db.issue_auth_code(user["tg_id"])
     delivered = await safe_send(
         bot,
-        user["tg_id"],
+        chat_id,
         f"🔒 <b>Код входа в {config.BRAND}</b>\n\nНомер: <code>{esc(user['phone'])}</code>\nКод: <code>{code}</code>\n\n"
         f"Действует {config.AUTH_CODE_TTL_SECONDS // 60} мин. Никому его не сообщайте.",
     )
@@ -212,10 +217,14 @@ async def h_market_buy(request: web.Request):
         return web.json_response({"ok": False, "error": "purchase_failed", "message": message}, status=409)
     # The DB transaction already transferred ownership and debited/credited balances.
     # Bot and client therefore see the same result immediately.
-    await safe_send(request.app["bot"], result["seller_id"],
-        f"🛒 Ваш лот «{esc(result['value'])}» куплен за {result['price']:g} RiseStars.")
-    await safe_send(request.app["bot"], user["tg_id"],
-        f"✅ Покупка завершена: «{esc(result['value'])}» теперь в вашем инвентаре.")
+    seller_chat_id = await db.telegram_chat_id(result["seller_id"])
+    buyer_chat_id = await db.telegram_chat_id(user["tg_id"])
+    if seller_chat_id:
+        await safe_send(request.app["bot"], seller_chat_id,
+            f"🛒 Ваш лот «{esc(result['value'])}» куплен за {result['price']:g} RiseStars.")
+    if buyer_chat_id:
+        await safe_send(request.app["bot"], buyer_chat_id,
+            f"✅ Покупка завершена: «{esc(result['value'])}» теперь в вашем инвентаре.")
     fresh = await db.get_user(user["tg_id"])
     return web.json_response({"ok": True, "purchase": {
         "type": result["item_type"], "value": result["value"],
