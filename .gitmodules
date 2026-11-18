@@ -1,3 +1,3 @@
-[submodule "Telegram-Android"]
-	path = Telegram-Android
+[submodule "client/telegram-android"]
+	path = client/telegram-android
 	url = https://github.com/TelegramMessenger/Telegram-Android.git
