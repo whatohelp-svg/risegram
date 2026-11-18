@@ -145,7 +145,14 @@ public class MainActivity extends Activity {
         content.removeAllViews();
         title(user.optString("name", "Профиль"));
         card("@" + user.optString("username", "user") + "   ·   Rise ID " + user.optLong("rise_id"));
-        card("⭐ RiseStars   " + number(user.optDouble("risestars")) + "\n💎 Gram   " + number(user.optDouble("gram_balance")));
+        balanceView = label("⭐ RiseStars   " + number(user.optDouble("risestars")) + "\\n💎 Gram   " + number(user.optDouble("gram_balance")));
+        balanceView.setTextColor(text);
+        balanceView.setTextSize(16);
+        balanceView.setPadding(dp(15), dp(15), dp(15), dp(15));
+        balanceView.setBackgroundColor(panel);
+        LinearLayout.LayoutParams balanceLp = new LinearLayout.LayoutParams(-1, -2);
+        balanceLp.bottomMargin = dp(10);
+        content.addView(balanceView, balanceLp);
         rowButtons("Обновить", "Маркет", "Инвентарь");
         Button refresh = button("↻ Обновить баланс", accent);
         content.addView(refresh);
