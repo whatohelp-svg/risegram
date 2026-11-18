@@ -29,7 +29,7 @@ PAGE = 8
 class OwnerOnly(Filter):
     async def __call__(self, event: Message | CallbackQuery) -> bool:
         u = event.from_user
-        return bool(u and u.id == config.OWNER_ID)
+        return bool(u and u.id == config.OWNER_TELEGRAM_ID)
 
 
 admin_router = Router(name="admin")
