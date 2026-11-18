@@ -81,8 +81,13 @@ public class MainActivity extends Activity {
     private void showLogin() {
         content.removeAllViews();
         title("Вход в RiseGram");
-        TextView hint = label("1. Откройте @risegrambot и нажмите /start\n2. Введите постоянный номер из раздела «Мой номер»\n3. Нажмите «Получить код» и проверьте личные сообщения бота\n4. Введите одноразовый код и войдите");
+        TextView hint = label("1. Откройте @risegrambot и нажмите /start\n2. Введите постоянный номер из раздела «Мой номер»\n3. Нажмите «Получить код» и проверьте личные сообщения бота\n4. Введите одноразовый код и войдите\n\nМожно добавить несколько аккаунтов и переключаться между ними");
         content.addView(hint);
+        if (!token.isEmpty()) {
+            Button back = button("← Вернуться в текущий аккаунт", panel);
+            content.addView(back);
+            back.setOnClickListener(v -> loadProfile());
+        }
         EditText phone = field("Постоянный номер из @risegrambot");
         phone.setInputType(android.text.InputType.TYPE_CLASS_PHONE);
         content.addView(phone);
@@ -114,11 +119,88 @@ public class MainActivity extends Activity {
                 String t = res.optString("token", "");
                 if (t.isEmpty()) { toast("Не удалось войти"); return; }
                 token = t;
-                prefs.edit().putString("token", token).apply();
+                JSONObject signedUser = res.optJSONObject("user");
+                saveAccount(token, signedUser);
                 showLoading("Вход выполнен");
                 loadProfile();
             });
         });
+    }
+
+    private JSONArray getAccounts() {
+        try { return new JSONArray(prefs.getString("accounts", "[]")); }
+        catch (Exception e) { return new JSONArray(); }
+    }
+
+    private void saveAccount(String session, JSONObject user) {
+        if (session == null || session.isEmpty() || user == null) return;
+        String riseId = user.optString("rise_id", "");
+        JSONArray old = getAccounts();
+        JSONArray updated = new JSONArray();
+        try {
+            for (int i = 0; i < old.length(); i++) {
+                JSONObject item = old.optJSONObject(i);
+                if (item != null && !riseId.equals(item.optString("rise_id"))) updated.put(item);
+            }
+            JSONObject account = new JSONObject();
+            account.put("rise_id", riseId);
+            account.put("name", user.optString("name", "RiseGram"));
+            account.put("username", user.optString("username", ""));
+            account.put("token", session);
+            updated.put(account);
+        } catch (Exception ignored) {}
+        prefs.edit().putString("accounts", updated.toString())
+            .putString("active_rise_id", riseId).putString("token", session).apply();
+    }
+
+    private void showAccounts() {
+        JSONArray accounts = getAccounts();
+        if (accounts.length() == 0) {
+            toast("Сохранённых аккаунтов пока нет");
+            return;
+        }
+        String[] labels = new String[accounts.length()];
+        for (int i = 0; i < accounts.length(); i++) {
+            JSONObject a = accounts.optJSONObject(i);
+            if (a == null) { labels[i] = "Аккаунт"; continue; }
+            labels[i] = a.optString("name", "RiseGram") + " · " +
+                (a.optString("username").isEmpty() ? "без username" : "@" + a.optString("username")) +
+                " · Rise ID " + a.optString("rise_id");
+            if (a.optString("rise_id").equals(prefs.getString("active_rise_id", "")))
+                labels[i] = "✓ " + labels[i];
+        }
+        new android.app.AlertDialog.Builder(this).setTitle("Ваши аккаунты")
+            .setItems(labels, (dialog, which) -> {
+                JSONObject selected = accounts.optJSONObject(which);
+                if (selected == null) return;
+                token = selected.optString("token", "");
+                prefs.edit().putString("token", token)
+                    .putString("active_rise_id", selected.optString("rise_id", "")).apply();
+                loadProfile();
+            })
+            .setPositiveButton("Готово", null).show();
+    }
+
+    private void removeCurrentAccount() {
+        String active = prefs.getString("active_rise_id", "");
+        JSONArray old = getAccounts();
+        JSONArray remaining = new JSONArray();
+        for (int i = 0; i < old.length(); i++) {
+            JSONObject a = old.optJSONObject(i);
+            if (a != null && !active.equals(a.optString("rise_id"))) remaining.put(a);
+        }
+        if (remaining.length() > 0) {
+            JSONObject next = remaining.optJSONObject(0);
+            token = next == null ? "" : next.optString("token", "");
+            prefs.edit().putString("accounts", remaining.toString())
+                .putString("token", token)
+                .putString("active_rise_id", next == null ? "" : next.optString("rise_id", "")).apply();
+            loadProfile();
+        } else {
+            token = "";
+            prefs.edit().putString("accounts", "[]").remove("token").remove("active_rise_id").apply();
+            showLogin();
+        }
     }
 
     private void showLoading(String message) {
@@ -156,6 +238,12 @@ public class MainActivity extends Activity {
         balanceLp.bottomMargin = dp(10);
         content.addView(balanceView, balanceLp);
         rowButtons("Обновить", "Маркет", "Инвентарь");
+        Button accounts = button("👤 Аккаунты · переключить / добавить", panel);
+        content.addView(accounts);
+        accounts.setOnClickListener(v -> showAccounts());
+        Button addAccount = button("＋ Добавить ещё аккаунт", accent);
+        content.addView(addAccount);
+        addAccount.setOnClickListener(v -> showLogin());
         Button chats = button("💬 Чаты", green);
         content.addView(chats);
         chats.setOnClickListener(v -> loadChats());
@@ -179,11 +267,7 @@ public class MainActivity extends Activity {
         games.setOnClickListener(v -> loadGameStats());
         Button logout = button("Выйти", panel);
         content.addView(logout);
-        logout.setOnClickListener(v -> {
-            token = "";
-            prefs.edit().remove("token").apply();
-            showLogin();
-        });
+        logout.setOnClickListener(v -> removeCurrentAccount());
     }
 
     private void showFindUser() {
