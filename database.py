@@ -293,6 +293,20 @@ SCHEMA = [
         created_at TEXT,
         sold_at TEXT
     )""",
+    """CREATE TABLE IF NOT EXISTS messages (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        sender_id INTEGER NOT NULL,
+        recipient_id INTEGER NOT NULL,
+        body TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        read_at TEXT
+    )""",
+    """CREATE TABLE IF NOT EXISTS chat_blocks (
+        owner_id INTEGER NOT NULL,
+        blocked_id INTEGER NOT NULL,
+        created_at TEXT NOT NULL,
+        PRIMARY KEY(owner_id, blocked_id)
+    )""",
     """CREATE TABLE IF NOT EXISTS meta (
         key TEXT PRIMARY KEY,
         value TEXT
@@ -343,6 +357,8 @@ INDEXES = [
     "CREATE INDEX IF NOT EXISTS ix_scam_status ON scam_requests(status)",
     "CREATE UNIQUE INDEX IF NOT EXISTS ux_market_item ON market_listings(item_id) WHERE status='active'",
     "CREATE INDEX IF NOT EXISTS ix_market_status ON market_listings(status, item_type, price)",
+    "CREATE INDEX IF NOT EXISTS ix_messages_pair ON messages(sender_id, recipient_id, id)",
+    "CREATE INDEX IF NOT EXISTS ix_messages_recipient ON messages(recipient_id, read_at, id)",
 ]
 
 
