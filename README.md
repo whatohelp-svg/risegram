@@ -27,6 +27,10 @@ Recommended:
 
 `API_SECRET` is not embedded in the APK and is not required for public client endpoints. Login requests use the permanent number issued by `/start`, are rate-limited, and are verified with one-time codes delivered to that account's private bot chat.
 
+## Server API
+
+The independent RiseGram HTTP backend supports direct messages, groups/channels with owner/admin roles, authenticated media uploads/downloads, and account event streams. See [docs/SERVER_API.md](docs/SERVER_API.md) for endpoints, limits, and current deployment constraints. The Telegram Android submodule still requires a RiseGram-specific client adapter; it is not connected to these REST endpoints yet.
+
 ## Shared economy
 
 The bot and Android client use the same Railway SQLite database. A bot game changes the shared balance immediately; the client refreshes the profile balance while open. Marketplace purchases atomically debit the buyer, credit the seller after fee, and transfer the NFT inventory record.
