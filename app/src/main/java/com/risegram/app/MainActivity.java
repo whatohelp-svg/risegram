@@ -159,6 +159,9 @@ public class MainActivity extends Activity {
         Button chats = button("💬 Чаты", green);
         content.addView(chats);
         chats.setOnClickListener(v -> loadChats());
+        Button spaces = button("👥 Группы и каналы", green);
+        content.addView(spaces);
+        spaces.setOnClickListener(v -> loadSpaces());
         Button find = button("🔎 Найти пользователя по Rise ID", panel);
         content.addView(find);
         find.setOnClickListener(v -> showFindUser());
@@ -271,6 +274,114 @@ public class MainActivity extends Activity {
             Button back = button("К списку чатов", panel);
             content.addView(back);
             back.setOnClickListener(v -> loadChats());
+        });
+    }
+
+    private void loadSpaces() {
+        showLoading("Загружаем группы и каналы…");
+        api("GET", "/api/spaces", token, null, (res, err) -> {
+            if (err != null) { toast(err); loadProfile(); return; }
+            content.removeAllViews();
+            title("Группы и каналы");
+            Button create = button("＋ Создать группу или канал", green);
+            content.addView(create);
+            create.setOnClickListener(v -> createSpace());
+            Button join = button("Вступить по коду приглашения", accent);
+            content.addView(join);
+            join.setOnClickListener(v -> joinSpace());
+            JSONArray items = res.optJSONArray("spaces");
+            if (items == null || items.length() == 0) content.addView(label("Вы ещё не состоите в группах и каналах"));
+            else for (int i = 0; i < items.length(); i++) {
+                JSONObject item = items.optJSONObject(i);
+                if (item == null) continue;
+                int id = item.optInt("id");
+                String name = item.optString("title");
+                String type = item.optString("type").equals("channel") ? "Канал" : "Группа";
+                Button open = button((type.equals("Канал") ? "📢 " : "👥 ") + name + "\\n" + item.optString("last_message"), panel);
+                content.addView(open);
+                open.setOnClickListener(v -> openSpace(id, name));
+                TextView invite = label("Код приглашения: " + item.optString("invite_code"));
+                content.addView(invite);
+            }
+            Button back = button("Назад", panel);
+            content.addView(back);
+            back.setOnClickListener(v -> loadProfile());
+        });
+    }
+
+    private void createSpace() {
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        EditText name = field("Название");
+        EditText description = field("Описание (необязательно)");
+        Spinner type = new Spinner(this);
+        type.setAdapter(new ArrayAdapter<>(this, android.R.layout.simple_spinner_dropdown_item,
+            new String[]{"Группа", "Канал"}));
+        box.addView(name); box.addView(description); box.addView(type);
+        new android.app.AlertDialog.Builder(this).setTitle("Создать пространство")
+            .setView(box).setNegativeButton("Отмена", null)
+            .setPositiveButton("Создать", (d, w) -> {
+                String kind = type.getSelectedItemPosition() == 1 ? "channel" : "group";
+                api("POST", "/api/spaces", token,
+                    json("title", name.getText().toString().trim(),
+                         "description", description.getText().toString().trim(), "type", kind),
+                    (res, err) -> {
+                        if (err != null) toast(err);
+                        else {
+                            JSONObject space = res.optJSONObject("space");
+                            if (space != null) toast("Создано · код: " + space.optString("invite_code"));
+                            loadSpaces();
+                        }
+                    });
+            }).show();
+    }
+
+    private void joinSpace() {
+        EditText code = field("Код приглашения");
+        new android.app.AlertDialog.Builder(this).setTitle("Вступить")
+            .setView(code).setNegativeButton("Отмена", null)
+            .setPositiveButton("Вступить", (d, w) ->
+                api("POST", "/api/spaces/join", token, json("invite_code", code.getText().toString().trim()),
+                    (res, err) -> {
+                        if (err != null) toast(err);
+                        else { toast("Вы вступили"); loadSpaces(); }
+                    })).show();
+    }
+
+    private void openSpace(int spaceId, String name) {
+        showLoading("Открываем…");
+        api("GET", "/api/spaces/" + spaceId + "/messages", token, null, (res, err) -> {
+            if (err != null) { toast(err); loadSpaces(); return; }
+            content.removeAllViews();
+            title(name);
+            JSONObject space = res.optJSONObject("space");
+            if (space != null && "owner".equals(space.optString("role")))
+                card("Код приглашения: " + space.optString("invite_code"));
+            JSONArray messages = res.optJSONArray("messages");
+            if (messages != null) for (int i = 0; i < messages.length(); i++) {
+                JSONObject msg = messages.optJSONObject(i);
+                if (msg != null) card(msg.optString("sender") + " · " + msg.optString("rise_id") + "\\n" + msg.optString("text"));
+            }
+            EditText input = field("Сообщение");
+            content.addView(input);
+            Button send = button("Отправить", green);
+            content.addView(send);
+            send.setOnClickListener(v -> {
+                String body = input.getText().toString().trim();
+                if (body.isEmpty()) return;
+                send.setEnabled(false);
+                api("POST", "/api/spaces/" + spaceId + "/messages", token, json("text", body), (answer, error) -> {
+                    send.setEnabled(true);
+                    if (error != null) toast(error);
+                    else openSpace(spaceId, name);
+                });
+            });
+            Button refresh = button("Обновить", accent);
+            content.addView(refresh);
+            refresh.setOnClickListener(v -> openSpace(spaceId, name));
+            Button back = button("К списку", panel);
+            content.addView(back);
+            back.setOnClickListener(v -> loadSpaces());
         });
     }
 
