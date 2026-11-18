@@ -216,8 +216,8 @@ async def screen_nfts(event, uid: int, note: str = ""):
         label = f"@{it['value']}" if it["item_type"] == "username" else db.fmt_number(it["value"])
         text += f"• {esc(label)} ({'юзернейм' if it['item_type'] == 'username' else 'номер'}, {it['price_stars']} ⭐)\n"
         # Anonymous numbers are identity/login assets and cannot be deleted from bot admin UI.
-    if it["item_type"] != "number":
-        rows.append([btn(f"🗑 {label}"[:60], f"adm:nftdel:{it['id']}:{uid}", style="danger")])
+        if it["item_type"] != "number":
+            rows.append([btn(f"🗑 {label}"[:60], f"adm:nftdel:{it['id']}:{uid}", style="danger")])
     if not items:
         text += "Пусто."
     rows.append([btn("↩️ К игроку", f"adm:u:{uid}")])
