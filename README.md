@@ -2,11 +2,14 @@
 
 RiseGram is an independent messenger/economy backend and native Android client. The bot is a private delivery and account-linking interface; Telegram IDs are not RiseGram account identifiers.
 
-## Account identity
+## Account identity and login
 
 - `users.user_id` is the stable UUID for a RiseGram account.
-- `users.tg_id` is an internal numeric RiseGram database key used by existing economy relations.
-- `telegram_links` maps an optional Telegram private chat ID to an internal RiseGram account. Bot login codes and notifications resolve through this table.
+- `users.rise_id` is a unique random 8-digit public Rise ID, separate from the login number.
+- `users.tg_id` is a legacy-named internal database key, never a Telegram ID.
+- `/start` in the existing `@risegrambot` creates the account and assigns its permanent login number.
+- `telegram_links` maps the private bot chat to the internal account key only for delivery of one-time login codes and private bot messages.
+- The login number stays fixed unless purchased or changed by an administrator; each login code is one-time and expires.
 - Balances, games, purchases, transfers, NFT inventory, and market listings are owned by internal RiseGram account keys.
 - The database initializer remaps legacy Telegram-keyed user rows and their relational references to internal keys, preserving Telegram delivery links.
 
@@ -22,7 +25,7 @@ Recommended:
 - `OWNER_USERNAME=koyyzzback`
 - `STARTER_NFT_USERNAMES=koyyzz,owner,rise`
 
-`API_SECRET` is not embedded in the APK and is not required for public client endpoints. Login requests are rate-limited and verified with one-time codes delivered to the linked private bot chat.
+`API_SECRET` is not embedded in the APK and is not required for public client endpoints. Login requests use the permanent number issued by `/start`, are rate-limited, and are verified with one-time codes delivered to that account's private bot chat.
 
 ## Shared economy
 
