@@ -393,6 +393,21 @@ async def _migrate_legacy_telegram_keys(db, rows) -> None:
             "INSERT INTO telegram_links (telegram_chat_id,tg_id,linked_at) VALUES (?,?,?)",
             (old_id, new_id, now()),
         )
+    # RiseStars gift invoice payloads also contain the target account key.
+    cur = await db.execute("SELECT id, payload FROM purchases WHERE payload LIKE 'rs:%'")
+    payload_rows = await cur.fetchall()
+    await cur.close()
+    for purchase in payload_rows:
+        parts = (purchase["payload"] or "").split(":")
+        if len(parts) == 3 and parts[0] == "rs":
+            try:
+                old_target = int(parts[2])
+            except ValueError:
+                continue
+            if old_target in mapping:
+                parts[2] = str(mapping[old_target])
+                await db.execute("UPDATE purchases SET payload=? WHERE id=?", (":".join(parts), purchase["id"]))
+
     log.info("migrated %d legacy Telegram identities to internal RiseGram IDs", len(mapping))
 
 
