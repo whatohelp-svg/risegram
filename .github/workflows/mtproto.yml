@@ -1,0 +1,62 @@
+name: Build RiseGram MTProto server
+on:
+  push:
+    branches: [main, feature/market-economy-sync]
+    paths:
+      - '.gitmodules'
+      - 'server/**'
+      - '.github/workflows/mtproto.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - '.gitmodules'
+      - 'server/**'
+      - '.github/workflows/mtproto.yml'
+  workflow_dispatch:
+
+jobs:
+  config:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Validate Compose configuration
+        run: |
+          cp server/.env.mtproto.example server/.env.mtproto
+          python3 - <<'PY'
+          from pathlib import Path
+          import secrets
+          p = Path("server/.env.mtproto")
+          data = p.read_text()
+          for key in (
+              "CHANGE_ME_POSTGRES_PASSWORD",
+              "CHANGE_ME_REDIS_PASSWORD",
+              "CHANGE_ME_LONG_RANDOM_ADMIN_API_TOKEN",
+              "CHANGE_ME_ADMIN_UI_PASSWORD",
+              "CHANGE_ME_LONG_RANDOM_SESSION_KEY",
+              "CHANGE_ME_LONG_RANDOM_TURN_SECRET",
+          ):
+              data = data.replace(key, secrets.token_hex(32))
+          p.write_text(data)
+          PY
+          docker compose --env-file server/.env.mtproto -f server/docker-compose.mtproto.yml config --quiet
+
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [server, admin]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: docker/setup-buildx-action@v3
+      - name: Build MTProto ${{ matrix.target }} image
+        uses: docker/build-push-action@v6
+        with:
+          context: server/mtproto
+          target: ${{ matrix.target }}
+          push: false
+          tags: risegram/mtproto-${{ matrix.target }}:ci
