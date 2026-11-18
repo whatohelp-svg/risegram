@@ -3,6 +3,7 @@ on:
   push:
     branches: [main, feature/market-economy-sync]
     paths:
+      - '.dockerignore'
       - '.gitmodules'
       - 'server/**'
       - '.github/workflows/mtproto.yml'
@@ -56,7 +57,8 @@ jobs:
       - name: Build MTProto ${{ matrix.target }} image
         uses: docker/build-push-action@v6
         with:
-          context: server/mtproto
+          context: .
+          file: server/Dockerfile.mtproto
           target: ${{ matrix.target }}
           push: false
           tags: risegram/mtproto-${{ matrix.target }}:ci
