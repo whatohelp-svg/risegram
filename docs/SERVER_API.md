@@ -68,3 +68,21 @@ Only owners and admins can publish to channels. Regular channel members are read
 The current SSE queues are process-local. They are suitable for a single service instance, not horizontally scaled deployments. Before scaling to multiple instances, move event fan-out to Redis Pub/Sub or an equivalent shared broker. SQLite media storage also assumes one persistent volume; distributed production storage should use object storage.
 
 The Telegram Android source submodule still speaks Telegram's MTProto API. It does not automatically use this HTTP API. A RiseGram client adapter must be implemented in the Android data layer before that client can log in to RiseGram and use these endpoints.
+
+
+## MTProto OTP webhook bridge
+
+The RiseGram Python service exposes `POST /internal/mtproto/otp` for
+`gramsrv` webhook deliveries. The request signature is validated using
+HMAC-SHA256, the timestamp window is five minutes, and `delivery_id` is
+idempotent. Only SMS `login_sms` requests for an existing, unbanned RiseGram
+number with a linked private bot chat are forwarded. OTP values and phone
+numbers are not written to the delivery audit table.
+
+For production, set `TELESRV_PHONE_CODE_DELIVERY_PROVIDER=webhook`,
+`TELESRV_OTP_WEBHOOK_URL=https://risegram-risegram.up.railway.app/internal/mtproto/otp`,
+and `TELESRV_OTP_WEBHOOK_SECRET` on the MTProto service. Set the exact same
+secret as `MTPROTO_OTP_SECRET` on the Python service. Do not use the static
+development code. This currently bridges delivery for already linked phone
+accounts; it does not yet merge the two server account databases or copy
+RiseStars/GRAM balances into the MTProto user store.
