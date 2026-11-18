@@ -92,8 +92,8 @@ case "$command_name" in
     else
       echo "telesrv: TELESRV_ADMIN_UI_PASSWORD or TELESRV_ADMIN_UI_TOKEN is required" >&2
       exit 64
-      ;;
-  esac
+    fi
+    ;;
 esac
 
 exec "$@"
