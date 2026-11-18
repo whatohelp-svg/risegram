@@ -10,6 +10,7 @@ import logging
 import random
 import secrets
 import sqlite3
+import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any, Iterable
 
@@ -135,7 +136,8 @@ async def execute(sql: str, params: Iterable[Any] = ()) -> int:
 
 SCHEMA = [
     """CREATE TABLE IF NOT EXISTS users (
-        tg_id INTEGER PRIMARY KEY,
+        tg_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id TEXT UNIQUE,
         rise_id INTEGER,
         name TEXT,
         username TEXT,
@@ -153,6 +155,12 @@ SCHEMA = [
         dox_claimed INTEGER NOT NULL DEFAULT 0,
         created_at TEXT,
         last_seen TEXT
+    )""",
+    """CREATE TABLE IF NOT EXISTS telegram_links (
+        telegram_chat_id INTEGER PRIMARY KEY,
+        tg_id INTEGER NOT NULL UNIQUE,
+        linked_at TEXT,
+        FOREIGN KEY(tg_id) REFERENCES users(tg_id) ON DELETE CASCADE
     )""",
     """CREATE TABLE IF NOT EXISTS testers (
         tg_id INTEGER PRIMARY KEY,
@@ -294,6 +302,7 @@ SCHEMA = [
 # Колонки, которые должны быть, даже если таблица осталась от старой версии бота.
 COLUMNS: dict[str, dict[str, str]] = {
     "users": {
+        "user_id": "TEXT",
         "rise_id": "INTEGER", "name": "TEXT", "username": "TEXT", "phone": "TEXT",
         "phone_digits": "TEXT", "risestars": "REAL DEFAULT 0", "gram_balance": "REAL DEFAULT 0",
         "banned": "INTEGER DEFAULT 0", "verified": "INTEGER DEFAULT 0", "auth_code": "TEXT",
@@ -351,7 +360,7 @@ async def init_db() -> None:
         await db.commit()
 
         # Дозаполняем rise_id / phone_digits у старых пользователей.
-        cur = await db.execute("SELECT tg_id, phone, rise_id, phone_digits FROM users")
+        cur = await db.execute("SELECT tg_id, user_id, phone, rise_id, phone_digits FROM users")
         rows = await cur.fetchall()
         await cur.close()
         used_rise = {r["rise_id"] for r in rows if r["rise_id"]}
@@ -369,8 +378,8 @@ async def init_db() -> None:
                     pd = _new_phone(used_phone)
                 used_phone.add(pd)
             await db.execute(
-                "UPDATE users SET rise_id=?, phone_digits=?, phone=COALESCE(NULLIF(phone,''), ?) WHERE tg_id=?",
-                (rid, pd, fmt_number(pd), r["tg_id"]),
+                "UPDATE users SET user_id=COALESCE(NULLIF(user_id,''), ?), rise_id=?, phone_digits=?, phone=COALESCE(NULLIF(phone,''), ?) WHERE tg_id=?",
+                (str(uuid.uuid4()), rid, pd, fmt_number(pd), r["tg_id"]),
             )
         await db.execute("UPDATE users SET created_at=? WHERE created_at IS NULL", (now(),))
         await db.commit()
@@ -418,40 +427,70 @@ def _new_phone(used: set) -> str:
 
 
 async def get_user(tg_id: int) -> dict | None:
+    """Fetch by internal RiseGram numeric key (never by Telegram chat ID)."""
     return await fetchone("SELECT * FROM users WHERE tg_id=?", (tg_id,))
 
 
-async def get_or_create_user(tg_id: int, name: str, username: str | None) -> dict:
+async def get_by_telegram(telegram_chat_id: int) -> dict | None:
+    return await fetchone(
+        "SELECT u.* FROM telegram_links l JOIN users u ON u.tg_id=l.tg_id WHERE l.telegram_chat_id=?",
+        (int(telegram_chat_id),),
+    )
+
+
+async def telegram_chat_id(user_id: int) -> int | None:
+    return await scalar("SELECT telegram_chat_id FROM telegram_links WHERE tg_id=?", (int(user_id),), None)
+
+
+async def get_or_create_user(telegram_id: int, name: str, username: str | None) -> dict:
+    """Resolve Telegram update to a RiseGram account; Telegram ID is only a delivery link."""
     uname = norm_username(username) or None
-    for _ in range(10):
-        user = await get_user(tg_id)
-        if user:
-            if tg_id == config.OWNER_ID:
-                await ensure_owner()
-                user = await get_user(tg_id) or user
-            effective_uname = config.OWNER_USERNAME if tg_id == config.OWNER_ID else (uname or user.get("username"))
-            await execute(
-                "UPDATE users SET name=?, username=?, last_seen=? WHERE tg_id=?",
-                (name, effective_uname, now(), tg_id),
-            )
-            user["name"], user["username"] = name, effective_uname
-            return user
-        used_rise = {r["rise_id"] for r in await fetchall("SELECT rise_id FROM users")}
+    owner_link = int(telegram_id) == config.OWNER_TELEGRAM_ID
+    user = await get_by_telegram(telegram_id)
+    if user:
+        effective_uname = config.OWNER_USERNAME if owner_link else (uname or user.get("username"))
+        await execute(
+            "UPDATE users SET name=?, username=?, last_seen=? WHERE tg_id=?",
+            (name, effective_uname, now(), user["tg_id"]),
+        )
+        user["name"], user["username"] = name, effective_uname
+        if owner_link:
+            await ensure_owner()
+            user = await get_by_telegram(telegram_id) or user
+        return user
+
+    async with connect() as db:
+        cur = await db.execute("SELECT rise_id FROM users")
+        used_rise = {r["rise_id"] for r in await cur.fetchall() if r["rise_id"]}
+        await cur.close()
         digits = gen_phone_digits()
-        try:
-            async with connect() as db:
-                await db.execute(
-                    """INSERT INTO users (tg_id, rise_id, name, username, phone, phone_digits,
-                                          risestars, gram_balance, created_at, last_seen)
-                       VALUES (?,?,?,?,?,?,0,0,?,?)""",
-                    (tg_id, _new_rise_id(used_rise), name, uname, fmt_number(digits), digits, now(), now()),
-                )
-                await db.commit()
-            if tg_id == config.OWNER_ID:
-                await ensure_owner()
-        except sqlite3.IntegrityError:
-            continue
-    raise RuntimeError("cannot create user")
+        cur = await db.execute(
+            """INSERT INTO users (user_id,rise_id,name,username,phone,phone_digits,
+                                  risestars,gram_balance,created_at,last_seen)
+               VALUES (?,?,?,?,?,?,0,0,?,?)""",
+            (str(uuid.uuid4()), _new_rise_id(used_rise), name,
+             config.OWNER_USERNAME if owner_link else uname, fmt_number(digits), digits, now(), now()),
+        )
+        internal_id = cur.lastrowid
+        await db.execute(
+            "INSERT INTO telegram_links (telegram_chat_id,tg_id,linked_at) VALUES (?,?,?)",
+            (int(telegram_id), internal_id, now()),
+        )
+        await db.commit()
+    if owner_link:
+        await ensure_owner()
+    return await get_user(internal_id)
+
+
+async def link_telegram(user_id: int, telegram_id: int) -> None:
+    """Attach the private bot chat to an existing RiseGram account."""
+    async with connect() as db:
+        await db.execute(
+            "INSERT INTO telegram_links (telegram_chat_id,tg_id,linked_at) VALUES (?,?,?) "
+            "ON CONFLICT(telegram_chat_id) DO UPDATE SET tg_id=excluded.tg_id, linked_at=excluded.linked_at",
+            (int(telegram_id), int(user_id), now()),
+        )
+        await db.commit()
 
 
 async def find_user(query: str) -> dict | None:
