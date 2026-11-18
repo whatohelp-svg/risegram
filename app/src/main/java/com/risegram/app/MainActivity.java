@@ -24,6 +24,10 @@ public class MainActivity extends Activity {
     private static final String API = "https://risegram-risegram.up.railway.app";
     private static final String PREFS = "risegram_session";
     private final ExecutorService io = Executors.newSingleThreadExecutor();
+    private final ExecutorService eventIo = Executors.newSingleThreadExecutor();
+    private volatile boolean liveEventsRunning = false;
+    private volatile int activeChatRiseId = 0;
+    private volatile String activeChatTitle = "";
     private SharedPreferences prefs;
     private LinearLayout root, content;
     private String token = "";
@@ -328,6 +332,8 @@ public class MainActivity extends Activity {
     }
 
     private void openChat(int riseId, String titleText) {
+        activeChatRiseId = riseId;
+        activeChatTitle = titleText;
         showLoading("Открываем диалог…");
         api("GET", "/api/chats/" + riseId + "/messages", token, null, (res, err) -> {
             if (err != null) { toast(err); loadChats(); return; }
@@ -690,16 +696,81 @@ public class MainActivity extends Activity {
     private int dp(int n) { return (int) (n * getResources().getDisplayMetrics().density + 0.5f); }
     private void toast(String value) { Toast.makeText(this, value, Toast.LENGTH_LONG).show(); }
 
+    private void startLiveEvents() {
+        if (token.isEmpty() || liveEventsRunning) return;
+        liveEventsRunning = true;
+        final String session = token;
+        eventIo.execute(() -> {
+            while (liveEventsRunning && session.equals(token)) {
+                HttpURLConnection conn = null;
+                try {
+                    conn = (HttpURLConnection) new URL(API + "/api/events").openConnection();
+                    conn.setRequestMethod("GET");
+                    conn.setConnectTimeout(12000);
+                    conn.setReadTimeout(30000);
+                    conn.setRequestProperty("Accept", "text/event-stream");
+                    conn.setRequestProperty("Authorization", "Bearer " + session);
+                    int status = conn.getResponseCode();
+                    if (status != 200) throw new IOException("Live events HTTP " + status);
+                    try (BufferedReader reader = new BufferedReader(
+                            new InputStreamReader(conn.getInputStream(), StandardCharsets.UTF_8))) {
+                        String line;
+                        String eventType = "";
+                        while (liveEventsRunning && session.equals(token) && (line = reader.readLine()) != null) {
+                            if (line.startsWith("event:")) eventType = line.substring(6).trim();
+                            else if (line.startsWith("data:")) {
+                                String payload = line.substring(5).trim();
+                                handleLiveEvent(eventType, payload);
+                            }
+                        }
+                    }
+                } catch (Exception ignored) {
+                    try { Thread.sleep(1800); } catch (InterruptedException stop) { Thread.currentThread().interrupt(); break; }
+                } finally {
+                    if (conn != null) conn.disconnect();
+                }
+            }
+        });
+    }
+
+    private void handleLiveEvent(String eventType, String payload) {
+        if ("ready".equals(eventType) || payload.isEmpty()) return;
+        try {
+            JSONObject event = new JSONObject(payload);
+            String type = event.optString("type", eventType);
+            runOnUiThread(() -> {
+                if (!liveEventsRunning || isFinishing()) return;
+                if ("new_message".equals(type)) {
+                    int sender = event.optInt("from_rise_id");
+                    if (activeChatRiseId > 0 && activeChatRiseId == sender) {
+                        openChat(activeChatRiseId, activeChatTitle);
+                    } else if (content != null && content.getChildCount() > 0) {
+                        View first = content.getChildAt(0);
+                        if (first instanceof TextView && "Сообщения".contentEquals(((TextView) first).getText())) loadChats();
+                    }
+                } else if ("new_space_message".equals(type) || "sync_required".equals(type)) {
+                    if (activeChatRiseId == 0 && content != null && content.getChildCount() > 0) {
+                        View first = content.getChildAt(0);
+                        if (first instanceof TextView && "Группы и каналы".contentEquals(((TextView) first).getText())) loadSpaces();
+                    }
+                }
+            });
+        } catch (Exception ignored) {}
+    }
+
     @Override protected void onResume() {
         super.onResume();
+        startLiveEvents();
         balanceHandler.removeCallbacks(balancePoll);
         balanceHandler.postDelayed(balancePoll, 5000);
     }
 
     @Override protected void onPause() {
+        liveEventsRunning = false;
+        activeChatRiseId = 0;
         balanceHandler.removeCallbacks(balancePoll);
         super.onPause();
     }
 
-    @Override protected void onDestroy() { super.onDestroy(); io.shutdown(); }
+    @Override protected void onDestroy() { liveEventsRunning = false; super.onDestroy(); io.shutdown(); eventIo.shutdownNow(); }
 }
