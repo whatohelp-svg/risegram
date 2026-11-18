@@ -423,6 +423,55 @@ async def h_space_send(request: web.Request):
     return web.json_response({"ok": True, "message_id": message_id})
 
 
+async def h_chat_blocks(request: web.Request):
+    user = await _current_user(request)
+    if not user:
+        return web.json_response({"ok": False, "error": "unauthorized"}, status=401)
+    rows = await db.fetchall(
+        """SELECT u.rise_id,u.name,u.username,b.created_at
+           FROM chat_blocks b JOIN users u ON u.tg_id=b.blocked_id
+           WHERE b.owner_id=? ORDER BY b.created_at DESC LIMIT 200""",
+        (user["tg_id"],))
+    return web.json_response({"ok": True, "blocked": [
+        {"rise_id": x["rise_id"], "name": x["name"], "username": x["username"],
+         "created_at": x["created_at"]} for x in rows
+    ]})
+
+
+async def h_block_user(request: web.Request):
+    user = await _current_user(request)
+    if not user:
+        return web.json_response({"ok": False, "error": "unauthorized"}, status=401)
+    try:
+        peer_rise_id = int(request.match_info["rise_id"])
+    except ValueError:
+        return web.json_response({"ok": False, "error": "bad_rise_id"}, status=400)
+    peer = await db.fetchone("SELECT tg_id FROM users WHERE rise_id=? AND banned=0", (peer_rise_id,))
+    if not peer or int(peer["tg_id"]) == int(user["tg_id"]):
+        return web.json_response({"ok": False, "error": "user_not_found"}, status=404)
+    await db.execute(
+        "INSERT OR IGNORE INTO chat_blocks(owner_id,blocked_id,created_at) VALUES(?,?,?)",
+        (user["tg_id"], peer["tg_id"], db.now()))
+    return web.json_response({"ok": True, "blocked": True, "rise_id": peer_rise_id})
+
+
+async def h_unblock_user(request: web.Request):
+    user = await _current_user(request)
+    if not user:
+        return web.json_response({"ok": False, "error": "unauthorized"}, status=401)
+    try:
+        peer_rise_id = int(request.match_info["rise_id"])
+    except ValueError:
+        return web.json_response({"ok": False, "error": "bad_rise_id"}, status=400)
+    peer = await db.fetchone("SELECT tg_id FROM users WHERE rise_id=?", (peer_rise_id,))
+    if not peer:
+        return web.json_response({"ok": False, "error": "user_not_found"}, status=404)
+    await db.execute(
+        "DELETE FROM chat_blocks WHERE owner_id=? AND blocked_id=?",
+        (user["tg_id"], peer["tg_id"]))
+    return web.json_response({"ok": True, "blocked": False, "rise_id": peer_rise_id})
+
+
 async def h_inventory(request: web.Request):
     user = await _current_user(request)
     if not user:
@@ -576,6 +625,9 @@ async def start_api(bot) -> web.AppRunner | None:
         web.get("/api/spaces/{space_id}/messages", h_space_messages),
         web.post("/api/spaces/{space_id}/messages", h_space_send),
         web.post("/api/chats/{rise_id}/messages", h_send_message),
+        web.get("/api/blocks", h_chat_blocks),
+        web.post("/api/blocks/{rise_id}", h_block_user),
+        web.delete("/api/blocks/{rise_id}", h_unblock_user),
         web.get("/api/inventory", h_inventory),
         web.post("/api/inventory/{item_id}/activate", h_activate_nft),
         web.get("/api/market", h_market),
