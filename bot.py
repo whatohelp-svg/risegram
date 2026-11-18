@@ -92,7 +92,7 @@ class GuardMiddleware(BaseMiddleware):
             # Деньги уже списаны Telegram: товар выдаём всегда, даже при бане или техработах,
             # иначе человек заплатил бы и ничего не получил (и возврата тоже не было бы).
             return await handler(event, data)
-        is_owner = tg_user.id == config.OWNER_ID
+        is_owner = tg_user.id == config.OWNER_TELEGRAM_ID
         if user.get("banned") and not is_owner:
             await _reply_block(event, "❌ Ваш аккаунт заблокирован.")
             return
@@ -421,9 +421,12 @@ async def send_rs_invoice(bot: Bot, payer: dict, stars: int, target_id: int) -> 
     if not target or target.get("banned"):
         return "Получатель не найден."
     amount = stars * config.RISESTARS_PER_STAR
+    chat_id = await db.telegram_chat_id(payer["tg_id"])
+    if chat_id is None:
+        return "Сначала откройте личный чат с ботом и привяжите аккаунт."
     await send_stars_invoice(
         bot,
-        payer["tg_id"],
+        chat_id,
         title=f"{fmt_num(amount)} {config.CURRENCY_NAME}",
         description=f"Пополнение {config.CURRENCY_NAME} в {config.BRAND} для {db.shown_username(target)}.",
         payload=f"rs:{stars}:{target_id}",
@@ -953,10 +956,14 @@ async def validate_order(uid: int, payload: str, total: int) -> str | None:
 @router.pre_checkout_query()
 async def on_pre_checkout(q: PreCheckoutQuery):
     # На техработах оплату не принимаем: pre_checkout не проходит через GuardMiddleware, поэтому проверяем здесь.
-    if q.from_user.id != config.OWNER_ID and await db.get_meta("maintenance") == "1":
+    if q.from_user.id != config.OWNER_TELEGRAM_ID and await db.get_meta("maintenance") == "1":
         await q.answer(ok=False, error_message="Технические работы. Оплатите чуть позже.")
         return
-    err = await validate_order(q.from_user.id, q.invoice_payload, q.total_amount)
+    linked = await db.get_by_telegram(q.from_user.id)
+    if not linked:
+        await q.answer(ok=False, error_message="Сначала запустите бота для привязки аккаунта.")
+        return
+    err = await validate_order(linked["tg_id"], q.invoice_payload, q.total_amount)
     if err:
         await q.answer(ok=False, error_message=err)
     else:
@@ -1026,7 +1033,7 @@ async def deliver_order(bot: Bot, uid: int, payload: str, stars: int, charge: st
 @router.message(F.successful_payment)
 async def on_paid(message: Message, user: dict):
     sp = message.successful_payment
-    uid, stars, charge, payload = message.from_user.id, sp.total_amount, sp.telegram_payment_charge_id, sp.invoice_payload
+    uid, stars, charge, payload = user["tg_id"], sp.total_amount, sp.telegram_payment_charge_id, sp.invoice_payload
     try:  # запись ДО выдачи: повторная доставка апдейта не выдаст товар второй раз
         pid = await db.add_purchase(uid, "pending", "В обработке", stars, charge, payload, "processing")
     except sqlite3.IntegrityError:
@@ -1624,7 +1631,11 @@ async def run_crash(bot: Bot, uid: int):
 
 @router.callback_query(F.data.startswith("crash:cash:"))
 async def cb_crash_cash(call: CallbackQuery):
-    uid = call.from_user.id
+    linked = await db.get_by_telegram(call.from_user.id)
+    if not linked:
+        await call.answer("Аккаунт не найден.", show_alert=True)
+        return
+    uid = linked["tg_id"]
     g = crash_live.get(uid)
     if not g or g["done"] or g["gid"] != int(call.data.split(":")[2]):
         await call.answer("Игра уже закончилась.")
