@@ -481,7 +481,7 @@ async def init_db() -> None:
 
 def _new_rise_id(used: set) -> int:
     while True:
-        v = random.randint(100_000_000, 999_999_999)
+        v = 10_000_000 + secrets.randbelow(90_000_000)
         if v not in used:
             return v
 
