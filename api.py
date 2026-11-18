@@ -9,6 +9,7 @@ from __future__ import annotations
 from pathlib import Path
 import hmac
 import logging
+import secrets
 import time
 
 from aiohttp import web
@@ -246,6 +247,111 @@ async def h_send_message(request: web.Request):
     }})
 
 
+async def h_spaces(request: web.Request):
+    user = await _current_user(request)
+    if not user:
+        return web.json_response({"ok": False, "error": "unauthorized"}, status=401)
+    rows = await db.fetchall(
+        """SELECT s.*, m.role,
+             (SELECT body FROM rg_space_messages x WHERE x.space_id=s.id ORDER BY x.id DESC LIMIT 1) AS last_message
+           FROM rg_spaces s JOIN rg_space_members m ON m.space_id=s.id
+           WHERE m.user_id=? ORDER BY s.id DESC LIMIT 100""",
+        (user["tg_id"],))
+    return web.json_response({"ok": True, "spaces": [
+        {"id": x["id"], "title": x["title"], "description": x["description"],
+         "type": x["kind"], "role": x["role"], "invite_code": x["invite_code"],
+         "last_message": x["last_message"] or ""} for x in rows
+    ]})
+
+
+async def h_space_create(request: web.Request):
+    user = await _current_user(request)
+    if not user:
+        return web.json_response({"ok": False, "error": "unauthorized"}, status=401)
+    data = await _json(request)
+    title = str(data.get("title") or "").strip()
+    description = str(data.get("description") or "").strip()[:500]
+    kind = str(data.get("type") or "group")
+    if len(title) < 2 or len(title) > 64 or kind not in ("group", "channel"):
+        return web.json_response({"ok": False, "error": "invalid_space"}, status=400)
+    invite = secrets.token_urlsafe(8)
+    async with db.connect() as conn:
+        cur = await conn.execute(
+            "INSERT INTO rg_spaces(title,description,kind,owner_id,invite_code,created_at) VALUES(?,?,?,?,?,?)",
+            (title, description, kind, user["tg_id"], invite, db.now()))
+        space_id = cur.lastrowid
+        await conn.execute(
+            "INSERT INTO rg_space_members(space_id,user_id,role,joined_at) VALUES(?,?,?,?)",
+            (space_id, user["tg_id"], "owner", db.now()))
+        await conn.commit()
+    return web.json_response({"ok": True, "space": {"id": space_id, "title": title,
+        "type": kind, "invite_code": invite, "role": "owner"}})
+
+
+async def h_space_join(request: web.Request):
+    user = await _current_user(request)
+    if not user:
+        return web.json_response({"ok": False, "error": "unauthorized"}, status=401)
+    data = await _json(request)
+    invite = str(data.get("invite_code") or "").strip()
+    space = await db.fetchone("SELECT * FROM rg_spaces WHERE invite_code=?", (invite,))
+    if not space:
+        return web.json_response({"ok": False, "error": "invite_not_found"}, status=404)
+    await db.execute(
+        "INSERT OR IGNORE INTO rg_space_members(space_id,user_id,role,joined_at) VALUES(?,?,?,?)",
+        (space["id"], user["tg_id"], "member", db.now()))
+    return web.json_response({"ok": True, "space": {"id": space["id"], "title": space["title"], "type": space["kind"]}})
+
+
+async def h_space_messages(request: web.Request):
+    user = await _current_user(request)
+    if not user:
+        return web.json_response({"ok": False, "error": "unauthorized"}, status=401)
+    try:
+        space_id = int(request.match_info["space_id"])
+    except ValueError:
+        return web.json_response({"ok": False, "error": "bad_space_id"}, status=400)
+    member = await db.fetchone("SELECT role FROM rg_space_members WHERE space_id=? AND user_id=?",
+                               (space_id, user["tg_id"]))
+    if not member:
+        return web.json_response({"ok": False, "error": "not_a_member"}, status=403)
+    space = await db.fetchone("SELECT * FROM rg_spaces WHERE id=?", (space_id,))
+    rows = await db.fetchall(
+        """SELECT m.id,m.body,m.created_at,u.rise_id,u.name,u.username
+           FROM rg_space_messages m JOIN users u ON u.tg_id=m.sender_id
+           WHERE m.space_id=? ORDER BY m.id DESC LIMIT 100""", (space_id,))
+    rows.reverse()
+    return web.json_response({"ok": True, "space": {"id": space_id, "title": space["title"],
+        "type": space["kind"], "role": member["role"], "invite_code": space["invite_code"]},
+        "messages": [{"id": x["id"], "text": x["body"], "created_at": x["created_at"],
+          "sender": x["name"] or "Пользователь", "rise_id": x["rise_id"],
+          "username": x["username"]} for x in rows]})
+
+
+async def h_space_send(request: web.Request):
+    user = await _current_user(request)
+    if not user:
+        return web.json_response({"ok": False, "error": "unauthorized"}, status=401)
+    try:
+        space_id = int(request.match_info["space_id"])
+    except ValueError:
+        return web.json_response({"ok": False, "error": "bad_space_id"}, status=400)
+    data = await _json(request)
+    body = str(data.get("text") or "").strip()
+    if not body or len(body) > 4000:
+        return web.json_response({"ok": False, "error": "message_length"}, status=400)
+    space = await db.fetchone("SELECT * FROM rg_spaces WHERE id=?", (space_id,))
+    member = await db.fetchone("SELECT role FROM rg_space_members WHERE space_id=? AND user_id=?",
+                               (space_id, user["tg_id"]))
+    if not space or not member:
+        return web.json_response({"ok": False, "error": "not_a_member"}, status=403)
+    if space["kind"] == "channel" and member["role"] not in ("owner", "admin"):
+        return web.json_response({"ok": False, "error": "channel_read_only"}, status=403)
+    await db.execute("INSERT INTO rg_space_messages(space_id,sender_id,body,created_at) VALUES(?,?,?,?)",
+                     (space_id, user["tg_id"], body, db.now()))
+    return web.json_response({"ok": True})
+
+
 async def h_inventory(request: web.Request):
     user = await _current_user(request)
     if not user:
@@ -392,6 +498,11 @@ async def start_api(bot) -> web.AppRunner | None:
         web.get("/api/users/search", h_user_search),
         web.get("/api/chats", h_chats),
         web.get("/api/chats/{rise_id}/messages", h_messages),
+        web.get("/api/spaces", h_spaces),
+        web.post("/api/spaces", h_space_create),
+        web.post("/api/spaces/join", h_space_join),
+        web.get("/api/spaces/{space_id}/messages", h_space_messages),
+        web.post("/api/spaces/{space_id}/messages", h_space_send),
         web.post("/api/chats/{rise_id}/messages", h_send_message),
         web.get("/api/inventory", h_inventory),
         web.post("/api/inventory/{item_id}/activate", h_activate_nft),
