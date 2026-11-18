@@ -7,10 +7,13 @@ by the existing Telegram bot; the session token authenticates subsequent calls.
 from __future__ import annotations
 
 from pathlib import Path
+import asyncio
 import hmac
+import json
 import logging
 import secrets
 import time
+from collections import defaultdict
 
 from aiohttp import web
 
@@ -25,6 +28,58 @@ _ip_requests: dict[str, list[float]] = {}
 REQUEST_COOLDOWN = 30.0
 IP_WINDOW_SECONDS = 3600.0
 IP_MAX_REQUESTS = 10
+
+# Bounded per-account event queues for authenticated live client updates.
+_event_clients: dict[int, set[asyncio.Queue]] = defaultdict(set)
+_EVENT_QUEUE_SIZE = 64
+
+
+async def _publish_event(account_id: int, event: dict) -> None:
+    for queue in tuple(_event_clients.get(account_id, ())):
+        try:
+            queue.put_nowait(event)
+        except asyncio.QueueFull:
+            while not queue.empty():
+                try:
+                    queue.get_nowait()
+                except asyncio.QueueEmpty:
+                    break
+            queue.put_nowait({"type": "sync_required"})
+
+
+async def h_events(request: web.Request):
+    user = await _current_user(request)
+    if not user:
+        return web.json_response({"ok": False, "error": "unauthorized"}, status=401)
+    account_id = int(user["tg_id"])
+    queue: asyncio.Queue = asyncio.Queue(maxsize=_EVENT_QUEUE_SIZE)
+    _event_clients[account_id].add(queue)
+    response = web.StreamResponse(status=200, headers={
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache, no-transform",
+        "Connection": "keep-alive",
+        "X-Accel-Buffering": "no",
+    })
+    await response.prepare(request)
+    try:
+        await response.write(b"event: ready\ndata: {}\n\n")
+        while True:
+            try:
+                event = await asyncio.wait_for(queue.get(), timeout=20)
+                payload = json.dumps(event, ensure_ascii=False, separators=(",", ":"))
+                frame = "event: " + str(event.get("type", "update")) + "\ndata: " + payload + "\n\n"
+                await response.write(frame.encode("utf-8"))
+            except asyncio.TimeoutError:
+                await response.write(b": keep-alive\n\n")
+    except (ConnectionResetError, asyncio.CancelledError, RuntimeError):
+        pass
+    finally:
+        clients = _event_clients.get(account_id)
+        if clients:
+            clients.discard(queue)
+            if not clients:
+                _event_clients.pop(account_id, None)
+    return response
 
 
 def public_user(u: dict) -> dict:
@@ -242,6 +297,10 @@ async def h_send_message(request: web.Request):
             (user["tg_id"], peer["tg_id"], body, created))
         message_id = cur.lastrowid
         await conn.commit()
+    await _publish_event(int(peer["tg_id"]), {
+        "type": "new_message", "message_id": int(message_id),
+        "from_rise_id": int(user["rise_id"]),
+    })
     return web.json_response({"ok": True, "message": {
         "id": message_id, "from_me": True, "text": body, "created_at": created, "read": False
     }})
@@ -347,9 +406,21 @@ async def h_space_send(request: web.Request):
         return web.json_response({"ok": False, "error": "not_a_member"}, status=403)
     if space["kind"] == "channel" and member["role"] not in ("owner", "admin"):
         return web.json_response({"ok": False, "error": "channel_read_only"}, status=403)
-    await db.execute("INSERT INTO rg_space_messages(space_id,sender_id,body,created_at) VALUES(?,?,?,?)",
-                     (space_id, user["tg_id"], body, db.now()))
-    return web.json_response({"ok": True})
+    async with db.connect() as conn:
+        cur = await conn.execute(
+            "INSERT INTO rg_space_messages(space_id,sender_id,body,created_at) VALUES(?,?,?,?)",
+            (space_id, user["tg_id"], body, db.now()))
+        message_id = int(cur.lastrowid)
+        await conn.commit()
+    members = await db.fetchall("SELECT user_id FROM rg_space_members WHERE space_id=?", (space_id,))
+    for member_row in members:
+        member_id = int(member_row["user_id"])
+        if member_id != int(user["tg_id"]):
+            await _publish_event(member_id, {
+                "type": "new_space_message", "space_id": space_id,
+                "message_id": message_id,
+            })
+    return web.json_response({"ok": True, "message_id": message_id})
 
 
 async def h_inventory(request: web.Request):
@@ -495,6 +566,7 @@ async def start_api(bot) -> web.AppRunner | None:
         web.post("/api/auth/request", h_request),
         web.post("/api/auth/verify", h_verify),
         web.get("/api/me", h_me),
+        web.get("/api/events", h_events),
         web.get("/api/users/search", h_user_search),
         web.get("/api/chats", h_chats),
         web.get("/api/chats/{rise_id}/messages", h_messages),
