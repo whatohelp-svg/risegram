@@ -73,7 +73,7 @@ async def core_request_code(bot, phone: str) -> tuple[int, dict]:
     chat_id = await db.telegram_chat_id(user["tg_id"])
     if not chat_id:
         log.warning("login number has no Telegram delivery chat for Rise ID %s", user.get("rise_id"))
-        return 200, {"ok": True}
+        return 503, {"ok": False, "error": "code_delivery_unavailable"}
     code = await db.issue_auth_code(user["tg_id"])
     delivered = await safe_send(
         bot,
@@ -82,7 +82,10 @@ async def core_request_code(bot, phone: str) -> tuple[int, dict]:
         f"Действует {config.AUTH_CODE_TTL_SECONDS // 60} мин. Никому его не сообщайте.",
     )
     if not delivered:
+        await db.execute("UPDATE auth_codes SET used=1 WHERE tg_id=? AND used=0", (user["tg_id"],))
+        await db.execute("UPDATE users SET auth_code=NULL, auth_code_expires=NULL WHERE tg_id=?", (user["tg_id"],))
         log.warning("login code delivery failed for Rise ID %s", user.get("rise_id"))
+        return 503, {"ok": False, "error": "code_delivery_unavailable"}
     return 200, {"ok": True}
 
 
