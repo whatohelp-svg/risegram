@@ -1154,6 +1154,33 @@ async def ensure_owner() -> None:
                 await db.execute("UPDATE users SET username=? WHERE tg_id=?", (owner_name, oid))
             else:
                 log.warning("OWNER_USERNAME @%s is already used by another account", owner_name)
+        # Seed the initial tradable username NFTs into the owner's inventory.
+        # They are assets, not the owner's primary account handle, and are not listed
+        # until the owner chooses prices in the bot marketplace.
+        for nft_name in config.STARTER_NFT_USERNAMES:
+            if not (4 <= len(nft_name) <= config.NFT_MAX_LEN) or not nft_name[0].isalpha():
+                continue
+            cur = await db.execute(
+                "SELECT 1 FROM user_nft_inventory WHERE item_type='username' AND lower(value)=? LIMIT 1",
+                (nft_name,),
+            )
+            exists = await cur.fetchone()
+            await cur.close()
+            if exists:
+                continue
+            cur = await db.execute(
+                "SELECT 1 FROM users WHERE lower(COALESCE(username,''))=? OR lower(COALESCE(active_username,''))=? LIMIT 1",
+                (nft_name, nft_name),
+            )
+            claimed = await cur.fetchone()
+            await cur.close()
+            if claimed:
+                log.warning("starter NFT @%s skipped: username is already active on an account", nft_name)
+                continue
+            await db.execute(
+                "INSERT OR IGNORE INTO user_nft_inventory (tg_id,item_type,value,price_stars,created_at) VALUES (?,'username',?,0,?)",
+                (oid, nft_name, now()),
+            )
         await db.commit()
 
 
