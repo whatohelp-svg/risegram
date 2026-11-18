@@ -74,7 +74,7 @@ def create_media_handlers(current_user):
             if not extension:
                 return web.json_response({"ok": False, "error": "unsupported_file_type"}, status=415)
 
-            supplied_name = part.filename.replace("\\\\", "/").split("/")[-1]
+            supplied_name = part.filename.replace(chr(92), "/").split("/")[-1]
             original_name = re.sub(r"[^A-Za-z0-9._-]", "_", supplied_name)[:120].strip("._") or "upload"
             chunks = []
             total = 0
