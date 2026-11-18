@@ -32,7 +32,7 @@ own PostgreSQL and Redis state.
    docker compose --env-file .env.mtproto -f docker-compose.mtproto.yml up -d --build
    ```
 
-The MTProto listener is TCP port 2398. The admin panel is exposed on TCP port
+The MTProto listener is TCP port 2398 by default. The RiseGram Docker build also supports `TELESRV_ADVERTISE_PORT` so a TCP proxy with a generated external port can advertise that external port in `help.getConfig.DCOptions` while the process continues listening on 2398 internally. The admin panel is exposed on TCP port
 2600; put it behind HTTPS and restrict access before publishing it. The
 server generates its own persistent RSA private key under the mounted
 `/var/lib/telesrv` volume on first boot. Back up that volume; changing the RSA
