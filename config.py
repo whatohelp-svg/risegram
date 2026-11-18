@@ -120,7 +120,7 @@ MARKET_PAGE = 6
 
 # ── Владелец: ∞ балансы и ID 1 ──────────────────────────────────────────────
 INFINITE = 1e15                          # в интерфейсе значения от 1e12 показываются как ∞
-OWNER_RISE_ID = 1
+OWNER_RISE_ID = 0  # assigned a random unique 8-digit value on first initialization
 
 
 def is_reserved_username(name: str | None) -> bool:
