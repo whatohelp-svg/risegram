@@ -1165,42 +1165,30 @@ async def stats() -> dict:
 
 
 async def ensure_owner() -> None:
-    """Владелец: бесконечные Gram и RiseStars (хранится 1e15, в интерфейсе ∞), Мажор и RiseGram ID = 1."""
+    """Create the owner's internal account and link the Telegram bot only for private delivery."""
     oid = config.OWNER_ID
     async with connect() as db:
-        cur = await db.execute("SELECT rise_id, risestars, gram_balance, verified FROM users WHERE tg_id=?", (oid,))
+        cur = await db.execute("SELECT tg_id FROM users WHERE tg_id=?", (oid,))
         row = await cur.fetchone()
         await cur.close()
         if not row:
-            return
-        if row["risestars"] < config.INFINITE or row["gram_balance"] < config.INFINITE or not row["verified"]:
             await db.execute(
-                "UPDATE users SET risestars=?, gram_balance=?, verified=1 WHERE tg_id=?", (config.INFINITE, config.INFINITE, oid)
+                "INSERT INTO users (tg_id,user_id,rise_id,name,username,phone,phone_digits,risestars,gram_balance,verified,created_at,last_seen) "
+                "VALUES (?,?,?,?,?,?,?,?,?,1,?,?)",
+                (oid, str(uuid.uuid4()), config.OWNER_RISE_ID, "RiseGram Owner", config.OWNER_USERNAME,
+                 "+70000000000", "70000000000", config.INFINITE, config.INFINITE, now(), now()),
             )
-        if row["rise_id"] != config.OWNER_RISE_ID:
-            try:
-                await db.execute("UPDATE users SET rise_id=? WHERE tg_id=?", (config.OWNER_RISE_ID, oid))
-            except sqlite3.IntegrityError:
-                await db.rollback()
-                log.warning("rise_id=%s занят другим игроком", config.OWNER_RISE_ID)
-        # The account handle is separate from tradable NFT usernames.
-        owner_name = config.OWNER_USERNAME
-        if owner_name:
-            taken = await db.execute(
-                "SELECT 1 FROM users WHERE lower(COALESCE(username,''))=? AND tg_id!=? LIMIT 1",
-                (owner_name, oid),
-            )
-            collision = await taken.fetchone()
-            await taken.close()
-            if not collision:
-                await db.execute("UPDATE users SET username=? WHERE tg_id=?", (owner_name, oid))
-            else:
-                log.warning("OWNER_USERNAME @%s is already used by another account", owner_name)
-        # Seed the initial tradable username NFTs into the owner's inventory.
-        # They are assets, not the owner's primary account handle, and are not listed
-        # until the owner chooses prices in the bot marketplace.
+        await db.execute(
+            "INSERT INTO telegram_links (telegram_chat_id,tg_id,linked_at) VALUES (?,?,?) "
+            "ON CONFLICT(telegram_chat_id) DO UPDATE SET tg_id=excluded.tg_id, linked_at=excluded.linked_at",
+            (config.OWNER_TELEGRAM_ID, oid, now()),
+        )
+        await db.execute(
+            "UPDATE users SET risestars=?, gram_balance=?, verified=1, rise_id=?, username=? WHERE tg_id=?",
+            (config.INFINITE, config.INFINITE, config.OWNER_RISE_ID, config.OWNER_USERNAME, oid),
+        )
         for nft_name in config.STARTER_NFT_USERNAMES:
-            if not (4 <= len(nft_name) <= config.NFT_MAX_LEN) or not nft_name[0].isalpha():
+            if not (config.NFT_MIN_LEN <= len(nft_name) <= config.NFT_MAX_LEN) or not nft_name[0].isalpha():
                 continue
             cur = await db.execute(
                 "SELECT 1 FROM user_nft_inventory WHERE item_type='username' AND lower(value)=? LIMIT 1",
@@ -1211,8 +1199,8 @@ async def ensure_owner() -> None:
             if exists:
                 continue
             cur = await db.execute(
-                "SELECT 1 FROM users WHERE lower(COALESCE(username,''))=? OR lower(COALESCE(active_username,''))=? LIMIT 1",
-                (nft_name, nft_name),
+                "SELECT 1 FROM users WHERE (lower(COALESCE(username,''))=? OR lower(COALESCE(active_username,''))=?) AND tg_id!=? LIMIT 1",
+                (nft_name, nft_name, oid),
             )
             claimed = await cur.fetchone()
             await cur.close()
@@ -1220,7 +1208,7 @@ async def ensure_owner() -> None:
                 log.warning("starter NFT @%s skipped: username is already active on an account", nft_name)
                 continue
             await db.execute(
-                "INSERT OR IGNORE INTO user_nft_inventory (tg_id,item_type,value,price_stars,created_at) VALUES (?,'username',?,0,?)",
+                "INSERT INTO user_nft_inventory (tg_id,item_type,value,price_stars,created_at) VALUES (?,'username',?,0,?)",
                 (oid, nft_name, now()),
             )
         await db.commit()
