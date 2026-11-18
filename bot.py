@@ -1054,7 +1054,10 @@ async def on_paid(message: Message, user: dict):
             )
         return
     try:
-        await message.bot.refund_star_payment(user_id=uid, telegram_payment_charge_id=charge)
+        telegram_id = await db.telegram_chat_id(uid)
+        if telegram_id is None:
+            raise RuntimeError("account has no Telegram payment link")
+        await message.bot.refund_star_payment(user_id=telegram_id, telegram_payment_charge_id=charge)
         status, note = "refunded", "Не удалось выдать покупку, поэтому звёзды возвращены на ваш счёт Telegram."
     except Exception:
         log.exception("refund failed uid=%s charge=%s", uid, charge)
@@ -1757,7 +1760,11 @@ async def hl_watchdog(uid: int, gid: int):
 
 @router.callback_query(F.data.startswith("hl:go:"))
 async def cb_hl_go(call: CallbackQuery):
-    uid = call.from_user.id
+    linked = await db.get_by_telegram(call.from_user.id)
+    if not linked:
+        await call.answer("Аккаунт не найден.", show_alert=True)
+        return
+    uid = linked["tg_id"]
     parts = call.data.split(":")
     g = hl_live.get(uid)
     if not g or g["done"] or g["gid"] != int(parts[2]) or parts[3] not in ("hi", "lo"):
@@ -1791,7 +1798,11 @@ async def cb_hl_go(call: CallbackQuery):
 
 @router.callback_query(F.data.startswith("hl:cash:"))
 async def cb_hl_cash(call: CallbackQuery):
-    uid = call.from_user.id
+    linked = await db.get_by_telegram(call.from_user.id)
+    if not linked:
+        await call.answer("Аккаунт не найден.", show_alert=True)
+        return
+    uid = linked["tg_id"]
     g = hl_live.get(uid)
     if not g or g["done"] or g["gid"] != int(call.data.split(":")[2]):
         await call.answer("Игра уже закончилась.")
