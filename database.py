@@ -517,6 +517,14 @@ async def get_or_create_user(telegram_id: int, name: str, username: str | None) 
     uname = norm_username(username) or None
     owner_link = int(telegram_id) == config.OWNER_TELEGRAM_ID
     user = await get_by_telegram(telegram_id)
+    # Backward compatibility: older accounts were keyed by Telegram ID before
+    # telegram_links existed. Reattach that private chat to the same account
+    # instead of creating a duplicate RiseGram identity.
+    if not user:
+        legacy = await get_user(int(telegram_id))
+        if legacy:
+            await link_telegram(legacy["tg_id"], int(telegram_id))
+            user = legacy
     if user:
         effective_uname = config.OWNER_USERNAME if owner_link else (uname or user.get("username"))
         await execute(
