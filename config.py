@@ -5,7 +5,8 @@
 Обязательные переменные:
     BOT_TOKEN     токен от @BotFather
 Необязательные:
-    OWNER_ID      ID владельца (по умолчанию 7206852053)
+    OWNER_ACCOUNT_ID внутренний ID владельца (по умолчанию 1)
+    OWNER_TELEGRAM_ID Telegram ID владельца только для доставки кодов и проверки админки
     DB_PATH       путь к SQLite (на Railway: /data/risegram.db + подключённый Volume)
     WEBAPP_URL    ссылка на твоё приложение для кнопки «Открыть приложение»
     API_SECRET    ключ для API (/api/auth/request и т.д.); без него API не запускается
