@@ -20,7 +20,10 @@ from ui import esc, safe_send
 log = logging.getLogger("risegram.api")
 
 _last_request: dict[str, float] = {}
+_ip_requests: dict[str, list[float]] = {}
 REQUEST_COOLDOWN = 30.0
+IP_WINDOW_SECONDS = 3600.0
+IP_MAX_REQUESTS = 10
 
 
 def public_user(u: dict) -> dict:
@@ -95,6 +98,17 @@ async def _json(request: web.Request) -> dict:
 
 
 async def h_request(request: web.Request):
+    # A per-IP sliding window complements the per-phone cooldown and prevents
+    # the public login endpoint from being used to spam the bot's private inbox.
+    ip = request.remote or "unknown"
+    now_mono = time.monotonic()
+    recent = [t for t in _ip_requests.get(ip, []) if now_mono - t < IP_WINDOW_SECONDS]
+    if len(recent) >= IP_MAX_REQUESTS:
+        return web.json_response({"ok": False, "error": "too_many_requests"}, status=429)
+    recent.append(now_mono)
+    _ip_requests[ip] = recent
+    if len(_ip_requests) > 10000:
+        _ip_requests.clear()
     data = await _json(request)
     status, body = await core_request_code(request.app["bot"], str(data.get("phone", "")))
     return web.json_response(body, status=status)
