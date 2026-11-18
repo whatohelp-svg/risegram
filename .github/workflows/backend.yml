@@ -17,6 +17,8 @@ jobs:
         run: pip install -r requirements.txt
       - name: Compile Python modules
         run: python -m compileall -q .
+      - name: Run identity tests
+        run: python -m unittest discover -s tests -v
       - name: Check required independent identity schema
         run: |
           python - <<'PY'
