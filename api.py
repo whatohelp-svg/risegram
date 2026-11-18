@@ -28,7 +28,7 @@ IP_MAX_REQUESTS = 10
 
 def public_user(u: dict) -> dict:
     return {
-        "tg_id": u["tg_id"],
+        "user_id": u.get("user_id"),
         "rise_id": u["rise_id"],
         "name": u.get("name"),
         "username": db.shown_username(u).lstrip("@") if u.get("username") or u.get("active_username") else None,
@@ -156,8 +156,7 @@ async def h_market(request: web.Request):
     rows = await db.market_page(kind, limit, offset)
     return web.json_response({"ok": True, "items": [
         {"id": x["id"], "type": x["item_type"], "value": x["value"],
-         "price": float(x["price"]), "seller_id": x["seller_id"],
-         "seller_username": x.get("seller_username")}
+         "price": float(x["price"]), "seller_username": x.get("seller_username")}
         for x in rows
     ], "balance": float(user.get("risestars") or 0)})
 
