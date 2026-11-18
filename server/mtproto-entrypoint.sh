@@ -1,6 +1,15 @@
 #!/bin/sh
 set -eu
 
+# Railway mounts named volumes as root-owned directories. Claim the persistent
+# server state before dropping privileges, otherwise the first generated RSA
+# identity cannot be written and the service exits during startup.
+if [ "$(id -u)" -eq 0 ]; then
+  mkdir -p /var/lib/telesrv
+  chown -R 10001:10001 /var/lib/telesrv
+  exec su-exec 10001:10001 "$0" "$@"
+fi
+
 umask 077
 
 command_name="${1##*/}"
