@@ -2,6 +2,8 @@ package com.risegram.app;
 
 import android.app.Activity;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.content.Context;
@@ -25,6 +27,21 @@ public class MainActivity extends Activity {
     private SharedPreferences prefs;
     private LinearLayout root, content;
     private String token = "";
+    private TextView balanceView;
+    private final Handler balanceHandler = new Handler(Looper.getMainLooper());
+    private final Runnable balancePoll = new Runnable() {
+        @Override public void run() {
+            if (!token.isEmpty() && balanceView != null) {
+                api("GET", "/api/me", token, null, (res, err) -> {
+                    JSONObject u = res.optJSONObject("user");
+                    if (err == null && u != null && balanceView != null) {
+                        balanceView.setText("⭐ RiseStars   " + number(u.optDouble("risestars")) + "\n💎 Gram   " + number(u.optDouble("gram_balance")));
+                    }
+                });
+            }
+            balanceHandler.postDelayed(this, 5000);
+        }
+    };
 
     private int bg = Color.rgb(13, 19, 29), panel = Color.rgb(24, 33, 47);
     private int text = Color.rgb(238, 243, 250), muted = Color.rgb(150, 164, 183);
@@ -353,6 +370,17 @@ public class MainActivity extends Activity {
     private String number(double n) { return n == Math.rint(n) ? String.format(java.util.Locale.US, "%.0f", n) : String.format(java.util.Locale.US, "%.2f", n); }
     private int dp(int n) { return (int) (n * getResources().getDisplayMetrics().density + 0.5f); }
     private void toast(String value) { Toast.makeText(this, value, Toast.LENGTH_LONG).show(); }
+
+    @Override protected void onResume() {
+        super.onResume();
+        balanceHandler.removeCallbacks(balancePoll);
+        balanceHandler.postDelayed(balancePoll, 5000);
+    }
+
+    @Override protected void onPause() {
+        balanceHandler.removeCallbacks(balancePoll);
+        super.onPause();
+    }
 
     @Override protected void onDestroy() { super.onDestroy(); io.shutdown(); }
 }
