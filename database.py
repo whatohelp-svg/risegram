@@ -346,6 +346,56 @@ INDEXES = [
 ]
 
 
+async def _migrate_legacy_telegram_keys(db, rows) -> None:
+    """Move legacy Telegram-keyed rows to internal RiseGram IDs and preserve delivery links."""
+    cur = await db.execute("SELECT COUNT(*) FROM telegram_links")
+    linked_count = (await cur.fetchone())[0]
+    await cur.close()
+    if linked_count or not rows:
+        return
+
+    old_ids = [int(row["tg_id"]) for row in rows]
+    old_set = set(old_ids)
+    mapping: dict[int, int] = {}
+    if config.OWNER_TELEGRAM_ID in old_set:
+        mapping[config.OWNER_TELEGRAM_ID] = config.OWNER_ID
+    next_id = max(config.OWNER_ID + 1, 2)
+    for old_id in old_ids:
+        if old_id not in mapping:
+            while next_id in old_set or next_id in mapping.values():
+                next_id += 1
+            mapping[old_id] = next_id
+            next_id += 1
+
+    relations = [
+        ("testers", "tg_id"), ("testers", "added_by"),
+        ("admin_logs", "admin_id"), ("user_nft_inventory", "tg_id"),
+        ("purchases", "tg_id"), ("task_claims", "tg_id"),
+        ("scam_requests", "requester_id"), ("scam_requests", "resolved_by"),
+        ("verified_entities", "owner_id"), ("reservations", "tg_id"),
+        ("auth_codes", "tg_id"), ("sessions", "tg_id"),
+        ("legacy_numbers", "claimed_by"), ("games", "tg_id"),
+        ("transfers", "from_id"), ("transfers", "to_id"),
+        ("market_listings", "seller_id"), ("market_listings", "buyer_id"),
+    ]
+    # Temporary negative keys prevent collisions while primary and foreign keys move.
+    for old_id, new_id in mapping.items():
+        temp_id = -new_id
+        await db.execute("UPDATE users SET tg_id=? WHERE tg_id=?", (temp_id, old_id))
+        for table, column in relations:
+            await db.execute(f"UPDATE {table} SET {column}=? WHERE {column}=?", (temp_id, old_id))
+    for old_id, new_id in mapping.items():
+        temp_id = -new_id
+        await db.execute("UPDATE users SET tg_id=? WHERE tg_id=?", (new_id, temp_id))
+        for table, column in relations:
+            await db.execute(f"UPDATE {table} SET {column}=? WHERE {column}=?", (new_id, temp_id))
+        await db.execute(
+            "INSERT INTO telegram_links (telegram_chat_id,tg_id,linked_at) VALUES (?,?,?)",
+            (old_id, new_id, now()),
+        )
+    log.info("migrated %d legacy Telegram identities to internal RiseGram IDs", len(mapping))
+
+
 async def init_db() -> None:
     async with connect() as db:
         await db.execute("PRAGMA journal_mode=WAL")
@@ -361,6 +411,10 @@ async def init_db() -> None:
         await db.commit()
 
         # Дозаполняем rise_id / phone_digits у старых пользователей.
+        cur = await db.execute("SELECT tg_id, user_id, phone, rise_id, phone_digits FROM users")
+        rows = await cur.fetchall()
+        await cur.close()
+        await _migrate_legacy_telegram_keys(db, rows)
         cur = await db.execute("SELECT tg_id, user_id, phone, rise_id, phone_digits FROM users")
         rows = await cur.fetchall()
         await cur.close()
