@@ -139,6 +139,25 @@ async def h_inventory(request: web.Request):
     ]})
 
 
+async def h_activate_nft(request: web.Request):
+    user = await _current_user(request)
+    if not user:
+        return web.json_response({"ok": False, "error": "unauthorized"}, status=401)
+    try:
+        item_id = int(request.match_info["item_id"])
+    except ValueError:
+        return web.json_response({"ok": False, "error": "bad_item_id"}, status=400)
+    item = await db.fetchone(
+        "SELECT * FROM user_nft_inventory WHERE id=? AND tg_id=?",
+        (item_id, user["tg_id"]),
+    )
+    if not item or item["item_type"] != "username":
+        return web.json_response({"ok": False, "error": "username_nft_not_found"}, status=404)
+    await db.set_active_username(user["tg_id"], item["value"])
+    fresh = await db.get_user(user["tg_id"])
+    return web.json_response({"ok": True, "user": public_user(fresh), "active_username": item["value"]})
+
+
 async def h_market(request: web.Request):
     user = await _current_user(request)
     if not user:
@@ -248,6 +267,7 @@ async def start_api(bot) -> web.AppRunner | None:
         web.post("/api/auth/verify", h_verify),
         web.get("/api/me", h_me),
         web.get("/api/inventory", h_inventory),
+        web.post("/api/inventory/{item_id}/activate", h_activate_nft),
         web.get("/api/market", h_market),
         web.post("/api/market", h_market_list),
         web.post("/api/market/{listing_id}/buy", h_market_buy),
