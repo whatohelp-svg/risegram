@@ -462,6 +462,184 @@ async def h_space_send(request: web.Request):
     return web.json_response({"ok": True, "message_id": message_id})
 
 
+async def h_space_members(request: web.Request):
+    user = await _current_user(request)
+    if not user:
+        return web.json_response({"ok": False, "error": "unauthorized"}, status=401)
+    try:
+        space_id = int(request.match_info["space_id"])
+    except ValueError:
+        return web.json_response({"ok": False, "error": "bad_space_id"}, status=400)
+    membership = await db.fetchone(
+        "SELECT role FROM rg_space_members WHERE space_id=? AND user_id=?",
+        (space_id, user["tg_id"]),
+    )
+    if not membership:
+        return web.json_response({"ok": False, "error": "not_a_member"}, status=403)
+    rows = await db.fetchall(
+        """SELECT u.rise_id,u.name,u.username,u.active_username,u.verified,m.role,m.joined_at
+           FROM rg_space_members m JOIN users u ON u.tg_id=m.user_id
+           WHERE m.space_id=? ORDER BY CASE m.role WHEN 'owner' THEN 0 WHEN 'admin' THEN 1 ELSE 2 END,m.joined_at""",
+        (space_id,),
+    )
+    return web.json_response({"ok": True, "members": [
+        {"rise_id": x["rise_id"], "name": x["name"],
+         "username": x["active_username"] or x["username"],
+         "verified": bool(x["verified"]), "role": x["role"], "joined_at": x["joined_at"]}
+        for x in rows
+    ]})
+
+
+async def h_space_change_role(request: web.Request):
+    user = await _current_user(request)
+    if not user:
+        return web.json_response({"ok": False, "error": "unauthorized"}, status=401)
+    try:
+        space_id = int(request.match_info["space_id"])
+        target_rise_id = int(request.match_info["rise_id"])
+    except ValueError:
+        return web.json_response({"ok": False, "error": "bad_identifier"}, status=400)
+    data = await _json(request)
+    role = str(data.get("role") or "")
+    if role not in ("admin", "member"):
+        return web.json_response({"ok": False, "error": "invalid_role"}, status=400)
+    space = await db.fetchone("SELECT owner_id FROM rg_spaces WHERE id=?", (space_id,))
+    actor = await db.fetchone(
+        "SELECT role FROM rg_space_members WHERE space_id=? AND user_id=?",
+        (space_id, user["tg_id"]),
+    )
+    target = await db.fetchone(
+        """SELECT m.user_id,m.role FROM rg_space_members m JOIN users u ON u.tg_id=m.user_id
+           WHERE m.space_id=? AND u.rise_id=?""",
+        (space_id, target_rise_id),
+    )
+    if not space or not actor or int(space["owner_id"]) != int(user["tg_id"]):
+        return web.json_response({"ok": False, "error": "owner_required"}, status=403)
+    if not target or target["role"] == "owner" or int(target["user_id"]) == int(user["tg_id"]):
+        return web.json_response({"ok": False, "error": "member_not_found_or_protected"}, status=404)
+    await db.execute(
+        "UPDATE rg_space_members SET role=? WHERE space_id=? AND user_id=?",
+        (role, space_id, target["user_id"]),
+    )
+    await _publish_event(int(target["user_id"]), {"type": "space_membership_updated", "space_id": space_id})
+    return web.json_response({"ok": True, "rise_id": target_rise_id, "role": role})
+
+
+async def h_space_remove_member(request: web.Request):
+    user = await _current_user(request)
+    if not user:
+        return web.json_response({"ok": False, "error": "unauthorized"}, status=401)
+    try:
+        space_id = int(request.match_info["space_id"])
+        target_rise_id = int(request.match_info["rise_id"])
+    except ValueError:
+        return web.json_response({"ok": False, "error": "bad_identifier"}, status=400)
+    space = await db.fetchone("SELECT owner_id FROM rg_spaces WHERE id=?", (space_id,))
+    actor = await db.fetchone(
+        "SELECT role FROM rg_space_members WHERE space_id=? AND user_id=?",
+        (space_id, user["tg_id"]),
+    )
+    target = await db.fetchone(
+        """SELECT m.user_id,m.role FROM rg_space_members m JOIN users u ON u.tg_id=m.user_id
+           WHERE m.space_id=? AND u.rise_id=?""",
+        (space_id, target_rise_id),
+    )
+    if not space or not actor or actor["role"] not in ("owner", "admin"):
+        return web.json_response({"ok": False, "error": "moderator_required"}, status=403)
+    if not target or target["role"] == "owner":
+        return web.json_response({"ok": False, "error": "member_not_found_or_protected"}, status=404)
+    if actor["role"] == "admin" and target["role"] == "admin":
+        return web.json_response({"ok": False, "error": "owner_required"}, status=403)
+    await db.execute(
+        "DELETE FROM rg_space_members WHERE space_id=? AND user_id=?",
+        (space_id, target["user_id"]),
+    )
+    await _publish_event(int(target["user_id"]), {"type": "space_removed", "space_id": space_id})
+    return web.json_response({"ok": True, "removed_rise_id": target_rise_id})
+
+
+async def h_space_transfer_owner(request: web.Request):
+    user = await _current_user(request)
+    if not user:
+        return web.json_response({"ok": False, "error": "unauthorized"}, status=401)
+    try:
+        space_id = int(request.match_info["space_id"])
+        target_rise_id = int(request.match_info["rise_id"])
+    except ValueError:
+        return web.json_response({"ok": False, "error": "bad_identifier"}, status=400)
+    async with db.connect() as conn:
+        cur = await conn.execute("SELECT owner_id FROM rg_spaces WHERE id=?", (space_id,))
+        space = await cur.fetchone()
+        if not space or int(space["owner_id"]) != int(user["tg_id"]):
+            await conn.rollback()
+            return web.json_response({"ok": False, "error": "owner_required"}, status=403)
+        cur = await conn.execute(
+            """SELECT m.user_id FROM rg_space_members m JOIN users u ON u.tg_id=m.user_id
+               WHERE m.space_id=? AND u.rise_id=? AND m.user_id!=?""",
+            (space_id, target_rise_id, user["tg_id"]),
+        )
+        target = await cur.fetchone()
+        if not target:
+            await conn.rollback()
+            return web.json_response({"ok": False, "error": "member_not_found"}, status=404)
+        await conn.execute(
+            "UPDATE rg_space_members SET role='admin' WHERE space_id=? AND user_id=?",
+            (space_id, user["tg_id"]),
+        )
+        await conn.execute(
+            "UPDATE rg_space_members SET role='owner' WHERE space_id=? AND user_id=?",
+            (space_id, target["user_id"]),
+        )
+        await conn.execute(
+            "UPDATE rg_spaces SET owner_id=? WHERE id=?",
+            (target["user_id"], space_id),
+        )
+        await conn.commit()
+    for member in await db.fetchall("SELECT user_id FROM rg_space_members WHERE space_id=?", (space_id,)):
+        await _publish_event(int(member["user_id"]), {"type": "space_membership_updated", "space_id": space_id})
+    return web.json_response({"ok": True, "owner_rise_id": target_rise_id})
+
+
+async def h_space_rotate_invite(request: web.Request):
+    user = await _current_user(request)
+    if not user:
+        return web.json_response({"ok": False, "error": "unauthorized"}, status=401)
+    try:
+        space_id = int(request.match_info["space_id"])
+    except ValueError:
+        return web.json_response({"ok": False, "error": "bad_space_id"}, status=400)
+    owner = await db.fetchone("SELECT owner_id FROM rg_spaces WHERE id=?", (space_id,))
+    if not owner or int(owner["owner_id"]) != int(user["tg_id"]):
+        return web.json_response({"ok": False, "error": "owner_required"}, status=403)
+    invite = secrets.token_urlsafe(12)
+    await db.execute("UPDATE rg_spaces SET invite_code=? WHERE id=?", (invite, space_id))
+    return web.json_response({"ok": True, "invite_code": invite})
+
+
+async def h_space_leave(request: web.Request):
+    user = await _current_user(request)
+    if not user:
+        return web.json_response({"ok": False, "error": "unauthorized"}, status=401)
+    try:
+        space_id = int(request.match_info["space_id"])
+    except ValueError:
+        return web.json_response({"ok": False, "error": "bad_space_id"}, status=400)
+    space = await db.fetchone("SELECT owner_id FROM rg_spaces WHERE id=?", (space_id,))
+    membership = await db.fetchone(
+        "SELECT role FROM rg_space_members WHERE space_id=? AND user_id=?",
+        (space_id, user["tg_id"]),
+    )
+    if not space or not membership:
+        return web.json_response({"ok": False, "error": "not_a_member"}, status=404)
+    if int(space["owner_id"]) == int(user["tg_id"]):
+        return web.json_response({"ok": False, "error": "transfer_ownership_first"}, status=409)
+    await db.execute(
+        "DELETE FROM rg_space_members WHERE space_id=? AND user_id=?",
+        (space_id, user["tg_id"]),
+    )
+    return web.json_response({"ok": True, "left": True})
+
+
 async def h_chat_blocks(request: web.Request):
     user = await _current_user(request)
     if not user:
@@ -663,6 +841,12 @@ async def start_api(bot) -> web.AppRunner | None:
         web.post("/api/spaces/join", h_space_join),
         web.get("/api/spaces/{space_id}/messages", h_space_messages),
         web.post("/api/spaces/{space_id}/messages", h_space_send),
+        web.get("/api/spaces/{space_id}/members", h_space_members),
+        web.post("/api/spaces/{space_id}/members/{rise_id}/role", h_space_change_role),
+        web.delete("/api/spaces/{space_id}/members/{rise_id}", h_space_remove_member),
+        web.post("/api/spaces/{space_id}/owner/{rise_id}", h_space_transfer_owner),
+        web.post("/api/spaces/{space_id}/invite/rotate", h_space_rotate_invite),
+        web.post("/api/spaces/{space_id}/leave", h_space_leave),
         web.post("/api/chats/{rise_id}/messages", h_send_message),
         web.post("/api/media", h_media_upload),
         web.get("/api/media/{media_id}", h_media_download),
