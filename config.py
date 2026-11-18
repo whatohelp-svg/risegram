@@ -124,4 +124,6 @@ OWNER_RISE_ID = 1
 def is_reserved_username(name: str | None) -> bool:
     """Юзернеймы, которые купить нельзя: служебные, всё на «rise…», всё с risegram / risestars."""
     n = (name or "").strip().lstrip("@").lower()
+    if n in STARTER_NFT_USERNAMES:
+        return False
     return n in RESERVED_USERNAMES or n.startswith("rise") or "risegram" in n or "risestars" in n
