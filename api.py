@@ -135,6 +135,117 @@ async def h_me(request: web.Request):
     return web.json_response({"ok": True, "user": public_user(user)})
 
 
+async def h_user_search(request: web.Request):
+    user = await _current_user(request)
+    if not user:
+        return web.json_response({"ok": False, "error": "unauthorized"}, status=401)
+    q = (request.query.get("q") or "").strip().lstrip("@")
+    if len(q) < 2:
+        return web.json_response({"ok": True, "users": []})
+    like = f"%{q.lower()}%"
+    rows = await db.fetchall(
+        """SELECT * FROM users
+           WHERE tg_id != ? AND banned=0 AND
+             (CAST(rise_id AS TEXT)=? OR lower(username) LIKE ? OR lower(active_username) LIKE ? OR lower(name) LIKE ?)
+           ORDER BY CASE WHEN CAST(rise_id AS TEXT)=? THEN 0 ELSE 1 END, name LIMIT 25""",
+        (user["tg_id"], q, like, like, like, q),
+    )
+    return web.json_response({"ok": True, "users": [public_user(x) for x in rows]})
+
+
+async def h_chats(request: web.Request):
+    user = await _current_user(request)
+    if not user:
+        return web.json_response({"ok": False, "error": "unauthorized"}, status=401)
+    rows = await db.fetchall(
+        """SELECT peer.tg_id, peer.user_id, peer.rise_id, peer.name, peer.username,
+                  peer.phone, peer.verified, peer.risestars, peer.gram_balance, peer.active_username,
+                  m.id AS message_id, m.body AS last_message, m.created_at AS last_at,
+                  (SELECT COUNT(*) FROM messages u WHERE u.sender_id=peer.tg_id
+                    AND u.recipient_id=? AND u.read_at IS NULL) AS unread
+           FROM users peer
+           JOIN (
+             SELECT CASE WHEN sender_id=? THEN recipient_id ELSE sender_id END AS peer_id,
+                    MAX(id) AS last_id
+             FROM messages WHERE sender_id=? OR recipient_id=?
+             GROUP BY peer_id
+           ) recent ON recent.peer_id=peer.tg_id
+           JOIN messages m ON m.id=recent.last_id
+           WHERE peer.banned=0
+           ORDER BY m.id DESC LIMIT 100""",
+        (user["tg_id"], user["tg_id"], user["tg_id"], user["tg_id"]),
+    )
+    chats = []
+    for row in rows:
+        peer = {k: row.get(k) for k in ("user_id","rise_id","name","username","phone","verified","risestars","gram_balance","active_username")}
+        chats.append({"user": public_user(peer), "last_message": row["last_message"],
+                      "last_at": row["last_at"], "unread": int(row["unread"] or 0)})
+    return web.json_response({"ok": True, "chats": chats})
+
+
+async def h_messages(request: web.Request):
+    user = await _current_user(request)
+    if not user:
+        return web.json_response({"ok": False, "error": "unauthorized"}, status=401)
+    try:
+        peer_id = int(request.match_info["rise_id"])
+    except ValueError:
+        return web.json_response({"ok": False, "error": "bad_rise_id"}, status=400)
+    peer = await db.fetchone("SELECT * FROM users WHERE rise_id=? AND banned=0", (peer_id,))
+    if not peer or peer["tg_id"] == user["tg_id"]:
+        return web.json_response({"ok": False, "error": "user_not_found"}, status=404)
+    blocked = await db.scalar(
+        "SELECT COUNT(*) FROM chat_blocks WHERE (owner_id=? AND blocked_id=?) OR (owner_id=? AND blocked_id=?)",
+        (user["tg_id"], peer["tg_id"], peer["tg_id"], user["tg_id"]), 0)
+    if blocked:
+        return web.json_response({"ok": False, "error": "chat_unavailable"}, status=403)
+    await db.execute(
+        "UPDATE messages SET read_at=? WHERE sender_id=? AND recipient_id=? AND read_at IS NULL",
+        (db.now(), peer["tg_id"], user["tg_id"]))
+    rows = await db.fetchall(
+        """SELECT id,sender_id,recipient_id,body,created_at,read_at FROM messages
+           WHERE (sender_id=? AND recipient_id=?) OR (sender_id=? AND recipient_id=?)
+           ORDER BY id DESC LIMIT 100""",
+        (user["tg_id"], peer["tg_id"], peer["tg_id"], user["tg_id"]))
+    rows.reverse()
+    return web.json_response({"ok": True, "peer": public_user(peer), "messages": [
+        {"id": x["id"], "from_me": x["sender_id"] == user["tg_id"], "text": x["body"],
+         "created_at": x["created_at"], "read": bool(x["read_at"])} for x in rows
+    ]})
+
+
+async def h_send_message(request: web.Request):
+    user = await _current_user(request)
+    if not user:
+        return web.json_response({"ok": False, "error": "unauthorized"}, status=401)
+    try:
+        peer_id = int(request.match_info["rise_id"])
+    except ValueError:
+        return web.json_response({"ok": False, "error": "bad_rise_id"}, status=400)
+    data = await _json(request)
+    body = str(data.get("text") or "").strip()
+    if not body or len(body) > 4000:
+        return web.json_response({"ok": False, "error": "message_length"}, status=400)
+    peer = await db.fetchone("SELECT * FROM users WHERE rise_id=? AND banned=0", (peer_id,))
+    if not peer or peer["tg_id"] == user["tg_id"]:
+        return web.json_response({"ok": False, "error": "user_not_found"}, status=404)
+    blocked = await db.scalar(
+        "SELECT COUNT(*) FROM chat_blocks WHERE (owner_id=? AND blocked_id=?) OR (owner_id=? AND blocked_id=?)",
+        (user["tg_id"], peer["tg_id"], peer["tg_id"], user["tg_id"]), 0)
+    if blocked:
+        return web.json_response({"ok": False, "error": "chat_unavailable"}, status=403)
+    created = db.now()
+    async with db.connect() as conn:
+        cur = await conn.execute(
+            "INSERT INTO messages(sender_id,recipient_id,body,created_at) VALUES(?,?,?,?)",
+            (user["tg_id"], peer["tg_id"], body, created))
+        message_id = cur.lastrowid
+        await conn.commit()
+    return web.json_response({"ok": True, "message": {
+        "id": message_id, "from_me": True, "text": body, "created_at": created, "read": False
+    }})
+
+
 async def h_inventory(request: web.Request):
     user = await _current_user(request)
     if not user:
@@ -278,6 +389,10 @@ async def start_api(bot) -> web.AppRunner | None:
         web.post("/api/auth/request", h_request),
         web.post("/api/auth/verify", h_verify),
         web.get("/api/me", h_me),
+        web.get("/api/users/search", h_user_search),
+        web.get("/api/chats", h_chats),
+        web.get("/api/chats/{rise_id}/messages", h_messages),
+        web.post("/api/chats/{rise_id}/messages", h_send_message),
         web.get("/api/inventory", h_inventory),
         web.post("/api/inventory/{item_id}/activate", h_activate_nft),
         web.get("/api/market", h_market),
