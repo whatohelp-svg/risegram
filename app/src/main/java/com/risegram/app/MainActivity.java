@@ -156,6 +156,12 @@ public class MainActivity extends Activity {
         balanceLp.bottomMargin = dp(10);
         content.addView(balanceView, balanceLp);
         rowButtons("Обновить", "Маркет", "Инвентарь");
+        Button chats = button("💬 Чаты", green);
+        content.addView(chats);
+        chats.setOnClickListener(v -> loadChats());
+        Button find = button("🔎 Найти пользователя по Rise ID", panel);
+        content.addView(find);
+        find.setOnClickListener(v -> showFindUser());
         Button refresh = button("↻ Обновить баланс", accent);
         content.addView(refresh);
         refresh.setOnClickListener(v -> loadProfile());
@@ -174,6 +180,97 @@ public class MainActivity extends Activity {
             token = "";
             prefs.edit().remove("token").apply();
             showLogin();
+        });
+    }
+
+    private void showFindUser() {
+        EditText query = field("Rise ID или имя пользователя");
+        new android.app.AlertDialog.Builder(this).setTitle("Найти в RiseGram")
+            .setView(query).setNegativeButton("Отмена", null)
+            .setPositiveButton("Найти", (d, w) -> {
+                String q = query.getText().toString().trim();
+                if (q.length() < 2) { toast("Введите минимум 2 символа"); return; }
+                api("GET", "/api/users/search?q=" + android.net.Uri.encode(q), token, null, (res, err) -> {
+                    if (err != null) { toast(err); return; }
+                    JSONArray users = res.optJSONArray("users");
+                    if (users == null || users.length() == 0) { toast("Пользователь не найден"); return; }
+                    String[] labels = new String[users.length()];
+                    int[] ids = new int[users.length()];
+                    for (int i = 0; i < users.length(); i++) {
+                        JSONObject u = users.optJSONObject(i);
+                        ids[i] = u == null ? 0 : u.optInt("rise_id");
+                        labels[i] = (u == null ? "Пользователь" : u.optString("name")) + " · Rise ID " + ids[i];
+                    }
+                    new android.app.AlertDialog.Builder(this).setTitle("Результаты")
+                        .setItems(labels, (dialog, which) -> openChat(ids[which], labels[which]))
+                        .setNegativeButton("Закрыть", null).show();
+                });
+            }).show();
+    }
+
+    private void loadChats() {
+        showLoading("Загружаем чаты…");
+        api("GET", "/api/chats", token, null, (res, err) -> {
+            if (err != null) { toast(err); loadProfile(); return; }
+            content.removeAllViews();
+            title("Сообщения");
+            Button search = button("＋ Новый чат по Rise ID", green);
+            content.addView(search);
+            search.setOnClickListener(v -> showFindUser());
+            JSONArray chats = res.optJSONArray("chats");
+            if (chats == null || chats.length() == 0) content.addView(label("Пока нет диалогов — найдите пользователя по Rise ID"));
+            else for (int i = 0; i < chats.length(); i++) {
+                JSONObject c = chats.optJSONObject(i);
+                if (c == null) continue;
+                JSONObject u = c.optJSONObject("user");
+                if (u == null) continue;
+                int rid = u.optInt("rise_id");
+                String name = u.optString("name", "Пользователь");
+                String last = c.optString("last_message", "");
+                Button item = button(name + " · " + rid + "\\n" + last, panel);
+                content.addView(item);
+                item.setOnClickListener(v -> openChat(rid, name));
+            }
+            Button back = button("Назад", panel);
+            content.addView(back);
+            back.setOnClickListener(v -> loadProfile());
+        });
+    }
+
+    private void openChat(int riseId, String titleText) {
+        showLoading("Открываем диалог…");
+        api("GET", "/api/chats/" + riseId + "/messages", token, null, (res, err) -> {
+            if (err != null) { toast(err); loadChats(); return; }
+            content.removeAllViews();
+            title(titleText);
+            JSONArray messages = res.optJSONArray("messages");
+            if (messages != null) for (int i = 0; i < messages.length(); i++) {
+                JSONObject m = messages.optJSONObject(i);
+                if (m == null) continue;
+                String prefix = m.optBoolean("from_me") ? "Вы: " : "Собеседник: ";
+                card(prefix + m.optString("text"));
+            }
+            EditText input = field("Сообщение");
+            input.setSingleLine(false);
+            content.addView(input);
+            Button send = button("Отправить", green);
+            content.addView(send);
+            send.setOnClickListener(v -> {
+                String message = input.getText().toString().trim();
+                if (message.isEmpty()) return;
+                send.setEnabled(false);
+                api("POST", "/api/chats/" + riseId + "/messages", token, json("text", message), (answer, error) -> {
+                    send.setEnabled(true);
+                    if (error != null) toast(error);
+                    else openChat(riseId, titleText);
+                });
+            });
+            Button refresh = button("Обновить", accent);
+            content.addView(refresh);
+            refresh.setOnClickListener(v -> openChat(riseId, titleText));
+            Button back = button("К списку чатов", panel);
+            content.addView(back);
+            back.setOnClickListener(v -> loadChats());
         });
     }
 
