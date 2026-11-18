@@ -3,7 +3,6 @@
 .env.*
 !.env.example
 server/.env.mtproto
-server/.env.mtproto.*
 
 # Local Python state
 __pycache__/
