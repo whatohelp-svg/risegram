@@ -83,7 +83,7 @@ public class MainActivity extends Activity {
         title("Вход в RiseGram");
         TextView hint = label("Введите номер аккаунта — бот пришлёт одноразовый код в личные сообщения");
         content.addView(hint);
-        EditText phone = field("Номер телефона");
+        EditText phone = field("Постоянный номер из @risegrambot");
         content.addView(phone);
         EditText code = field("Код из бота");
         content.addView(code);
@@ -144,7 +144,7 @@ public class MainActivity extends Activity {
     private void showHome(JSONObject user) {
         content.removeAllViews();
         title(user.optString("name", "Профиль"));
-        card("@" + user.optString("username", "user") + "   ·   Rise ID " + user.optLong("rise_id"));
+        card("@" + user.optString("username", "user") + "   ·   Rise ID " + user.optString("rise_id"));
         balanceView = label("⭐ RiseStars   " + number(user.optDouble("risestars")) + "\\n💎 Gram   " + number(user.optDouble("gram_balance")));
         balanceView.setTextColor(text);
         balanceView.setTextSize(16);
