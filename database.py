@@ -301,6 +301,29 @@ SCHEMA = [
         created_at TEXT NOT NULL,
         read_at TEXT
     )""",
+    """CREATE TABLE IF NOT EXISTS rg_spaces (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        title TEXT NOT NULL,
+        description TEXT DEFAULT '',
+        kind TEXT NOT NULL DEFAULT 'group',
+        owner_id INTEGER NOT NULL,
+        invite_code TEXT NOT NULL UNIQUE,
+        created_at TEXT NOT NULL
+    )""",
+    """CREATE TABLE IF NOT EXISTS rg_space_members (
+        space_id INTEGER NOT NULL,
+        user_id INTEGER NOT NULL,
+        role TEXT NOT NULL DEFAULT 'member',
+        joined_at TEXT NOT NULL,
+        PRIMARY KEY(space_id, user_id)
+    )""",
+    """CREATE TABLE IF NOT EXISTS rg_space_messages (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        space_id INTEGER NOT NULL,
+        sender_id INTEGER NOT NULL,
+        body TEXT NOT NULL,
+        created_at TEXT NOT NULL
+    )""",
     """CREATE TABLE IF NOT EXISTS chat_blocks (
         owner_id INTEGER NOT NULL,
         blocked_id INTEGER NOT NULL,
@@ -359,6 +382,8 @@ INDEXES = [
     "CREATE INDEX IF NOT EXISTS ix_market_status ON market_listings(status, item_type, price)",
     "CREATE INDEX IF NOT EXISTS ix_messages_pair ON messages(sender_id, recipient_id, id)",
     "CREATE INDEX IF NOT EXISTS ix_messages_recipient ON messages(recipient_id, read_at, id)",
+    "CREATE INDEX IF NOT EXISTS ix_space_members_user ON rg_space_members(user_id, space_id)",
+    "CREATE INDEX IF NOT EXISTS ix_space_messages ON rg_space_messages(space_id, id)",
 ]
 
 
