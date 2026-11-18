@@ -19,7 +19,7 @@ from aiohttp import web
 
 import config
 import database as db
-from media_api import create_media_handlers
+from media_api import create_media_handlers, public_media
 from ui import esc, safe_send
 
 log = logging.getLogger("risegram.api")
@@ -267,9 +267,22 @@ async def h_messages(request: web.Request):
            ORDER BY id DESC LIMIT 100""",
         (user["tg_id"], peer["tg_id"], peer["tg_id"], user["tg_id"]))
     rows.reverse()
+    message_ids = [int(x["id"]) for x in rows]
+    media_by_message = defaultdict(list)
+    if message_ids:
+        marks = ",".join("?" for _ in message_ids)
+        attachments = await db.fetchall(
+            f"""SELECT mm.message_id, med.* FROM rg_message_media mm
+                JOIN rg_media med ON med.id=mm.media_id
+                WHERE mm.message_id IN ({marks}) ORDER BY mm.position""",
+            message_ids,
+        )
+        for item in attachments:
+            media_by_message[int(item["message_id"])].append(public_media(item))
     return web.json_response({"ok": True, "peer": public_user(peer), "messages": [
         {"id": x["id"], "from_me": x["sender_id"] == user["tg_id"], "text": x["body"],
-         "created_at": x["created_at"], "read": bool(x["read_at"])} for x in rows
+         "created_at": x["created_at"], "read": bool(x["read_at"]),
+         "media": media_by_message[int(x["id"])]} for x in rows
     ]})
 
 
@@ -283,7 +296,24 @@ async def h_send_message(request: web.Request):
         return web.json_response({"ok": False, "error": "bad_rise_id"}, status=400)
     data = await _json(request)
     body = str(data.get("text") or "").strip()
-    if not body or len(body) > 4000:
+    media_ids = data.get("media_ids", [])
+    if not isinstance(media_ids, list) or len(media_ids) > 10:
+        return web.json_response({"ok": False, "error": "invalid_media_ids"}, status=400)
+    if any(not isinstance(mid, str) or not mid or len(mid) > 64 for mid in media_ids):
+        return web.json_response({"ok": False, "error": "invalid_media_ids"}, status=400)
+    media_ids = list(dict.fromkeys(media_ids))
+    media_rows = []
+    if media_ids:
+        marks = ",".join("?" for _ in media_ids)
+        media_rows = await db.fetchall(
+            f"SELECT * FROM rg_media WHERE uploader_id=? AND id IN ({marks})",
+            (user["tg_id"], *media_ids),
+        )
+        if len(media_rows) != len(media_ids):
+            return web.json_response({"ok": False, "error": "media_not_owned"}, status=403)
+        media_by_id = {item["id"]: item for item in media_rows}
+        media_rows = [media_by_id[mid] for mid in media_ids]
+    if (not body and not media_rows) or len(body) > 4000:
         return web.json_response({"ok": False, "error": "message_length"}, status=400)
     peer = await db.fetchone("SELECT * FROM users WHERE rise_id=? AND banned=0", (peer_id,))
     if not peer or peer["tg_id"] == user["tg_id"]:
@@ -298,14 +328,20 @@ async def h_send_message(request: web.Request):
         cur = await conn.execute(
             "INSERT INTO messages(sender_id,recipient_id,body,created_at) VALUES(?,?,?,?)",
             (user["tg_id"], peer["tg_id"], body, created))
-        message_id = cur.lastrowid
+        message_id = int(cur.lastrowid)
+        for position, media in enumerate(media_rows):
+            await conn.execute(
+                "INSERT INTO rg_message_media(message_id,media_id,position) VALUES(?,?,?)",
+                (message_id, media["id"], position),
+            )
         await conn.commit()
     await _publish_event(int(peer["tg_id"]), {
         "type": "new_message", "message_id": int(message_id),
         "from_rise_id": int(user["rise_id"]),
     })
     return web.json_response({"ok": True, "message": {
-        "id": message_id, "from_me": True, "text": body, "created_at": created, "read": False
+        "id": message_id, "from_me": True, "text": body, "created_at": created, "read": False,
+        "media": [public_media(item) for item in media_rows],
     }})
 
 
