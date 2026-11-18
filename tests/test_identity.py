@@ -46,6 +46,46 @@ class IdentityMigrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await db.telegram_chat_id(user["tg_id"]), telegram_id)
         self.assertEqual((await db.get_by_telegram(telegram_id))["user_id"], user["user_id"])
 
+    async def test_legacy_telegram_keys_are_remapped_with_inventory(self):
+        handle, legacy_path = tempfile.mkstemp(prefix="risegram-legacy-", suffix=".db")
+        os.close(handle)
+        try:
+            import aiosqlite
+            async with aiosqlite.connect(legacy_path) as legacy:
+                await legacy.execute(
+                    "CREATE TABLE users (tg_id INTEGER PRIMARY KEY, name TEXT, username TEXT, phone TEXT, "
+                    "phone_digits TEXT, rise_id INTEGER, created_at TEXT)"
+                )
+                await legacy.execute(
+                    "CREATE TABLE user_nft_inventory (id INTEGER PRIMARY KEY AUTOINCREMENT, tg_id INTEGER NOT NULL, "
+                    "item_type TEXT NOT NULL DEFAULT 'username', value TEXT, price_stars INTEGER DEFAULT 0, created_at TEXT)"
+                )
+                await legacy.execute(
+                    "INSERT INTO users (tg_id,name,username,phone,phone_digits,rise_id,created_at) "
+                    "VALUES (?,?,?,?,?,?,?)",
+                    (config.OWNER_TELEGRAM_ID, "Old Owner", "oldowner", "+70000000000", "70000000000", 123456789, "2026-01-01"),
+                )
+                await legacy.execute(
+                    "INSERT INTO user_nft_inventory (tg_id,item_type,value,price_stars,created_at) "
+                    "VALUES (?,'username','legacyasset',0,'2026-01-01')",
+                    (config.OWNER_TELEGRAM_ID,),
+                )
+                await legacy.commit()
+            db.DB_PATH = legacy_path
+            await db.init_db()
+            owner = await db.get_user(config.OWNER_ID)
+            self.assertIsNotNone(owner)
+            self.assertNotEqual(owner["tg_id"], config.OWNER_TELEGRAM_ID)
+            self.assertEqual(await db.telegram_chat_id(owner["tg_id"]), config.OWNER_TELEGRAM_ID)
+            items = await db.list_nft(owner["tg_id"])
+            self.assertIn("legacyasset", {x["value"] for x in items})
+        finally:
+            db.DB_PATH = self.path
+            try:
+                os.unlink(legacy_path)
+            except FileNotFoundError:
+                pass
+
     async def test_starter_nfts_are_owner_inventory_assets(self):
         owner = await db.get_user(config.OWNER_ID)
         items = await db.list_nft(owner["tg_id"])
