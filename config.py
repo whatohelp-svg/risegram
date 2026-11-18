@@ -34,6 +34,7 @@ STARTER_NFT_USERNAMES = tuple(dict.fromkeys(
 ADMIN_COMMAND = "admin7206852053"
 DB_PATH = os.getenv("DB_PATH", "risegram.db").strip() or "risegram.db"
 MEDIA_PATH = os.getenv("MEDIA_PATH", "/data/risegram-media").strip() or "/data/risegram-media"
+MTPROTO_OTP_SECRET = os.getenv("MTPROTO_OTP_SECRET", "").strip()
 WEBAPP_URL = os.getenv("WEBAPP_URL", "").strip()
 API_SECRET = os.getenv("API_SECRET", "").strip()
 PORT = _int("PORT", 8080)

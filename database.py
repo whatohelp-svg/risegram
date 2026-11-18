@@ -343,6 +343,10 @@ SCHEMA = [
         message_id INTEGER NOT NULL, media_id TEXT NOT NULL, position INTEGER NOT NULL DEFAULT 0,
         PRIMARY KEY(message_id, media_id)
     )""",
+    """CREATE TABLE IF NOT EXISTS rg_otp_deliveries (
+        delivery_id TEXT PRIMARY KEY, purpose TEXT NOT NULL, channel TEXT NOT NULL,
+        status TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+    )""",
     """CREATE TABLE IF NOT EXISTS meta (
         key TEXT PRIMARY KEY,
         value TEXT

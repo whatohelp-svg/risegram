@@ -9,6 +9,7 @@ from __future__ import annotations
 from pathlib import Path
 import asyncio
 import hmac
+import hashlib
 import json
 import logging
 import secrets
@@ -853,6 +854,75 @@ async def h_index(request: web.Request):
     return web.FileResponse(index_path)
 
 
+
+async def h_mtproto_otp_delivery(request: web.Request):
+    """Deliver gramsrv login codes into the existing linked RiseGram bot chat."""
+    secret = config.MTPROTO_OTP_SECRET
+    if not secret:
+        return web.json_response({"accepted": False, "error_code": "provider_not_configured", "retryable": False}, status=503)
+    raw = await request.read()
+    if len(raw) > 16 * 1024:
+        return web.json_response({"accepted": False, "error_code": "payload_too_large", "retryable": False}, status=413)
+    timestamp = request.headers.get("X-Telesrv-Timestamp", "")
+    signature = request.headers.get("X-Telesrv-Signature", "")
+    try:
+        sent_at = int(timestamp)
+    except (TypeError, ValueError):
+        return web.json_response({"accepted": False, "error_code": "invalid_signature", "retryable": False}, status=401)
+    if abs(time.time() - sent_at) > 300:
+        return web.json_response({"accepted": False, "error_code": "expired_signature", "retryable": False}, status=401)
+    expected = "sha256=" + hmac.new(secret.encode(), timestamp.encode("ascii") + b"." + raw, hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(expected, signature):
+        return web.json_response({"accepted": False, "error_code": "invalid_signature", "retryable": False}, status=401)
+    try:
+        data = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return web.json_response({"accepted": False, "error_code": "invalid_json", "retryable": False}, status=400)
+    if not isinstance(data, dict) or data.get("version") != "1":
+        return web.json_response({"accepted": False, "error_code": "invalid_payload", "retryable": False}, status=400)
+    delivery_id = str(data.get("delivery_id") or "")
+    purpose, channel = str(data.get("purpose") or ""), str(data.get("channel") or "")
+    recipient, code = str(data.get("recipient") or ""), str(data.get("code") or "")
+    if (not delivery_id or len(delivery_id) > 128 or channel != "sms" or purpose != "login_sms"
+            or not recipient or len(recipient) > 40 or not code or len(code) > 16 or not code.isdigit()):
+        return web.json_response({"accepted": False, "error_code": "unsupported_delivery", "retryable": False}, status=400)
+    existing = await db.fetchone("SELECT status FROM rg_otp_deliveries WHERE delivery_id=?", (delivery_id,))
+    if existing:
+        if existing["status"] == "sent":
+            return web.json_response({"accepted": True, "message_id": delivery_id})
+        return web.json_response({"accepted": False, "error_code": "delivery_already_processed", "retryable": False}, status=409)
+    now = db.now()
+    await db.execute(
+        """INSERT INTO rg_otp_deliveries(delivery_id,purpose,channel,status,created_at,updated_at)
+           VALUES(?,?,?,'processing',?,?)""",
+        (delivery_id, purpose, channel, now, now),
+    )
+    digits = db.digits_of(recipient)
+    user = await db.fetchone("SELECT * FROM users WHERE phone_digits=? AND banned=0", (digits,)) if len(digits) >= 7 else None
+    if not user or not await db.is_feature_on("auth_numbers"):
+        await db.execute("UPDATE rg_otp_deliveries SET status='rejected',updated_at=? WHERE delivery_id=?", (db.now(), delivery_id))
+        return web.json_response({"accepted": False, "error_code": "recipient_unavailable", "retryable": False}, status=404)
+    chat_id = await db.telegram_chat_id(user["tg_id"])
+    if not chat_id:
+        await db.execute("UPDATE rg_otp_deliveries SET status='rejected',updated_at=? WHERE delivery_id=?", (db.now(), delivery_id))
+        return web.json_response({"accepted": False, "error_code": "delivery_unavailable", "retryable": False}, status=503)
+    message = (
+        f"🔐 <b>Код входа в {config.BRAND}</b>\n\n"
+        f"Номер: <code>{esc(user.get('phone') or recipient)}</code>\n"
+        f"Код: <code>{esc(code)}</code>\n\n"
+        "Код одноразовый. Никому его не сообщайте"
+    )
+    delivered = await safe_send(request.app["bot"], chat_id, message)
+    await db.execute(
+        "UPDATE rg_otp_deliveries SET status=?,updated_at=? WHERE delivery_id=?",
+        ("sent" if delivered else "failed", db.now(), delivery_id),
+    )
+    if not delivered:
+        log.warning("MTProto OTP delivery failed for delivery id %s", delivery_id)
+        return web.json_response({"accepted": False, "error_code": "delivery_failed", "retryable": False}, status=503)
+    return web.json_response({"accepted": True, "message_id": delivery_id})
+
+
 async def h_health(request: web.Request):
     return web.json_response({"ok": True, "service": "risegram-api"})
 
@@ -895,6 +965,7 @@ async def start_api(bot) -> web.AppRunner | None:
         web.post("/api/market/{listing_id}/buy", h_market_buy),
         web.get("/api/games/stats", h_game_stats),
         web.get("/api/purchases", h_purchases),
+        web.post("/internal/mtproto/otp", h_mtproto_otp_delivery),
         web.get("/health", h_health),
     ])
     runner = web.AppRunner(app)
