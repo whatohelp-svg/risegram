@@ -122,9 +122,11 @@ public class MainActivity extends Activity {
                 if (err != null) { toast(err); return; }
                 String t = res.optString("token", "");
                 if (t.isEmpty()) { toast("Не удалось войти"); return; }
+                liveEventsRunning = false;
                 token = t;
                 JSONObject signedUser = res.optJSONObject("user");
                 saveAccount(token, signedUser);
+                startLiveEvents();
                 showLoading("Вход выполнен");
                 loadProfile();
             });
@@ -177,9 +179,11 @@ public class MainActivity extends Activity {
             .setItems(labels, (dialog, which) -> {
                 JSONObject selected = accounts.optJSONObject(which);
                 if (selected == null) return;
+                liveEventsRunning = false;
                 token = selected.optString("token", "");
                 prefs.edit().putString("token", token)
                     .putString("active_rise_id", selected.optString("rise_id", "")).apply();
+                startLiveEvents();
                 loadProfile();
             })
             .setPositiveButton("Готово", null).show();
@@ -195,10 +199,12 @@ public class MainActivity extends Activity {
         }
         if (remaining.length() > 0) {
             JSONObject next = remaining.optJSONObject(0);
+            liveEventsRunning = false;
             token = next == null ? "" : next.optString("token", "");
             prefs.edit().putString("accounts", remaining.toString())
                 .putString("token", token)
                 .putString("active_rise_id", next == null ? "" : next.optString("rise_id", "")).apply();
+            startLiveEvents();
             loadProfile();
         } else {
             token = "";
