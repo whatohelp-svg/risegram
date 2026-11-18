@@ -81,11 +81,13 @@ public class MainActivity extends Activity {
     private void showLogin() {
         content.removeAllViews();
         title("Вход в RiseGram");
-        TextView hint = label("Введите номер аккаунта — бот пришлёт одноразовый код в личные сообщения");
+        TextView hint = label("1. Откройте @risegrambot и нажмите /start\n2. Введите постоянный номер из раздела «Мой номер»\n3. Нажмите «Получить код» и проверьте личные сообщения бота\n4. Введите одноразовый код и войдите");
         content.addView(hint);
         EditText phone = field("Постоянный номер из @risegrambot");
+        phone.setInputType(android.text.InputType.TYPE_CLASS_PHONE);
         content.addView(phone);
-        EditText code = field("Код из бота");
+        EditText code = field("Одноразовый код из бота");
+        code.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);
         content.addView(code);
         Button request = button("Получить код", accent);
         content.addView(request);
@@ -93,18 +95,18 @@ public class MainActivity extends Activity {
         content.addView(enter);
         request.setOnClickListener(v -> {
             String p = phone.getText().toString().trim();
-            if (p.isEmpty()) { toast("Введите номер"); return; }
+            if (p.replaceAll("\\D", "").length() < 7) { toast("Введите постоянный номер из @risegrambot полностью"); return; }
             request.setEnabled(false);
             api("POST", "/api/auth/request", null, json("phone", p), (res, err) -> {
                 request.setEnabled(true);
                 if (err != null) toast(err);
-                else toast("Если номер зарегистрирован — код отправлен в бот");
+                else toast("Проверьте личные сообщения @risegrambot — там должен быть код входа");
             });
         });
         enter.setOnClickListener(v -> {
             String p = phone.getText().toString().trim();
             String c = code.getText().toString().trim();
-            if (p.isEmpty() || c.isEmpty()) { toast("Введите номер и код"); return; }
+            if (p.replaceAll("\\D", "").length() < 7 || c.length() != 5) { toast("Проверьте номер и 5-значный код из бота"); return; }
             enter.setEnabled(false);
             api("POST", "/api/auth/verify", null, json("phone", p, "code", c), (res, err) -> {
                 enter.setEnabled(true);
