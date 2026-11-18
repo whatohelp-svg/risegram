@@ -677,13 +677,17 @@ async def run_broadcast(bot: Bot, text: str):
     ids = await db.all_user_ids()
     ok = fail = 0
     for uid in ids:
+        chat_id = await db.telegram_chat_id(uid)
+        if chat_id is None:
+            fail += 1
+            continue
         try:
-            await bot.send_message(uid, f"📣 {esc(text)}")
+            await bot.send_message(chat_id, f"📣 {esc(text)}")
             ok += 1
         except TelegramRetryAfter as e:
             await asyncio.sleep(e.retry_after)
             try:
-                await bot.send_message(uid, f"📣 {esc(text)}")
+                await bot.send_message(chat_id, f"📣 {esc(text)}")
                 ok += 1
             except Exception:  # noqa: BLE001
                 fail += 1
