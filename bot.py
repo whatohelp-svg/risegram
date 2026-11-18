@@ -1024,7 +1024,15 @@ async def deliver_order(bot: Bot, uid: int, payload: str, stars: int, charge: st
         if not valid_username(name) or await db.username_taken(name) or not await db.add_nft(uid, "username", name, stars):
             await db.release("username", name)
             return False, "nft_username", "Юзернейм уже занят", ""
-        await db.set_active_username(uid, name)
+        # Purchasing another NFT username must not deactivate previously enabled aliases.
+        await db.execute(
+            "UPDATE user_nft_inventory SET is_active=1 WHERE tg_id=? AND item_type='username' AND value=?",
+            (uid, name),
+        )
+        await db.execute(
+            "UPDATE users SET active_username=COALESCE(active_username, ?) WHERE tg_id=?",
+            (name, uid),
+        )
         await db.release("username", name)
         return True, "nft_username", f"NFT @{name}", f"✅ Юзернейм <b>@{esc(name)}</b> теперь ваш и выбран активным."
     return False, "unknown", "Неизвестный товар", ""
