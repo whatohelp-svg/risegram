@@ -2,11 +2,14 @@ name: Build RiseGram APK
 on:
   workflow_dispatch:
   push:
+    branches: [main, feature/market-economy-sync]
     paths:
       - 'app/**'
       - 'build.gradle'
       - 'settings.gradle'
       - '.github/workflows/android.yml'
+  pull_request:
+    branches: [main]
 jobs:
   build:
     runs-on: ubuntu-latest
