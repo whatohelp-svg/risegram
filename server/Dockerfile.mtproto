@@ -54,6 +54,12 @@ WORKDIR /app
 USER 10001:10001
 ENTRYPOINT ["/usr/local/bin/telesrv-container-entrypoint"]
 
+
+FROM runtime-base AS admin
+COPY --from=build-admin /out/telesrv-admin /usr/local/bin/telesrv-admin
+EXPOSE 2600
+CMD ["telesrv-admin"]
+
 FROM runtime-base AS server
 USER root
 RUN apk add --no-cache ffmpeg openssl \
@@ -67,7 +73,3 @@ USER 10001:10001
 EXPOSE 2398 2400 2401 2599 12399/udp 12400/udp
 CMD ["telesrv"]
 
-FROM runtime-base AS admin
-COPY --from=build-admin /out/telesrv-admin /usr/local/bin/telesrv-admin
-EXPOSE 2600
-CMD ["telesrv-admin"]
