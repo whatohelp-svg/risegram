@@ -9,7 +9,7 @@
     OWNER_TELEGRAM_ID Telegram ID владельца только для доставки кодов и проверки админки
     DB_PATH       путь к SQLite (на Railway: /data/risegram.db + подключённый Volume)
     WEBAPP_URL    ссылка на твоё приложение для кнопки «Открыть приложение»
-    API_SECRET    ключ для API (/api/auth/request и т.д.); без него API не запускается
+    API_SECRET    необязательный внутренний секрет; не встраивать в APK
     PORT          порт API (Railway задаёт сам)
 """
 from __future__ import annotations
