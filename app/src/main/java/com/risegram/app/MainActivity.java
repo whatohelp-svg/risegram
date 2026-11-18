@@ -263,6 +263,9 @@ public class MainActivity extends Activity {
         Button spaces = button("👥 Группы и каналы", green);
         content.addView(spaces);
         spaces.setOnClickListener(v -> loadSpaces());
+        Button blocks = button("🚫 Чёрный список", panel);
+        content.addView(blocks);
+        blocks.setOnClickListener(v -> loadBlockedUsers());
         Button find = button("🔎 Найти пользователя по Rise ID", panel);
         content.addView(find);
         find.setOnClickListener(v -> showFindUser());
@@ -370,9 +373,46 @@ public class MainActivity extends Activity {
             Button refresh = button("Обновить", accent);
             content.addView(refresh);
             refresh.setOnClickListener(v -> openChat(riseId, titleText));
+            Button block = button("🚫 Заблокировать пользователя", panel);
+            content.addView(block);
+            block.setOnClickListener(v -> new android.app.AlertDialog.Builder(this)
+                .setTitle("Заблокировать пользователя?")
+                .setMessage("Пользователь не сможет отправлять вам сообщения, а диалог станет недоступен")
+                .setNegativeButton("Отмена", null)
+                .setPositiveButton("Заблокировать", (dialog, which) ->
+                    api("POST", "/api/blocks/" + riseId, token, new JSONObject(), (answer, error) -> {
+                        if (error != null) toast(error);
+                        else { toast("Пользователь заблокирован"); loadChats(); }
+                    })).show());
             Button back = button("К списку чатов", panel);
             content.addView(back);
             back.setOnClickListener(v -> loadChats());
+        });
+    }
+
+    private void loadBlockedUsers() {
+        showLoading("Загружаем чёрный список…");
+        api("GET", "/api/blocks", token, null, (res, err) -> {
+            if (err != null) { toast(err); loadProfile(); return; }
+            content.removeAllViews();
+            title("Чёрный список");
+            JSONArray items = res.optJSONArray("blocked");
+            if (items == null || items.length() == 0) content.addView(label("Заблокированных пользователей нет"));
+            else for (int i = 0; i < items.length(); i++) {
+                JSONObject item = items.optJSONObject(i);
+                if (item == null) continue;
+                int rid = item.optInt("rise_id");
+                String name = item.optString("name", "Пользователь");
+                Button unblock = button(name + " · Rise ID " + rid + " — Разблокировать", panel);
+                content.addView(unblock);
+                unblock.setOnClickListener(v ->
+                    api("DELETE", "/api/blocks/" + rid, token, null, (answer, error) -> {
+                        if (error != null) toast(error); else loadBlockedUsers();
+                    }));
+            }
+            Button back = button("Назад", panel);
+            content.addView(back);
+            back.setOnClickListener(v -> loadProfile());
         });
     }
 
