@@ -215,6 +215,8 @@ async def screen_nfts(event, uid: int, note: str = ""):
     for it in items[:15]:
         label = f"@{it['value']}" if it["item_type"] == "username" else db.fmt_number(it["value"])
         text += f"• {esc(label)} ({'юзернейм' if it['item_type'] == 'username' else 'номер'}, {it['price_stars']} ⭐)\n"
+        # Anonymous numbers are identity/login assets and cannot be deleted from bot admin UI.
+    if it["item_type"] != "number":
         rows.append([btn(f"🗑 {label}"[:60], f"adm:nftdel:{it['id']}:{uid}", style="danger")])
     if not items:
         text += "Пусто."
@@ -231,10 +233,12 @@ async def fresh_phone(uid: int) -> str:
     return ""
 
 
-async def remove_nft(item_id: int) -> str:
+async def remove_nft(item_id: int, *, force: bool = False) -> str:
     it = await db.get_nft(item_id)
     if not it:
         return "Уже удалено."
+    if it["item_type"] == "number" and not force:
+        return "Анонимные номера нельзя удалять: они связаны с входом и привязкой аккаунта."
     uid = it["tg_id"]
     await db.delete_nft(item_id)
     u = await db.get_user(uid)
@@ -242,7 +246,7 @@ async def remove_nft(item_id: int) -> str:
         await db.set_active_username(uid, None)
     if it["item_type"] == "number" and u and u.get("phone_digits") == it["value"]:
         await fresh_phone(uid)
-        return "Номер удалён, игроку выдан новый."
+        return "Номер отозван, игроку выдан новый."
     return "Удалено."
 
 
@@ -266,10 +270,10 @@ async def revoke_goods(p: dict) -> str:
             return "снят Мажор с канала"
         if kind == "nu":
             row = await db.fetchone("SELECT id FROM user_nft_inventory WHERE item_type='username' AND value=?", (a[0],))
-            return await remove_nft(row["id"]) if row else "юзернейм уже удалён"
+            return await remove_nft(row["id"], force=True) if row else "юзернейм уже удалён"
         if kind == "nm":
             row = await db.fetchone("SELECT id FROM user_nft_inventory WHERE item_type='number' AND value=?", (a[1],))
-            return await remove_nft(row["id"]) if row else "номер уже удалён"
+            return await remove_nft(row["id"], force=True) if row else "номер уже удалён"
         if kind == "sc":
             await db.execute("UPDATE scam_requests SET status='refunded' WHERE id=? AND status IN ('pending','approved')", (int(a[1]),))
             return "метка SCAM снята"
