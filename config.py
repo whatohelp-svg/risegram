@@ -24,7 +24,7 @@ def _int(name: str, default: int) -> int:
 
 
 BOT_TOKEN = os.getenv("BOT_TOKEN", "").strip()
-OWNER_ID = _int("OWNER_ID", 7206852053)
+OWNER_ID = _int("OWNER_ID", 1)  # internal RiseGram account key\nOWNER_TELEGRAM_ID = _int("OWNER_TELEGRAM_ID", 7206852053)  # private bot delivery link
 OWNER_USERNAME = os.getenv("OWNER_USERNAME", "koyyzzback").strip().lstrip("@").lower()
 STARTER_NFT_USERNAMES = tuple(dict.fromkeys(
     n.strip().lstrip("@").lower() for n in os.getenv("STARTER_NFT_USERNAMES", "koyyzz,owner,rise").split(",") if n.strip()
