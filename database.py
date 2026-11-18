@@ -330,6 +330,7 @@ COLUMNS: dict[str, dict[str, str]] = {
 }
 
 INDEXES = [
+    "CREATE UNIQUE INDEX IF NOT EXISTS ux_users_user_id ON users(user_id)",
     "CREATE UNIQUE INDEX IF NOT EXISTS ux_users_rise_id ON users(rise_id)",
     "CREATE UNIQUE INDEX IF NOT EXISTS ux_users_phone_digits ON users(phone_digits)",
     "CREATE INDEX IF NOT EXISTS ix_users_username ON users(username)",
