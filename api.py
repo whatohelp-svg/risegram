@@ -419,11 +419,23 @@ async def h_space_messages(request: web.Request):
            FROM rg_space_messages m JOIN users u ON u.tg_id=m.sender_id
            WHERE m.space_id=? ORDER BY m.id DESC LIMIT 100""", (space_id,))
     rows.reverse()
+    message_ids = [int(x["id"]) for x in rows]
+    media_by_message = defaultdict(list)
+    if message_ids:
+        marks = ",".join("?" for _ in message_ids)
+        attachments = await db.fetchall(
+            f"""SELECT mm.message_id, med.* FROM rg_space_message_media mm
+                JOIN rg_media med ON med.id=mm.media_id
+                WHERE mm.message_id IN ({marks}) ORDER BY mm.position""",
+            message_ids,
+        )
+        for item in attachments:
+            media_by_message[int(item["message_id"])].append(public_media(item))
     return web.json_response({"ok": True, "space": {"id": space_id, "title": space["title"],
         "type": space["kind"], "role": member["role"], "invite_code": space["invite_code"]},
         "messages": [{"id": x["id"], "text": x["body"], "created_at": x["created_at"],
           "sender": x["name"] or "Пользователь", "rise_id": x["rise_id"],
-          "username": x["username"]} for x in rows]})
+          "username": x["username"], "media": media_by_message[int(x["id"])]} for x in rows]})
 
 
 async def h_space_send(request: web.Request):
@@ -436,7 +448,24 @@ async def h_space_send(request: web.Request):
         return web.json_response({"ok": False, "error": "bad_space_id"}, status=400)
     data = await _json(request)
     body = str(data.get("text") or "").strip()
-    if not body or len(body) > 4000:
+    media_ids = data.get("media_ids", [])
+    if not isinstance(media_ids, list) or len(media_ids) > 10:
+        return web.json_response({"ok": False, "error": "invalid_media_ids"}, status=400)
+    if any(not isinstance(mid, str) or not mid or len(mid) > 64 for mid in media_ids):
+        return web.json_response({"ok": False, "error": "invalid_media_ids"}, status=400)
+    media_ids = list(dict.fromkeys(media_ids))
+    media_rows = []
+    if media_ids:
+        marks = ",".join("?" for _ in media_ids)
+        media_rows = await db.fetchall(
+            f"SELECT * FROM rg_media WHERE uploader_id=? AND id IN ({marks})",
+            (user["tg_id"], *media_ids),
+        )
+        if len(media_rows) != len(media_ids):
+            return web.json_response({"ok": False, "error": "media_not_owned"}, status=403)
+        media_by_id = {item["id"]: item for item in media_rows}
+        media_rows = [media_by_id[mid] for mid in media_ids]
+    if (not body and not media_rows) or len(body) > 4000:
         return web.json_response({"ok": False, "error": "message_length"}, status=400)
     space = await db.fetchone("SELECT * FROM rg_spaces WHERE id=?", (space_id,))
     member = await db.fetchone("SELECT role FROM rg_space_members WHERE space_id=? AND user_id=?",
@@ -450,6 +479,11 @@ async def h_space_send(request: web.Request):
             "INSERT INTO rg_space_messages(space_id,sender_id,body,created_at) VALUES(?,?,?,?)",
             (space_id, user["tg_id"], body, db.now()))
         message_id = int(cur.lastrowid)
+        for position, media in enumerate(media_rows):
+            await conn.execute(
+                "INSERT INTO rg_space_message_media(message_id,media_id,position) VALUES(?,?,?)",
+                (message_id, media["id"], position),
+            )
         await conn.commit()
     members = await db.fetchall("SELECT user_id FROM rg_space_members WHERE space_id=?", (space_id,))
     for member_row in members:
@@ -459,7 +493,8 @@ async def h_space_send(request: web.Request):
                 "type": "new_space_message", "space_id": space_id,
                 "message_id": message_id,
             })
-    return web.json_response({"ok": True, "message_id": message_id})
+    return web.json_response({"ok": True, "message_id": message_id,
+                              "media": [public_media(item) for item in media_rows]})
 
 
 async def h_space_members(request: web.Request):
