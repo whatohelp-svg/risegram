@@ -88,6 +88,27 @@ class IdentityMigrationTests(unittest.IsolatedAsyncioTestCase):
             except FileNotFoundError:
                 pass
 
+    async def test_multiple_nft_usernames_can_be_active_at_once(self):
+        owner = await db.get_user(config.OWNER_ID)
+        uid = owner["tg_id"]
+        self.assertTrue(await db.add_nft(uid, "username", "aliasone", 0))
+        self.assertTrue(await db.add_nft(uid, "username", "aliastwo", 0))
+        first = await db.fetchone("SELECT id FROM user_nft_inventory WHERE tg_id=? AND value='aliasone'", (uid,))
+        second = await db.fetchone("SELECT id FROM user_nft_inventory WHERE tg_id=? AND value='aliastwo'", (uid,))
+        self.assertTrue((await db.set_nft_username_active(uid, first["id"], True))[0])
+        self.assertTrue((await db.set_nft_username_active(uid, second["id"], True))[0])
+        active = await db.fetchall(
+            "SELECT value FROM user_nft_inventory WHERE tg_id=? AND item_type='username' AND is_active=1",
+            (uid,),
+        )
+        self.assertEqual({x["value"] for x in active}, {"aliasone", "aliastwo"})
+        self.assertTrue((await db.set_nft_username_active(uid, first["id"], False))[0])
+        active = await db.fetchall(
+            "SELECT value FROM user_nft_inventory WHERE tg_id=? AND item_type='username' AND is_active=1",
+            (uid,),
+        )
+        self.assertEqual({x["value"] for x in active}, {"aliastwo"})
+
     async def test_starter_nfts_are_owner_inventory_assets(self):
         owner = await db.get_user(config.OWNER_ID)
         items = await db.list_nft(owner["tg_id"])
