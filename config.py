@@ -26,6 +26,9 @@ def _int(name: str, default: int) -> int:
 BOT_TOKEN = os.getenv("BOT_TOKEN", "").strip()
 OWNER_ID = _int("OWNER_ID", 7206852053)
 OWNER_USERNAME = os.getenv("OWNER_USERNAME", "koyyzzback").strip().lstrip("@").lower()
+STARTER_NFT_USERNAMES = tuple(dict.fromkeys(
+    n.strip().lstrip("@").lower() for n in os.getenv("STARTER_NFT_USERNAMES", "koyyzz,owner,rise").split(",") if n.strip()
+))
 ADMIN_COMMAND = "admin7206852053"
 DB_PATH = os.getenv("DB_PATH", "risegram.db").strip() or "risegram.db"
 WEBAPP_URL = os.getenv("WEBAPP_URL", "").strip()
