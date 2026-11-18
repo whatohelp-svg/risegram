@@ -221,6 +221,9 @@ public class MainActivity extends Activity {
             }
             JSONObject user = res.optJSONObject("user");
             if (user == null) { showLogin(); return; }
+            if (getAccounts().length() == 0 || !prefs.getString("active_rise_id", "").equals(user.optString("rise_id"))) {
+                saveAccount(token, user);
+            }
             showHome(user);
         });
     }
