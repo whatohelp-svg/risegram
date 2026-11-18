@@ -351,7 +351,7 @@ COLUMNS: dict[str, dict[str, str]] = {
     "admin_logs": {"admin_id": "INTEGER", "action_text": "TEXT", "created_at": "TEXT"},
     "user_nft_inventory": {
         "item_type": "TEXT DEFAULT 'username'", "value": "TEXT", "price_stars": "INTEGER DEFAULT 0",
-        "created_at": "TEXT",
+        "created_at": "TEXT", "is_active": "INTEGER DEFAULT 0",
     },
     "purchases": {
         "item_type": "TEXT", "item_desc": "TEXT", "price_xtr": "INTEGER DEFAULT 0",
@@ -464,6 +464,11 @@ async def init_db() -> None:
             for col, decl in cols.items():
                 if col not in have:
                     await db.execute(f"ALTER TABLE {table} ADD COLUMN {col} {decl}")
+        # Keep a previously selected NFT username active when upgrading.
+        await db.execute(
+            "UPDATE user_nft_inventory SET is_active=1 WHERE item_type='username' AND value IN "
+            "(SELECT lower(replace(active_username,'@','')) FROM users WHERE active_username IS NOT NULL AND active_username!='')"
+        )
         await db.commit()
 
         # Дозаполняем rise_id / phone_digits у старых пользователей.
@@ -618,8 +623,9 @@ async def find_user(query: str) -> dict | None:
         return None
     if q.startswith("@") or any(ch.isalpha() for ch in q) or not digits_of(q):
         return await fetchone(
-            "SELECT * FROM users WHERE lower(replace(username,'@',''))=? OR lower(replace(active_username,'@',''))=? LIMIT 1",
-            (norm_username(q), norm_username(q)),
+            "SELECT * FROM users WHERE lower(replace(username,'@',''))=? OR lower(replace(active_username,'@',''))=? "
+            "OR tg_id IN (SELECT tg_id FROM user_nft_inventory WHERE item_type='username' AND is_active=1 AND value=?) LIMIT 1",
+            (norm_username(q), norm_username(q), norm_username(q)),
         )
     d = digits_of(q)
     if len(d) <= 12:
@@ -967,7 +973,44 @@ async def delete_nft(item_id: int) -> None:
 
 
 async def set_active_username(tg_id: int, value: str | None) -> None:
-    await execute("UPDATE users SET active_username=? WHERE tg_id=?", (value, tg_id))
+    """Set the primary displayed alias while keeping NFT activation state consistent."""
+    async with connect() as conn:
+        await conn.execute("UPDATE user_nft_inventory SET is_active=0 WHERE tg_id=? AND item_type='username'", (tg_id,))
+        if value:
+            await conn.execute(
+                "UPDATE user_nft_inventory SET is_active=1 WHERE tg_id=? AND item_type='username' AND value=?",
+                (tg_id, norm_username(value)),
+            )
+        await conn.execute("UPDATE users SET active_username=? WHERE tg_id=?", (value, tg_id))
+        await conn.commit()
+
+
+async def set_nft_username_active(tg_id: int, item_id: int, active: bool) -> tuple[bool, str | None]:
+    """Activate/deactivate owned NFT usernames independently; no one-at-a-time limit."""
+    async with connect() as conn:
+        cur = await conn.execute(
+            "SELECT value FROM user_nft_inventory WHERE id=? AND tg_id=? AND item_type='username'",
+            (item_id, tg_id),
+        )
+        item = await cur.fetchone()
+        await cur.close()
+        if not item:
+            return False, None
+        cur = await conn.execute("SELECT 1 FROM market_listings WHERE item_id=? AND status='active'", (item_id,))
+        listed = await cur.fetchone()
+        await cur.close()
+        if listed:
+            return False, None
+        await conn.execute("UPDATE user_nft_inventory SET is_active=? WHERE id=? AND tg_id=?", (1 if active else 0, item_id, tg_id))
+        cur = await conn.execute(
+            "SELECT value FROM user_nft_inventory WHERE tg_id=? AND item_type='username' AND is_active=1 ORDER BY id DESC LIMIT 1",
+            (tg_id,),
+        )
+        primary = await cur.fetchone()
+        await cur.close()
+        await conn.execute("UPDATE users SET active_username=? WHERE tg_id=?", (primary["value"] if primary else None, tg_id))
+        await conn.commit()
+        return True, item["value"]
 
 
 async def grant_number_to_user(tg_id: int, digits: str, price: int = 0, make_active: bool = True) -> bool:
@@ -1371,8 +1414,8 @@ async def create_listing(seller_id: int, item_id: int, price: float) -> tuple[bo
             return False, "На маркете продаются только анонимные номера +888.", 0
         if u.get("phone_digits") == it["value"]:
             return False, "Это ваш текущий номер. Сначала выберите другой номер.", 0
-    elif norm_username(u.get("active_username")) == it["value"]:
-        return False, "Это ваш активный юзернейм. Сначала снимите его с активных.", 0
+    elif bool(it.get("is_active")):
+        return False, "Этот NFT-юзернейм активен. Сначала отключите его в инвентаре.", 0
     try:
         async with connect() as db:
             cur = await db.execute(
