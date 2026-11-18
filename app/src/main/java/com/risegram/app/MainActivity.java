@@ -185,7 +185,22 @@ public class MainActivity extends Activity {
             if (items == null || items.length() == 0) content.addView(label("Инвентарь пока пуст"));
             else for (int i = 0; i < items.length(); i++) {
                 JSONObject item = items.optJSONObject(i);
-                if (item != null) card((item.optString("type").equals("number") ? "📞 " : "🏷 @") + item.optString("value") + "   ·   #" + item.optInt("id"));
+                if (item == null) continue;
+                final int itemId = item.optInt("id");
+                final String itemType = item.optString("type");
+                final String itemValue = item.optString("value");
+                card((itemType.equals("number") ? "📞 " : "🏷 @") + itemValue + "   ·   #" + itemId);
+                if (itemType.equals("username")) {
+                    Button activate = button("Сделать @" + itemValue + " активным", accent);
+                    content.addView(activate);
+                    activate.setOnClickListener(v -> {
+                        activate.setEnabled(false);
+                        api("POST", "/api/inventory/" + itemId + "/activate", token, new JSONObject(), (answer, error) -> {
+                            if (error != null) { activate.setEnabled(true); toast(error); }
+                            else { toast("Юзернейм активирован"); loadInventory(); }
+                        });
+                    });
+                }
             }
             Button sell = button("Выставить NFT на маркет", green);
             content.addView(sell);
