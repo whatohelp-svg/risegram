@@ -34,6 +34,7 @@ class IdentityMigrationTests(unittest.IsolatedAsyncioTestCase):
         owner = await db.get_by_telegram(config.OWNER_TELEGRAM_ID)
         self.assertIsNotNone(owner)
         self.assertEqual(owner["tg_id"], config.OWNER_ID)
+        self.assertRegex(str(owner["rise_id"]), r"^[1-9][0-9]{7}$")
         self.assertNotEqual(owner["tg_id"], config.OWNER_TELEGRAM_ID)
         self.assertTrue(owner["user_id"])
         self.assertEqual(await db.telegram_chat_id(owner["tg_id"]), config.OWNER_TELEGRAM_ID)
@@ -43,6 +44,7 @@ class IdentityMigrationTests(unittest.IsolatedAsyncioTestCase):
         user = await db.get_or_create_user(telegram_id, "Test User", "testuser")
         self.assertNotEqual(user["tg_id"], telegram_id)
         self.assertTrue(user["user_id"])
+        self.assertRegex(str(user["rise_id"]), r"^[1-9][0-9]{7}$")
         self.assertEqual(await db.telegram_chat_id(user["tg_id"]), telegram_id)
         self.assertEqual((await db.get_by_telegram(telegram_id))["user_id"], user["user_id"])
 
