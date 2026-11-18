@@ -43,14 +43,23 @@ replace_once(
     '\t\t\treturn fmt.Errorf("TELESRV_ADVERTISE_PORT must be a TCP port in 1..65535: %q", raw)\n'
     '\t\t}\n'
     '\t}\n'
-    '\tadvertisePortStr := strconv.Itoa(advertisePort)\n',
-    "advertised external TCP port",
+    '\tadvertisePortStr := strconv.Itoa(advertisePort)\n'
+    '\tadvertiseHost := strings.TrimSpace(os.Getenv("TELESRV_ADVERTISE_HOST"))\n'
+    '\tif advertiseHost == "" { advertiseHost = cfg.AdvertiseIP }\n'
+    '\tif strings.ContainsAny(advertiseHost, "/: ") { return fmt.Errorf("TELESRV_ADVERTISE_HOST must be a hostname or IP without scheme or port") }\n',
+    "advertised external TCP host and port",
 )
 
 replace_once(
     'zap.String("advertise", net.JoinHostPort(cfg.AdvertiseIP, portStr)),',
-    'zap.String("advertise", net.JoinHostPort(cfg.AdvertiseIP, advertisePortStr)),',
+    'zap.String("advertise", net.JoinHostPort(advertiseHost, advertisePortStr)),',
     "advertised address log",
+)
+
+replace_once(
+    'IP:                       cfg.AdvertiseIP,',
+    'IP:                       advertiseHost,',
+    "MTProto advertised host",
 )
 
 replace_once(
@@ -60,4 +69,4 @@ replace_once(
 )
 
 source.write_text(text)
-print("RiseGram MTProto source patch applied; server will log only the public RSA key and advertise the configured external TCP port.")
+print("RiseGram MTProto source patch applied; server will log only the public RSA key and advertise the configured external TCP host and port.")
