@@ -43,7 +43,8 @@ class TesterAccess(Filter):
         u = event.from_user
         if u is None:
             return False
-        return u.id == config.OWNER_ID or await is_tester(u.id)
+        linked = await db.get_by_telegram(u.id)
+        return bool(linked and (linked["tg_id"] == config.OWNER_ID or await is_tester(linked["tg_id"])))
 
 
 class TesterFlow(StatesGroup):
