@@ -1,0 +1,122 @@
+name: risegram-mtproto
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: telesrv_main
+      POSTGRES_USER: telesrv
+      POSTGRES_PASSWORD: ${TELESRV_POSTGRES_PASSWORD:?Set TELESRV_POSTGRES_PASSWORD in .env.mtproto}
+      TZ: UTC
+    volumes:
+      - mtproto-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U telesrv -d telesrv_main"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    environment:
+      REDIS_PASSWORD: ${TELESRV_REDIS_PASSWORD:?Set TELESRV_REDIS_PASSWORD in .env.mtproto}
+    command:
+      - sh
+      - -c
+      - exec redis-server --appendonly yes --requirepass "$$REDIS_PASSWORD"
+    volumes:
+      - mtproto-redis:/data
+    healthcheck:
+      test: ["CMD-SHELL", "REDISCLI_AUTH=$$REDIS_PASSWORD redis-cli ping | grep -qx PONG"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  mtproto:
+    build:
+      context: ./mtproto
+      target: server
+    environment:
+      TELESRV_LISTEN: ${TELESRV_LISTEN:-0.0.0.0:2398}
+      TELESRV_ADVERTISE_IP: ${TELESRV_ADVERTISE_IP:?Set a client-reachable IP}
+      TELESRV_DC: ${TELESRV_DC:-2}
+      TELESRV_PUBLIC_BASE_URL: ${TELESRV_PUBLIC_BASE_URL:?Set TELESRV_PUBLIC_BASE_URL}
+      TELESRV_PUBLIC_WEB_BASE_URL: ${TELESRV_PUBLIC_WEB_BASE_URL:?Set TELESRV_PUBLIC_WEB_BASE_URL}
+      TELESRV_PUBLIC_LINK_WEB_ADDR: 0.0.0.0:2401
+      TELESRV_LIVESTREAM_RTMP_ADDR: 0.0.0.0:2400
+      TELESRV_BRAND_PRODUCT_NAME: RiseGram
+      TELESRV_BRAND_PRODUCT_USERNAME: risegram
+      TELESRV_BRAND_ANDROID_APP_NAME: RiseGram
+      TELESRV_BRAND_DESKTOP_APP_NAME: RiseGram Desktop
+      TELESRV_BRAND_IOS_APP_NAME: RiseGram iOS
+      TELESRV_BRAND_MACOS_APP_NAME: RiseGram macOS
+      TELESRV_BRAND_PREMIUM_NAME: RiseGram Premium
+      TELESRV_BRAND_STARS_NAME: RiseStars
+      TELESRV_RSA_KEY: ${TELESRV_RSA_KEY:-/var/lib/telesrv/server_rsa.pem}
+      TELESRV_IDENTITY_DIR: ${TELESRV_IDENTITY_DIR:-/var/lib/telesrv/identity}
+      TELESRV_BLOB_BACKEND: localfs
+      TELESRV_BLOB_DIR: ${TELESRV_BLOB_DIR:-/var/lib/telesrv/blobs}
+      TELESRV_BLOB_STAGING_DIR: ${TELESRV_BLOB_STAGING_DIR:-/var/lib/telesrv/blob-staging}
+      TELESRV_POSTGRES_PASSWORD: ${TELESRV_POSTGRES_PASSWORD:?Set TELESRV_POSTGRES_PASSWORD}
+      TELESRV_POSTGRES_DSN: ${TELESRV_POSTGRES_DSN:?Set TELESRV_POSTGRES_DSN}
+      TELESRV_REDIS_ADDR: redis:6379
+      TELESRV_REDIS_PASSWORD: ${TELESRV_REDIS_PASSWORD:?Set TELESRV_REDIS_PASSWORD}
+      TELESRV_REDIS_DB: ${TELESRV_REDIS_DB:-0}
+      TELESRV_ADMIN_API_TOKEN: ${TELESRV_ADMIN_API_TOKEN:?Set TELESRV_ADMIN_API_TOKEN}
+      TELESRV_ADMIN_API_ADDR: ${TELESRV_ADMIN_API_ADDR:-0.0.0.0:2599}
+      TELESRV_TURN_SECRET: ${TELESRV_TURN_SECRET:?Set TELESRV_TURN_SECRET}
+      TELESRV_PHONE_CODE_DELIVERY_PROVIDER: ${TELESRV_PHONE_CODE_DELIVERY_PROVIDER:-development}
+      TELESRV_DEV_AUTH_CODE: ${TELESRV_DEV_AUTH_CODE:-}
+    ports:
+      - "2398:2398/tcp"
+      - "2400:2400/tcp"
+      - "2401:2401/tcp"
+      - "12399:12399/udp"
+      - "12400:12400/udp"
+    volumes:
+      - mtproto-state:/var/lib/telesrv
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  admin:
+    build:
+      context: ./mtproto
+      target: admin
+    environment:
+      TELESRV_POSTGRES_PASSWORD: ${TELESRV_POSTGRES_PASSWORD:?Set TELESRV_POSTGRES_PASSWORD}
+      TELESRV_POSTGRES_DSN: ${TELESRV_POSTGRES_DSN:?Set TELESRV_POSTGRES_DSN}
+      TELESRV_REDIS_ADDR: redis:6379
+      TELESRV_REDIS_PASSWORD: ${TELESRV_REDIS_PASSWORD:?Set TELESRV_REDIS_PASSWORD}
+      TELESRV_REDIS_DB: ${TELESRV_REDIS_DB:-0}
+      TELESRV_ADMIN_API_TOKEN: ${TELESRV_ADMIN_API_TOKEN:?Set TELESRV_ADMIN_API_TOKEN}
+      TELESRV_ADMIN_API_ADDR: http://mtproto:2599
+      TELESRV_ADMIN_UI_ADDR: 0.0.0.0:2600
+      TELESRV_ADMIN_UI_PASSWORD: ${TELESRV_ADMIN_UI_PASSWORD:?Set TELESRV_ADMIN_UI_PASSWORD}
+      TELESRV_ADMIN_SESSION_KEY: ${TELESRV_ADMIN_SESSION_KEY:?Set TELESRV_ADMIN_SESSION_KEY}
+      TELESRV_ADMIN_UI_PERMISSIONS: "*"
+      TELESRV_RSA_KEY: ${TELESRV_RSA_KEY:-/var/lib/telesrv/server_rsa.pem}
+      TELESRV_IDENTITY_DIR: ${TELESRV_IDENTITY_DIR:-/var/lib/telesrv/identity}
+      TELESRV_BLOB_DIR: ${TELESRV_BLOB_DIR:-/var/lib/telesrv/blobs}
+      TELESRV_BLOB_STAGING_DIR: ${TELESRV_BLOB_STAGING_DIR:-/var/lib/telesrv/blob-staging}
+      TELESRV_LISTEN: ${TELESRV_LISTEN:-0.0.0.0:2398}
+    ports:
+      - "2600:2600/tcp"
+    volumes:
+      - mtproto-state:/var/lib/telesrv
+    depends_on:
+      mtproto:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  mtproto-postgres:
+  mtproto-redis:
+  mtproto-state:
