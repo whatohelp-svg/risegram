@@ -3,12 +3,24 @@ from pathlib import Path
 source = Path("cmd/telesrv/main.go")
 text = source.read_text()
 
+
 def replace_once(old: str, new: str, label: str) -> None:
     global text
     count = text.count(old)
     if count != 1:
         raise SystemExit(f"RiseGram MTProto patch expected one {label} match, found {count}")
     text = text.replace(old, new, 1)
+
+
+def replace_many(old: str, new: str, expected: int, label: str) -> None:
+    global text
+    count = text.count(old)
+    if count != expected:
+        raise SystemExit(
+            f"RiseGram MTProto patch expected {expected} {label} matches, found {count}"
+        )
+    text = text.replace(old, new)
+
 
 replace_once(
     'import (\n\t"context"\n',
@@ -50,9 +62,10 @@ replace_once(
     "advertised external TCP host and port",
 )
 
-replace_once(
+replace_many(
     'zap.String("advertise", net.JoinHostPort(cfg.AdvertiseIP, portStr)),',
     'zap.String("advertise", net.JoinHostPort(advertiseHost, advertisePortStr)),',
+    2,
     "advertised address log",
 )
 
@@ -69,4 +82,7 @@ replace_once(
 )
 
 source.write_text(text)
-print("RiseGram MTProto source patch applied; server will log only the public RSA key and advertise the configured external TCP host and port.")
+print(
+    "RiseGram MTProto source patch applied; both advertised-address log records "
+    "use the external TCP endpoint."
+)
