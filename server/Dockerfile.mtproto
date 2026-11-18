@@ -49,7 +49,7 @@ RUN apk add --no-cache ca-certificates tzdata \
     && addgroup -S -g 10001 telesrv \
     && adduser -S -D -H -u 10001 -G telesrv telesrv \
     && install -d -o telesrv -g telesrv -m 0750 /app /var/lib/telesrv
-COPY --chmod=0555 server/mtproto/deploy/docker/docker-entrypoint.sh /usr/local/bin/telesrv-container-entrypoint
+COPY --chmod=0555 server/mtproto-entrypoint.sh /usr/local/bin/telesrv-container-entrypoint
 WORKDIR /app
 USER 10001:10001
 ENTRYPOINT ["/usr/local/bin/telesrv-container-entrypoint"]
