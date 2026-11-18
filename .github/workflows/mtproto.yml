@@ -21,7 +21,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          submodules: recursive
+          submodules: false
+      - name: Fetch only the MTProto server submodule
+        run: git submodule update --init server/mtproto
       - name: Validate Compose configuration
         run: |
           cp server/.env.mtproto.example server/.env.mtproto
@@ -53,6 +55,8 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
+      - name: Fetch only the MTProto server submodule
+        run: git submodule update --init server/mtproto
       - uses: docker/setup-buildx-action@v3
       - name: Build MTProto ${{ matrix.target }} image
         uses: docker/build-push-action@v6
