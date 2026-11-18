@@ -1097,16 +1097,19 @@ async def items_screen(event, user: dict):
         text += "Пока пусто. Купить можно в разделе «Донат»."
     if names:
         text += "<b>Юзернеймы</b>\n"
+        active_count = sum(1 for n in names if n.get("is_active"))
+        text += f"Активно: {active_count} из {len(names)} — ограничений по количеству нет\n"
         for n in names[:ITEMS_SHOWN]:
-            on = db.norm_username(user.get("active_username")) == n["value"]
+            on = bool(n.get("is_active"))
             lock = " 🛒 на маркете" if n["id"] in listed else ""
             text += f"{'🟢' if on else '⚪'} @{esc(n['value'])}{lock}\n"
-            if not on and n["id"] not in listed:
-                rows.append([btn(f"Выбрать @{n['value']}", f"my:un:{n['id']}")])
+            if n["id"] not in listed:
+                action = "Отключить" if on else "Использовать"
+                rows.append([btn(f"{action} @{n['value']}", f"my:un:{n['id']}")])
         if len(names) > ITEMS_SHOWN:
             text += f"…и ещё {len(names) - ITEMS_SHOWN}\n"
-        if user.get("active_username"):
-            rows.append([btn("Убрать активный юзернейм", "my:un:0")])
+        if active_count:
+            rows.append([btn("Отключить все NFT-юзернеймы", "my:un:0")])
         text += "\n"
     if nums:
         text += "<b>Номера</b>\n"
@@ -1131,18 +1134,18 @@ async def cb_items(call: CallbackQuery, user: dict):
 async def cb_my_username(call: CallbackQuery, user: dict):
     item_id = int(call.data.split(":")[2])
     if item_id == 0:
+        await db.execute("UPDATE user_nft_inventory SET is_active=0 WHERE tg_id=? AND item_type='username'", (user["tg_id"],))
         await db.set_active_username(user["tg_id"], None)
-        user["active_username"] = None
     else:
         it = await db.get_nft(item_id)
         if not it or it["tg_id"] != user["tg_id"] or it["item_type"] != "username":
             await call.answer("Не найдено.", show_alert=True)
             return
-        if await db.listing_for_item(item_id):
-            await call.answer("Юзернейм выставлен на маркете. Сначала снимите лот.", show_alert=True)
+        ok, _ = await db.set_nft_username_active(user["tg_id"], item_id, not bool(it.get("is_active")))
+        if not ok:
+            await call.answer("NFT не найден или выставлен на маркете.", show_alert=True)
             return
-        await db.set_active_username(user["tg_id"], it["value"])
-        user["active_username"] = it["value"]
+    user = await db.get_user(user["tg_id"])
     await items_screen(call, user)
 
 
