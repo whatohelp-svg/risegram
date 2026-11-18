@@ -1141,6 +1141,19 @@ async def ensure_owner() -> None:
             except sqlite3.IntegrityError:
                 await db.rollback()
                 log.warning("rise_id=%s занят другим игроком", config.OWNER_RISE_ID)
+        # The account handle is separate from tradable NFT usernames.
+        owner_name = config.OWNER_USERNAME
+        if owner_name:
+            taken = await db.execute(
+                "SELECT 1 FROM users WHERE lower(COALESCE(username,''))=? AND tg_id!=? LIMIT 1",
+                (owner_name, oid),
+            )
+            collision = await taken.fetchone()
+            await taken.close()
+            if not collision:
+                await db.execute("UPDATE users SET username=? WHERE tg_id=?", (owner_name, oid))
+            else:
+                log.warning("OWNER_USERNAME @%s is already used by another account", owner_name)
         await db.commit()
 
 
