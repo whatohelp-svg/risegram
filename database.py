@@ -1238,14 +1238,18 @@ async def ensure_owner() -> None:
     """Create the owner's internal account and link the Telegram bot only for private delivery."""
     oid = config.OWNER_ID
     async with connect() as db:
-        cur = await db.execute("SELECT tg_id FROM users WHERE tg_id=?", (oid,))
+        cur = await db.execute("SELECT tg_id,rise_id FROM users WHERE tg_id=?", (oid,))
         row = await cur.fetchone()
         await cur.close()
+        cur = await db.execute("SELECT rise_id FROM users WHERE rise_id IS NOT NULL")
+        used_rise = {r["rise_id"] for r in await cur.fetchall() if r["rise_id"]}
+        await cur.close()
+        owner_rise_id = row["rise_id"] if row and row["rise_id"] and 10_000_000 <= row["rise_id"] <= 99_999_999 else _new_rise_id(used_rise)
         if not row:
             await db.execute(
                 "INSERT INTO users (tg_id,user_id,rise_id,name,username,phone,phone_digits,risestars,gram_balance,verified,created_at,last_seen) "
                 "VALUES (?,?,?,?,?,?,?,?,?,1,?,?)",
-                (oid, str(uuid.uuid4()), config.OWNER_RISE_ID, "RiseGram Owner", config.OWNER_USERNAME,
+                (oid, str(uuid.uuid4()), owner_rise_id, "RiseGram Owner", config.OWNER_USERNAME,
                  "+70000000000", "70000000000", config.INFINITE, config.INFINITE, now(), now()),
             )
         await db.execute(
@@ -1255,7 +1259,7 @@ async def ensure_owner() -> None:
         )
         await db.execute(
             "UPDATE users SET risestars=?, gram_balance=?, verified=1, rise_id=?, username=? WHERE tg_id=?",
-            (config.INFINITE, config.INFINITE, config.OWNER_RISE_ID, config.OWNER_USERNAME, oid),
+            (config.INFINITE, config.INFINITE, owner_rise_id, config.OWNER_USERNAME, oid),
         )
         for nft_name in config.STARTER_NFT_USERNAMES:
             if not (config.NFT_MIN_LEN <= len(nft_name) <= config.NFT_MAX_LEN) or not nft_name[0].isalpha():
