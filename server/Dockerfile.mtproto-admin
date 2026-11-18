@@ -1,22 +1,28 @@
 # syntax=docker/dockerfile:1.7
 ARG GO_IMAGE=golang:1.26.11-alpine
 ARG ALPINE_IMAGE=alpine:3.22@sha256:14358309a308569c32bdc37e2e0e9694be33a9d99e68afb0f5ff33cc1f695dce
+ARG GRAMSRV_SHA=18511c2227b3cf4f4006ea3fc63ac10910f55530
 
 FROM --platform=$BUILDPLATFORM ${GO_IMAGE} AS build-base
 ARG TARGETOS
 ARG TARGETARCH
+ARG GRAMSRV_SHA
 RUN apk add --no-cache ca-certificates git python3
 WORKDIR /src
-COPY server/mtproto/go.mod server/mtproto/go.sum ./
-RUN go mod download
-COPY server/mtproto/cmd/ ./cmd/
-COPY server/mtproto/deploy/ ./deploy/
-COPY server/mtproto/internal/ ./internal/
+# Railway's Git integration does not reliably materialize nested Git submodules.
+# Fetch the exact pinned upstream commit during the image build instead.
+RUN git init /src \
+    && git -C /src remote add origin https://github.com/iamxvbaba/gramsrv.git \
+    && git -C /src fetch --depth 1 origin "${GRAMSRV_SHA}" \
+    && git -C /src checkout --detach FETCH_HEAD
 COPY server/patches/patch_mtproto.py /tmp/patch_mtproto.py
 RUN python3 /tmp/patch_mtproto.py
+RUN go mod download
 ENV CGO_ENABLED=0
 
 FROM build-base AS build-server
+ARG TARGETOS
+ARG TARGETARCH
 ARG VCS_REF=unknown
 ARG VCS_BRANCH=unknown
 ARG VCS_TREE_STATE=unknown
@@ -29,10 +35,7 @@ RUN GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
 FROM build-base AS build-admin
 RUN apk add --no-cache nodejs npm
 WORKDIR /src/cmd/telesrv-admin/web
-COPY server/mtproto/cmd/telesrv-admin/web/package.json server/mtproto/cmd/telesrv-admin/web/package-lock.json ./
-RUN npm ci
-COPY server/mtproto/cmd/telesrv-admin/web/ ./
-RUN npm run build
+RUN npm ci && npm run build
 WORKDIR /src
 RUN GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
     go build -trimpath -ldflags="-s -w" -o /out/telesrv-admin ./cmd/telesrv-admin
@@ -54,21 +57,18 @@ WORKDIR /app
 USER 10001:10001
 ENTRYPOINT ["/usr/local/bin/telesrv-container-entrypoint"]
 
-
 FROM runtime-base AS server
 USER root
 RUN apk add --no-cache ffmpeg openssl \
     && install -d -o telesrv -g telesrv -m 0750 \
       /var/lib/telesrv/blobs /var/lib/telesrv/blob-staging \
-      /var/lib/telesrv/maptiles /var/lib/telesrv/livestream
-RUN install -d -o telesrv -g telesrv -m 0700 /var/lib/telesrv/wallet
+      /var/lib/telesrv/maptiles /var/lib/telesrv/livestream \
+      /usr/share/telesrv/langpack \
+    && install -d -o telesrv -g telesrv -m 0700 /var/lib/telesrv/wallet
 COPY --from=build-server /out/telesrv /usr/local/bin/telesrv
-RUN install -d -o telesrv -g telesrv -m 0750 /usr/share/telesrv/langpack
 USER 10001:10001
 EXPOSE 2398 2400 2401 2599 12399/udp 12400/udp
 CMD ["telesrv"]
-
-
 
 FROM runtime-base AS admin
 COPY --from=build-admin /out/telesrv-admin /usr/local/bin/telesrv-admin
