@@ -330,6 +330,19 @@ SCHEMA = [
         created_at TEXT NOT NULL,
         PRIMARY KEY(owner_id, blocked_id)
     )""",
+    """CREATE TABLE IF NOT EXISTS rg_media (
+        id TEXT PRIMARY KEY, uploader_id INTEGER NOT NULL, storage_name TEXT NOT NULL UNIQUE,
+        original_name TEXT NOT NULL, mime_type TEXT NOT NULL, byte_size INTEGER NOT NULL,
+        sha256 TEXT NOT NULL, created_at TEXT NOT NULL
+    )""",
+    """CREATE TABLE IF NOT EXISTS rg_message_media (
+        message_id INTEGER NOT NULL, media_id TEXT NOT NULL, position INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY(message_id, media_id)
+    )""",
+    """CREATE TABLE IF NOT EXISTS rg_space_message_media (
+        message_id INTEGER NOT NULL, media_id TEXT NOT NULL, position INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY(message_id, media_id)
+    )""",
     """CREATE TABLE IF NOT EXISTS meta (
         key TEXT PRIMARY KEY,
         value TEXT
@@ -384,6 +397,9 @@ INDEXES = [
     "CREATE INDEX IF NOT EXISTS ix_messages_recipient ON messages(recipient_id, read_at, id)",
     "CREATE INDEX IF NOT EXISTS ix_space_members_user ON rg_space_members(user_id, space_id)",
     "CREATE INDEX IF NOT EXISTS ix_space_messages ON rg_space_messages(space_id, id)",
+    "CREATE INDEX IF NOT EXISTS ix_rg_media_owner ON rg_media(uploader_id, created_at)",
+    "CREATE INDEX IF NOT EXISTS ix_rg_message_media_message ON rg_message_media(message_id, position)",
+    "CREATE INDEX IF NOT EXISTS ix_rg_space_media_message ON rg_space_message_media(message_id, position)",
 ]
 
 
