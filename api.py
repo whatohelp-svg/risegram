@@ -19,6 +19,7 @@ from aiohttp import web
 
 import config
 import database as db
+from media_api import create_media_handlers
 from ui import esc, safe_send
 
 log = logging.getLogger("risegram.api")
@@ -110,6 +111,8 @@ async def _current_user(request: web.Request) -> dict | None:
         return None
     return user
 
+
+h_media_upload, h_media_download = create_media_handlers(_current_user)
 
 async def core_request_code(bot, phone: str) -> tuple[int, dict]:
     digits = db.digits_of(phone)
@@ -608,7 +611,7 @@ async def h_health(request: web.Request):
 async def start_api(bot) -> web.AppRunner | None:
     # Public auth endpoints are protected by per-phone cooldown and one-time codes.
     # API_SECRET is intentionally not required by a public APK.
-    app = web.Application(client_max_size=64 * 1024)
+    app = web.Application(client_max_size=26 * 1024 * 1024)
     app["bot"] = bot
     app.add_routes([
         web.get("/", h_index),
@@ -625,6 +628,8 @@ async def start_api(bot) -> web.AppRunner | None:
         web.get("/api/spaces/{space_id}/messages", h_space_messages),
         web.post("/api/spaces/{space_id}/messages", h_space_send),
         web.post("/api/chats/{rise_id}/messages", h_send_message),
+        web.post("/api/media", h_media_upload),
+        web.get("/api/media/{media_id}", h_media_download),
         web.get("/api/blocks", h_chat_blocks),
         web.post("/api/blocks/{rise_id}", h_block_user),
         web.delete("/api/blocks/{rise_id}", h_unblock_user),
