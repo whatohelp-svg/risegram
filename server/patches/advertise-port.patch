@@ -1,0 +1,35 @@
+diff --git a/cmd/telesrv/main.go b/cmd/telesrv/main.go
+index 0000000..1111111 100644
+--- a/cmd/telesrv/main.go
++++ b/cmd/telesrv/main.go
+@@ -702,6 +702,14 @@
+ 	port, err := strconv.Atoi(portStr)
+ 	if err != nil {
+ 		return fmt.Errorf("parse listen port %q: %w", portStr, err)
+ 	}
++	advertisePort := port
++	if raw := strings.TrimSpace(os.Getenv("TELESRV_ADVERTISE_PORT")); raw != "" {
++		advertisePort, err = strconv.Atoi(raw)
++		if err != nil || advertisePort < 1 || advertisePort > 65535 {
++			return fmt.Errorf("TELESRV_ADVERTISE_PORT must be a TCP port in 1..65535: %q", raw)
++		}
++	}
++	advertisePortStr := strconv.Itoa(advertisePort)
+ 
+ 	// tg.Layer is generated from the currently imported canonical schema; after
+ 	// adopting a future Layer there is no need to maintain a separate constant in telesrv.
+@@ -714,7 +722,7 @@
+ 		zap.String("listen", cfg.ListenAddr),
+ 		zap.Int("dc", cfg.DC),
+ 		zap.String("default_country_code", cfg.DefaultCountryCode),
+-		zap.String("advertise", net.JoinHostPort(cfg.AdvertiseIP, portStr)),
++		zap.String("advertise", net.JoinHostPort(cfg.AdvertiseIP, advertisePortStr)),
+ 		zap.Int("tl_layer", tg.Layer),
+@@ -1920,7 +1928,7 @@
+ 		DC:                       cfg.DC,
+ 		DefaultCountryCode:       cfg.DefaultCountryCode,
+ 		IP:                       cfg.AdvertiseIP,
+-		Port:                     port,
++		Port:                     advertisePort,
+ 		OutboundPushTimeout:      cfg.OutboundPushTimeout,
+*** End Patch
