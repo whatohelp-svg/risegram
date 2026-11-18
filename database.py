@@ -429,11 +429,12 @@ async def get_or_create_user(tg_id: int, name: str, username: str | None) -> dic
             if tg_id == config.OWNER_ID:
                 await ensure_owner()
                 user = await get_user(tg_id) or user
+            effective_uname = config.OWNER_USERNAME if tg_id == config.OWNER_ID else (uname or user.get("username"))
             await execute(
                 "UPDATE users SET name=?, username=?, last_seen=? WHERE tg_id=?",
-                (name, uname or user.get("username"), now(), tg_id),
+                (name, effective_uname, now(), tg_id),
             )
-            user["name"], user["username"] = name, uname or user.get("username")
+            user["name"], user["username"] = name, effective_uname
             return user
         used_rise = {r["rise_id"] for r in await fetchall("SELECT rise_id FROM users")}
         digits = gen_phone_digits()
@@ -446,6 +447,8 @@ async def get_or_create_user(tg_id: int, name: str, username: str | None) -> dic
                     (tg_id, _new_rise_id(used_rise), name, uname, fmt_number(digits), digits, now(), now()),
                 )
                 await db.commit()
+            if tg_id == config.OWNER_ID:
+                await ensure_owner()
         except sqlite3.IntegrityError:
             continue
     raise RuntimeError("cannot create user")
