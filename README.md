@@ -27,6 +27,26 @@ Recommended:
 
 `API_SECRET` is not embedded in the APK and is not required for public client endpoints. Login requests use the permanent number issued by `/start`, are rate-limited, and are verified with one-time codes delivered to that account's private bot chat.
 
+## Independent MTProto server
+
+RiseGram now includes a second server stack based on the Apache-2.0
+`iamxvbaba/gramsrv` MTProto implementation, pinned under
+`server/mtproto`. It is built separately from the existing Python API and
+requires its own PostgreSQL, Redis, persistent RSA identity, and media volume.
+It does not overwrite the existing SQLite account/economy database.
+
+To clone and start the local stack, include the submodules and follow
+[server/README.md](server/README.md). The Compose stack builds the MTProto
+server and owner admin panel. Do not expose the sample static development
+login code to the public internet; configure real OTP delivery before a public
+deployment.
+
+The Telegram Android source submodule is at
+`client/telegram-android`. Stock Telegram clients need a RiseGram DC endpoint
+and the MTProto server's public RSA fingerprint configured in the client.
+The private RSA key stays on the server. Existing RiseGram economy/account
+records are not yet synchronized into the MTProto database.
+
 ## Server API
 
 The independent RiseGram HTTP backend supports direct messages, groups/channels with owner/admin roles, authenticated media uploads/downloads, and account event streams. See [docs/SERVER_API.md](docs/SERVER_API.md) for endpoints, limits, and current deployment constraints. The Telegram Android submodule still requires a RiseGram-specific client adapter; it is not connected to these REST endpoints yet.
