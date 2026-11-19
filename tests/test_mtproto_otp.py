@@ -92,6 +92,16 @@ class MtprotoOtpWebhookTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(row["status"], "sent")
 
+    async def test_regular_login_delivery_passes_internal_user_id_to_safe_send(self):
+        api._last_request.clear()
+        with patch("api.safe_send", new=AsyncMock(return_value=True)) as send:
+            status, body = await api.core_request_code(object(), self.user["phone"])
+        self.assertEqual(status, 200)
+        self.assertTrue(body["ok"])
+        self.assertEqual(send.await_args.args[1], self.user["tg_id"])
+        self.assertEqual(await db.telegram_chat_id(send.await_args.args[1]), self.telegram_chat_id)
+        self.assertIn("Код входа", send.await_args.args[2])
+
     async def test_invalid_hmac_is_rejected_before_any_delivery(self):
         raw = json.dumps(self.payload(), separators=(",", ":")).encode()
         with patch("api.safe_send", new=AsyncMock(return_value=True)) as send:
