@@ -78,7 +78,8 @@ class MtprotoOtpWebhookTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(first.status, 200)
             self.assertTrue((await first.json())["accepted"])
             self.assertEqual(send.await_count, 1)
-            self.assertEqual(send.await_args.args[1], self.telegram_chat_id)
+            self.assertEqual(send.await_args.args[1], self.user["tg_id"])
+            self.assertEqual(await db.telegram_chat_id(send.await_args.args[1]), self.telegram_chat_id)
             self.assertIn("482913", send.await_args.args[2])
 
             duplicate = await self.client.post("/internal/mtproto/otp", data=raw, headers=headers)
