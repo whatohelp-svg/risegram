@@ -30,6 +30,7 @@ class MtprotoOtpWebhookTests(unittest.IsolatedAsyncioTestCase):
             "UPDATE users SET phone='+7771234567', phone_digits='7771234567' WHERE tg_id=?",
             (self.user["tg_id"],),
         )
+        self.user = await db.get_user(self.user["tg_id"])
 
         app = web.Application()
         app["bot"] = object()
