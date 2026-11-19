@@ -137,7 +137,7 @@ async def core_request_code(bot, phone: str) -> tuple[int, dict]:
     code = await db.issue_auth_code(user["tg_id"])
     delivered = await safe_send(
         bot,
-        chat_id,
+        user["tg_id"],
         f"🔒 <b>Код входа в {config.BRAND}</b>\n\nНомер: <code>{esc(user['phone'])}</code>\nКод: <code>{code}</code>\n\n"
         f"Действует {config.AUTH_CODE_TTL_SECONDS // 60} мин. Никому его не сообщайте.",
     )
@@ -912,7 +912,7 @@ async def h_mtproto_otp_delivery(request: web.Request):
         f"Код: <code>{esc(code)}</code>\n\n"
         "Код одноразовый. Никому его не сообщайте"
     )
-    delivered = await safe_send(request.app["bot"], chat_id, message)
+    delivered = await safe_send(request.app["bot"], user["tg_id"], message)
     await db.execute(
         "UPDATE rg_otp_deliveries SET status=?,updated_at=? WHERE delivery_id=?",
         ("sent" if delivered else "failed", db.now(), delivery_id),
