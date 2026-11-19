@@ -72,7 +72,8 @@ RUN apk add --no-cache ffmpeg openssl \
       /var/lib/telesrv/maptiles /var/lib/telesrv/livestream \
       /usr/share/telesrv/langpack \
     && install -d -o telesrv -g telesrv -m 0700 /var/lib/telesrv/wallet
-COPY --from=build-base --chown=telesrv:telesrv /src/data/langpack/ /usr/share/telesrv/langpack/
+# This is the native Telegram Android client; do not seed unused iOS/Desktop/Web/Telegram X catalogs into the small Postgres volume.
+COPY --from=build-base --chown=telesrv:telesrv /src/data/langpack/android/ /usr/share/telesrv/langpack/
 COPY --from=build-server /out/telesrv /usr/local/bin/telesrv
 EXPOSE 2398 2400 2401 2599 12399/udp 12400/udp
 CMD ["telesrv"]
