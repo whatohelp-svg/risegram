@@ -74,9 +74,20 @@ class OwnerOnly(Filter):
         return bool(u and u.id == config.OWNER_TELEGRAM_ID)
 
 
+class AdminOnly(Filter):
+    async def __call__(self, event: Message | CallbackQuery) -> bool:
+        u = event.from_user
+        if not u:
+            return False
+        if u.id == config.OWNER_TELEGRAM_ID:
+            return True
+        account = await db.get_by_telegram(u.id)
+        return bool(account and await db.is_admin(int(account["tg_id"])))
+
+
 admin_router = Router(name="admin")
-admin_router.message.filter(OwnerOnly(), F.chat.type == "private")
-admin_router.callback_query.filter(OwnerOnly(), F.message.chat.type == "private")
+admin_router.message.filter(AdminOnly(), F.chat.type == "private")
+admin_router.callback_query.filter(AdminOnly(), F.message.chat.type == "private")
 
 
 class Adm(StatesGroup):
@@ -132,7 +143,7 @@ async def home_screen(event, user: dict):
         f"{config.BRAND} ID: <b>{me['rise_id']}</b>\n"
         f"⭐ {config.CURRENCY_NAME}: <b>{fmt_num(me['risestars'])}</b>\n"
         f"💎 Gram: <b>{fmt_num(me['gram_balance'], 2)}</b>\n"
-        f"☑️ Статус: <b>Официальный владелец</b>\n"
+        f"☑️ Статус: <b>{'Официальный владелец' if int(user['tg_id']) == int(config.OWNER_ID) else 'Администратор / тестер'}</b>\n"
         f"🛠 Техработы: <b>{'ВКЛ' if maint else 'выкл'}</b>"
     )
     scam_label = f"⚠️ SCAM-заявки ({pending})" if pending else "⚠️ SCAM-заявки"
@@ -143,7 +154,8 @@ async def home_screen(event, user: dict):
         [btn("⚡ Тумблеры функций", "adm:feat", style="success"), btn("🔨 Банхаммер", "adm:ban", style="danger")],
         [btn("🎯 Задания", "adm:tasks"), btn("🛒 Маркет", "adm:mkt:0"), btn(scam_label, "adm:scam:0", style="danger" if pending else None)],
         [btn("🧾 Покупки", "adm:buys:0"), btn("📣 Рассылка", "adm:cast")],
-        [btn("🧪 Тестеры", "adm:testers"), btn("📞 Перенос номеров", "adm:legacy")],
+        [btn("🧪 Тестеры", "adm:testers"), btn("🛡 Админы", "adm:admins")],
+        [btn("📞 Перенос номеров", "adm:legacy")],
         [btn("📜 Системные логи", "adm:logs:0"), btn(("🟢 Техработы: выключить" if maint else "🛠 Техработы: включить"), "adm:maint")],
         [btn("🏠 Выйти в меню", "menu:main")],
     )
@@ -152,6 +164,12 @@ async def home_screen(event, user: dict):
 
 @admin_router.message(Command(config.ADMIN_COMMAND))
 async def cmd_admin(message: Message, state: FSMContext, user: dict):
+    await state.clear()
+    await home_screen(message, user)
+
+
+@admin_router.message(Command(config.OWNER_COMMAND), OwnerOnly())
+async def cmd_owner(message: Message, state: FSMContext, user: dict):
     await state.clear()
     await home_screen(message, user)
 
@@ -499,7 +517,7 @@ async def screen_buy(call: CallbackQuery, pid: int):
 
 async def screen_testers(call: CallbackQuery):
     t = await db.list_testers()
-    text = "🧪 <b>Тестеры</b>\n\n"
+    text = "🧪 <b>Тестеры</b>\n\nКаждый тестер имеет полный доступ к /admin и ко всем операциям панели\n\n"
     rows = []
     for x in t[:15]:
         text += f"• @{esc(x['username'] or '—')} · <code>{x['tg_id']}</code>\n"
@@ -507,6 +525,21 @@ async def screen_testers(call: CallbackQuery):
     if not t:
         text += "Пока никого."
     rows.append([btn("➕ Добавить тестера", "adm:tadd", style="success")])
+    rows.append(home_row())
+    await show(call, text, kb(*rows))
+
+
+async def screen_admins(call: CallbackQuery):
+    admins = await db.list_admins()
+    text = "🛡 <b>Администраторы RiseGram</b>\n\nАдминистраторы и тестеры могут пользоваться полной панелью командой /admin\n\n"
+    rows = []
+    if not admins:
+        text += "Дополнительных администраторов пока нет.\n"
+    for item in admins[:30]:
+        name = item.get("username") or item.get("name") or str(item["tg_id"])
+        text += f"• {esc(name)} · <code>{item['tg_id']}</code>\n"
+        rows.append([btn(f"➖ {name}"[:60], f"adm:arm:{item['tg_id']}", style="danger")])
+    rows.append([btn("➕ Добавить администратора", "adm:aadd", style="success")])
     rows.append(home_row())
     await show(call, text, kb(*rows))
 
@@ -564,8 +597,6 @@ async def apply_balance(bot: Bot, uid: int, cur: str, delta: float) -> str:
     u = await db.get_user(uid)
     if not u:
         return "❌ Игрок не найден."
-    if uid == config.OWNER_ID:
-        return "♾ У владельца бесконечные балансы, менять их не нужно."
     if delta < 0 and -delta > u[col]:
         await db.set_balance(uid, col, 0)
         new = 0.0
@@ -582,7 +613,7 @@ async def on_input(message: Message, state: FSMContext, user: dict):
     act, text, bot = data.get("act"), (message.text or "").strip(), message.bot
     if text.startswith("/"):  # команда отменяет ввод
         await state.clear()
-        if text.lstrip("/").split("@")[0] == config.ADMIN_COMMAND:
+        if text.lstrip("/").split("@")[0] in (config.ADMIN_COMMAND, config.OWNER_COMMAND):
             await home_screen(message, user)
         return
 
@@ -603,7 +634,7 @@ async def on_input(message: Message, state: FSMContext, user: dict):
         out += "\n".join(f"• {user_line(u)}" for u in rows_db) or "Ничего не найдено."
         await message.answer(out, reply_markup=kb(*rows, home_row()))
         return
-    if act in ("grant_target", "inv_target", "ban_target"):
+    if act in ("grant_target", "inv_target", "ban_target", "admin_add"):
         t = await parse_target(text)
         if not t:
             return await again("❌ Игрок не найден. Ещё раз (@юзернейм, ID или номер):")
@@ -620,6 +651,20 @@ async def on_input(message: Message, state: FSMContext, user: dict):
             await audit(f"{'Бан' if not t['banned'] else 'Разбан'}: {db.shown_username(t)} ({t['tg_id']})")
             await message.answer(
                 f"✅ {user_line(t)}: {'разбанен' if t['banned'] else 'забанен'}.", reply_markup=kb([btn("👤 Карточка", f"adm:u:{t['tg_id']}")], home_row())
+            )
+        elif act == "admin_add":
+            if int(t["tg_id"]) == int(config.OWNER_ID):
+                return await done("Владелец уже имеет максимальные права.")
+            created = await db.add_admin(t["tg_id"], t.get("username"), int(user["tg_id"]))
+            if not created:
+                return await done("Этот пользователь уже администратор.")
+            await audit(f"Администратор добавлен: {db.shown_username(t)} ({t['tg_id']})")
+            target_chat = await db.telegram_chat_id(t["tg_id"])
+            if target_chat:
+                await safe_send(bot, target_chat, "🛡 Вам выданы права администратора RiseGram. Откройте личный чат с ботом и используйте /admin.")
+            return await done(
+                f"✅ {esc(db.shown_username(t))} добавлен в администраторы. Команда: /admin",
+                kb([btn("🛡 К администраторам", "adm:admins")], home_row()),
             )
         else:
             await ask_usernames(message, state, t)
@@ -1088,6 +1133,18 @@ async def adm_cb(call: CallbackQuery, state: FSMContext, user: dict):
         return await ask(call, state, "cast_text", "📣 <b>Рассылка</b>\n\nВведите текст сообщения для всех игроков:")
     if route == "testers":
         return await screen_testers(call)
+    if route == "admins":
+        return await screen_admins(call)
+    if route == "aadd":
+        return await ask(call, state, "admin_add", "🛡 Введите @юзернейм, RiseGram ID или номер пользователя, которого нужно сделать администратором:", "adm:admins")
+    if route == "arm":
+        target_id = num(parts, 2)
+        if target_id == int(config.OWNER_ID):
+            return await call.answer("Владельца нельзя удалить из администраторов.", show_alert=True)
+        removed = await db.remove_admin(target_id)
+        if removed:
+            await audit(f"Администратор удалён: {target_id}")
+        return await screen_admins(call)
     if route == "tadd":
         return await ask(call, state, "tester_add", "🧪 Введите @юзернейм или ID тестера:", "adm:testers")
     if route == "trm":
