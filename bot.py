@@ -101,11 +101,12 @@ class GuardMiddleware(BaseMiddleware):
             except Exception:
                 logging.getLogger("risegram.bot").debug("post-payment username sync deferred", exc_info=True)
             return result
-        is_owner = tg_user.id == config.OWNER_TELEGRAM_ID
-        if user.get("banned") and not is_owner:
+        is_admin = tg_user.id == config.OWNER_TELEGRAM_ID or await db.is_admin(int(user["tg_id"]))
+        data["is_admin"] = is_admin
+        if user.get("banned") and not is_admin:
             await _reply_block(event, "❌ Ваш аккаунт заблокирован.")
             return
-        if not is_owner and await db.get_meta("maintenance") == "1":
+        if not is_admin and await db.get_meta("maintenance") == "1":
             await _reply_block(event, "🛠 Технические работы. Загляните позже.")
             return
         if is_cb and not (event.data or "").startswith("adm:"):
@@ -2101,6 +2102,7 @@ async def msg_fallback(message: Message, user: dict):
 
 async def on_startup(bot: Bot):
     await db.init_db()
+    await db.ensure_owner()
     await bot.delete_webhook(drop_pending_updates=True)
     me = await bot.get_me()
     log.info("%s запущен как @%s", config.BRAND, me.username)
@@ -2114,7 +2116,7 @@ async def main():
     dp = Dispatcher(storage=MemoryStorage())
     dp.message.outer_middleware(GuardMiddleware())
     dp.callback_query.outer_middleware(GuardMiddleware())
-    dp.include_router(admin_router)  # админка первой: /admin7206852053 не должна попадать в обычный fallback
+    dp.include_router(admin_router)  # панель /admin и владелец /owner обрабатываются раньше общего меню
     dp.include_router(router)
     dp.startup.register(on_startup)
     await db.init_db()
