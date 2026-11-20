@@ -174,6 +174,12 @@ SCHEMA = [
         added_at TEXT,
         added_by INTEGER
     )""",
+    """CREATE TABLE IF NOT EXISTS admins (
+        tg_id INTEGER PRIMARY KEY,
+        username TEXT,
+        added_at TEXT,
+        added_by INTEGER
+    )""",
     """CREATE TABLE IF NOT EXISTS admin_logs (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         admin_id INTEGER,
@@ -1525,6 +1531,39 @@ async def list_testers() -> list[dict]:
     return await fetchall("SELECT * FROM testers ORDER BY added_at DESC")
 
 
+async def is_admin(tg_id: int) -> bool:
+    if int(tg_id) == int(config.OWNER_ID):
+        return True
+    return bool(await scalar(
+        "SELECT 1 FROM admins WHERE tg_id=? UNION ALL SELECT 1 FROM testers WHERE tg_id=? LIMIT 1",
+        (int(tg_id), int(tg_id)),
+    ))
+
+
+async def add_admin(tg_id: int, username: str | None, added_by: int) -> bool:
+    if int(tg_id) == int(config.OWNER_ID):
+        return False
+    return await execute(
+        "INSERT OR IGNORE INTO admins (tg_id,username,added_at,added_by) VALUES (?,?,?,?)",
+        (int(tg_id), norm_username(username), now(), int(added_by)),
+    ) > 0
+
+
+async def remove_admin(tg_id: int) -> bool:
+    if int(tg_id) == int(config.OWNER_ID):
+        return False
+    return await execute("DELETE FROM admins WHERE tg_id=?", (int(tg_id),)) > 0
+
+
+async def list_admins() -> list[dict]:
+    return await fetchall(
+        """SELECT a.tg_id,a.username,a.added_at,a.added_by,
+                  u.name,u.rise_id
+           FROM admins a LEFT JOIN users u ON u.tg_id=a.tg_id
+           ORDER BY a.added_at DESC"""
+    )
+
+
 async def stats() -> dict:
     day = now_plus(-86400)
     week = now_plus(-7 * 86400)
@@ -1560,7 +1599,7 @@ async def ensure_owner() -> None:
     """Create the owner's internal account and link the Telegram bot only for private delivery."""
     oid = config.OWNER_ID
     async with connect() as db:
-        cur = await db.execute("SELECT tg_id,rise_id FROM users WHERE tg_id=?", (oid,))
+        cur = await db.execute("SELECT tg_id,rise_id,risestars,gram_balance FROM users WHERE tg_id=?", (oid,))
         row = await cur.fetchone()
         await cur.close()
         cur = await db.execute("SELECT rise_id FROM users WHERE rise_id IS NOT NULL")
@@ -1572,7 +1611,17 @@ async def ensure_owner() -> None:
                 "INSERT INTO users (tg_id,user_id,rise_id,name,username,phone,phone_digits,risestars,gram_balance,verified,created_at,last_seen) "
                 "VALUES (?,?,?,?,?,?,?,?,?,1,?,?)",
                 (oid, str(uuid.uuid4()), owner_rise_id, "RiseGram Owner", config.OWNER_USERNAME,
-                 "+70000000000", "70000000000", config.INFINITE, config.INFINITE, now(), now()),
+                 "+70000000000", "70000000000", config.OWNER_START_RISESTARS, config.OWNER_START_GRAM, now(), now()),
+            )
+        else:
+            # One-time migration: remove legacy ∞ values without resetting a
+            # finite wallet every time the bot restarts.
+            await db.execute(
+                """UPDATE users SET
+                     risestars=CASE WHEN risestars>=1000000000000 THEN ? ELSE risestars END,
+                     gram_balance=CASE WHEN gram_balance>=1000000000000 THEN ? ELSE gram_balance END
+                   WHERE tg_id=?""",
+                (config.OWNER_START_RISESTARS, config.OWNER_START_GRAM, oid),
             )
         await db.execute(
             "INSERT INTO telegram_links (telegram_chat_id,tg_id,linked_at) VALUES (?,?,?) "
@@ -1580,8 +1629,12 @@ async def ensure_owner() -> None:
             (config.OWNER_TELEGRAM_ID, oid, now()),
         )
         await db.execute(
-            "UPDATE users SET risestars=?, gram_balance=?, verified=1, rise_id=?, username=? WHERE tg_id=?",
-            (config.INFINITE, config.INFINITE, owner_rise_id, config.OWNER_USERNAME, oid),
+            "UPDATE users SET verified=1, rise_id=?, username=? WHERE tg_id=?",
+            (owner_rise_id, config.OWNER_USERNAME, oid),
+        )
+        await db.execute(
+            "INSERT OR IGNORE INTO admins (tg_id,username,added_at,added_by) VALUES (?,?,?,?)",
+            (oid, config.OWNER_USERNAME, now(), oid),
         )
         for nft_name in config.STARTER_NFT_USERNAMES:
             if not (config.NFT_MIN_LEN <= len(nft_name) <= config.NFT_MAX_LEN) or not nft_name[0].isalpha():
