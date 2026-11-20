@@ -81,6 +81,105 @@ replace_once(
     "MTProto RPC advertised port",
 )
 
+
+# Instrument the temporary-to-permanent binding and final phone sign-in commit.
+# Auth-key IDs are safe operational identifiers; do not log phone numbers or codes.
+auth_source = Path("internal/rpc/auth.go")
+auth_text = auth_source.read_text()
+
+
+def replace_auth_once(old: str, new: str, label: str) -> None:
+    global auth_text
+    count = auth_text.count(old)
+    if count != 1:
+        raise SystemExit(f"RiseGram auth patch expected one {label} match, found {count}")
+    auth_text = auth_text.replace(old, new, 1)
+
+
+replace_auth_once(
+    '\tsessionID, _ := SessionIDFrom(ctx)\n\tboundState, err := r.deps.Auth.BindTempAuthKey(ctx, sessionID, domain.TempAuthKeyBinding{\n',
+    '\tsessionID, _ := SessionIDFrom(ctx)\n'
+    '\tpermID := authKeyIDFromInt64(req.PermAuthKeyID)\n'
+    '\tif r.log != nil {\n'
+    '\t\tr.log.Info("auth.bindTempAuthKey requested",\n'
+    '\t\t\tzap.String("raw_auth_key_id", fmt.Sprintf("%x", id[:])),\n'
+    '\t\t\tzap.String("perm_auth_key_id", fmt.Sprintf("%x", permID[:])),\n'
+    '\t\t\tzap.Int64("session_id", sessionID),\n'
+    '\t\t)\n'
+    '\t}\n'
+    '\tboundState, err := r.deps.Auth.BindTempAuthKey(ctx, sessionID, domain.TempAuthKeyBinding{\n',
+    "temp auth key bind attempt logging",
+)
+
+replace_auth_once(
+    '\tif err != nil {\n\t\treturn false, bindTempAuthKeyErr(err)\n\t}\n\tpermID := authKeyIDFromInt64(req.PermAuthKeyID)\n',
+    '\tif err != nil {\n'
+    '\t\tif r.log != nil {\n'
+    '\t\t\tr.log.Warn("auth.bindTempAuthKey rejected",\n'
+    '\t\t\t\tzap.String("raw_auth_key_id", fmt.Sprintf("%x", id[:])),\n'
+    '\t\t\t\tzap.String("perm_auth_key_id", fmt.Sprintf("%x", permID[:])),\n'
+    '\t\t\t\tzap.Int64("session_id", sessionID),\n'
+    '\t\t\t\tzap.Error(err),\n'
+    '\t\t\t)\n'
+    '\t\t}\n'
+    '\t\treturn false, bindTempAuthKeyErr(err)\n'
+    '\t}\n'
+    '\tif r.log != nil {\n'
+    '\t\tr.log.Info("auth.bindTempAuthKey committed",\n'
+    '\t\t\tzap.String("raw_auth_key_id", fmt.Sprintf("%x", id[:])),\n'
+    '\t\t\tzap.String("perm_auth_key_id", fmt.Sprintf("%x", permID[:])),\n'
+    '\t\t\tzap.Int64("session_id", sessionID),\n'
+    '\t\t\tzap.Int("layer", boundState.Layer),\n'
+    '\t\t)\n'
+    '\t}\n',
+    "temp auth key bind result logging",
+)
+
+replace_auth_once(
+    '\tif err != nil {\n'
+    '\t\tif errors.Is(err, domain.ErrSessionPasswordNeeded) && u.ID != 0 {\n',
+    '\tif err != nil {\n'
+    '\t\tif r.log != nil {\n'
+    '\t\t\trawID, _ := RawAuthKeyIDFrom(ctx)\n'
+    '\t\t\tauthID, _ := AuthKeyIDFrom(ctx)\n'
+    '\t\t\tsessionID, _ := SessionIDFrom(ctx)\n'
+    '\t\t\tr.log.Info("auth.signIn did not complete",\n'
+    '\t\t\t\tzap.String("raw_auth_key_id", fmt.Sprintf("%x", rawID[:])),\n'
+    '\t\t\t\tzap.String("auth_key_id", fmt.Sprintf("%x", authID[:])),\n'
+    '\t\t\t\tzap.Int64("session_id", sessionID),\n'
+    '\t\t\t\tzap.Int64("user_id", u.ID),\n'
+    '\t\t\t\tzap.Bool("need_sign_up", needSignUp),\n'
+    '\t\t\t\tzap.Error(err),\n'
+    '\t\t\t)\n'
+    '\t\t}\n'
+    '\t\tif errors.Is(err, domain.ErrSessionPasswordNeeded) && u.ID != 0 {\n',
+    "sign-in failure diagnostics",
+)
+
+replace_auth_once(
+    '\tif id, ok := AuthKeyIDFrom(ctx); ok {\n'
+    '\t\tr.setAuthUserCache(id, u.ID, true)\n'
+    '\t}\n'
+    '\tr.bindSessionUser(ctx, u.ID)\n',
+    '\trawID, _ := RawAuthKeyIDFrom(ctx)\n'
+    '\tauthID, _ := AuthKeyIDFrom(ctx)\n'
+    '\tsessionID, _ := SessionIDFrom(ctx)\n'
+    '\tif r.log != nil {\n'
+    '\t\tr.log.Info("auth.signIn authorization committed",\n'
+    '\t\t\tzap.String("raw_auth_key_id", fmt.Sprintf("%x", rawID[:])),\n'
+    '\t\t\tzap.String("auth_key_id", fmt.Sprintf("%x", authID[:])),\n'
+    '\t\t\tzap.Int64("session_id", sessionID),\n'
+    '\t\t\tzap.Int64("user_id", u.ID),\n'
+    '\t\t)\n'
+    '\t}\n'
+    '\tif id, ok := AuthKeyIDFrom(ctx); ok {\n'
+    '\t\tr.setAuthUserCache(id, u.ID, true)\n'
+    '\t}\n'
+    '\tr.bindSessionUser(ctx, u.ID)\n',
+    "successful sign-in diagnostics",
+)
+
+auth_source.write_text(auth_text)
 source.write_text(text)
 print(
     "RiseGram MTProto source patch applied; both advertised-address log records "
