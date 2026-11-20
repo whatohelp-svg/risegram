@@ -27,7 +27,7 @@ class MtprotoOtpWebhookTests(unittest.IsolatedAsyncioTestCase):
         self.telegram_chat_id = 910000001
         self.user = await db.get_or_create_user(self.telegram_chat_id, "OTP tester", "otp_test")
         await db.execute(
-            "UPDATE users SET phone='+7771234567', phone_digits='7771234567' WHERE tg_id=?",
+            "UPDATE users SET phone='+888 0123 4567', phone_digits='88801234567' WHERE tg_id=?",
             (self.user["tg_id"],),
         )
         self.user = await db.get_user(self.user["tg_id"])
@@ -64,7 +64,7 @@ class MtprotoOtpWebhookTests(unittest.IsolatedAsyncioTestCase):
             "delivery_id": delivery_id,
             "purpose": "login_sms",
             "channel": "sms",
-            "recipient": "+7 771 234 567",
+            "recipient": "+888 0123 4567",
             "code": "482913",
             "expires_at": "2030-01-01T00:00:00Z",
             "expires_in": 300,
@@ -104,22 +104,16 @@ class MtprotoOtpWebhookTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await db.telegram_chat_id(send.await_args.args[1]), self.telegram_chat_id)
         self.assertIn("Код входа", send.await_args.args[2])
 
-    async def test_mtproto_otp_uses_explicitly_shared_personal_telegram_phone(self):
-        self.assertTrue(await db.link_telegram_phone(self.user["tg_id"], "+7771234567"))
-        raw = json.dumps(self.payload("otp_personal_phone"), separators=(",", ":")).encode()
+    async def test_personal_number_is_not_an_otp_alias(self):
+        payload = self.payload("otp_personal_phone")
+        payload["recipient"] = "+7 771 234 567"
+        raw = json.dumps(payload, separators=(",", ":")).encode()
         with patch("api.safe_send", new=AsyncMock(return_value=True)) as send:
             response = await self.client.post(
                 "/internal/mtproto/otp", data=raw, headers=self.signed_headers(raw)
             )
-        self.assertEqual(response.status, 200)
-        self.assertTrue((await response.json())["accepted"])
-        self.assertEqual(send.await_args.args[1], self.user["tg_id"])
-        self.assertIn("482913", send.await_args.args[2])
-
-    async def test_personal_phone_cannot_be_claimed_by_two_bot_accounts(self):
-        other = await db.get_or_create_user(910000002, "Other tester", "other_test")
-        self.assertTrue(await db.link_telegram_phone(self.user["tg_id"], "+7771234567"))
-        self.assertFalse(await db.link_telegram_phone(other["tg_id"], "+7771234567"))
+        self.assertEqual(response.status, 404)
+        send.assert_not_awaited()
 
     async def test_invalid_hmac_is_rejected_before_any_delivery(self):
         raw = json.dumps(self.payload(), separators=(",", ":")).encode()
