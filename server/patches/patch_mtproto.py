@@ -156,11 +156,16 @@ replace_auth_once(
     "sign-in failure diagnostics",
 )
 
-replace_auth_once(
+sign_in_start = auth_text.index("func (r *Router) finishAuthSignIn")
+sign_in_end = auth_text.index("func (r *Router) onAuthResendCode", sign_in_start)
+sign_in_text = auth_text[sign_in_start:sign_in_end]
+sign_in_old = (
     '\tif id, ok := AuthKeyIDFrom(ctx); ok {\n'
     '\t\tr.setAuthUserCache(id, u.ID, true)\n'
     '\t}\n'
-    '\tr.bindSessionUser(ctx, u.ID)\n',
+    '\tr.bindSessionUser(ctx, u.ID)\n'
+)
+sign_in_new = (
     '\trawID, _ := RawAuthKeyIDFrom(ctx)\n'
     '\tauthID, _ := AuthKeyIDFrom(ctx)\n'
     '\tsessionID, _ := SessionIDFrom(ctx)\n'
@@ -175,9 +180,12 @@ replace_auth_once(
     '\tif id, ok := AuthKeyIDFrom(ctx); ok {\n'
     '\t\tr.setAuthUserCache(id, u.ID, true)\n'
     '\t}\n'
-    '\tr.bindSessionUser(ctx, u.ID)\n',
-    "successful sign-in diagnostics",
+    '\tr.bindSessionUser(ctx, u.ID)\n'
 )
+if sign_in_text.count(sign_in_old) != 1:
+    raise SystemExit("RiseGram MTProto patch expected one successful sign-in block inside finishAuthSignIn")
+sign_in_text = sign_in_text.replace(sign_in_old, sign_in_new, 1)
+auth_text = auth_text[:sign_in_start] + sign_in_text + auth_text[sign_in_end:]
 
 auth_source.write_text(auth_text)
 source.write_text(text)
