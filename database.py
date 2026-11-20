@@ -162,6 +162,12 @@ SCHEMA = [
         linked_at TEXT,
         FOREIGN KEY(tg_id) REFERENCES users(tg_id) ON DELETE CASCADE
     )""",
+    """CREATE TABLE IF NOT EXISTS telegram_phone_links (
+        phone_digits TEXT PRIMARY KEY,
+        tg_id INTEGER NOT NULL UNIQUE,
+        linked_at TEXT,
+        FOREIGN KEY(tg_id) REFERENCES users(tg_id) ON DELETE CASCADE
+    )""",
     """CREATE TABLE IF NOT EXISTS testers (
         tg_id INTEGER PRIMARY KEY,
         username TEXT,
@@ -576,6 +582,42 @@ async def get_by_telegram(telegram_chat_id: int) -> dict | None:
 
 async def telegram_chat_id(user_id: int) -> int | None:
     return await scalar("SELECT telegram_chat_id FROM telegram_links WHERE tg_id=?", (int(user_id),), None)
+
+
+async def link_telegram_phone(user_id: int, phone: str) -> bool:
+    """Bind a Telegram-verified phone number to the private bot account."""
+    digits = digits_of(phone)
+    if len(digits) < 7 or len(digits) > 15:
+        return False
+    async with connect() as conn:
+        owner = await (await conn.execute(
+            "SELECT tg_id FROM telegram_phone_links WHERE phone_digits=?", (digits,)
+        )).fetchone()
+        if owner and int(owner["tg_id"]) != int(user_id):
+            return False
+        await conn.execute(
+            "DELETE FROM telegram_phone_links WHERE tg_id=? AND phone_digits<>?",
+            (int(user_id), digits),
+        )
+        await conn.execute(
+            """INSERT INTO telegram_phone_links(phone_digits,tg_id,linked_at) VALUES(?,?,?)
+               ON CONFLICT(phone_digits) DO UPDATE SET tg_id=excluded.tg_id, linked_at=excluded.linked_at""",
+            (digits, int(user_id), now()),
+        )
+        await conn.commit()
+    return True
+
+
+async def get_user_by_telegram_phone(phone: str) -> dict | None:
+    digits = digits_of(phone)
+    if len(digits) < 7 or len(digits) > 15:
+        return None
+    return await fetchone(
+        """SELECT u.* FROM users u
+           JOIN telegram_phone_links p ON p.tg_id=u.tg_id
+           WHERE p.phone_digits=? AND u.banned=0""",
+        (digits,),
+    )
 
 
 async def get_or_create_user(telegram_id: int, name: str, username: str | None) -> dict:
