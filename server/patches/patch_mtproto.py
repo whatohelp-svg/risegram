@@ -193,3 +193,110 @@ print(
     "RiseGram MTProto source patch applied; both advertised-address log records "
     "use the external TCP endpoint."
 )
+
+
+# Resolve a previously signed-in user's persistent business auth key when a
+# reconnect creates a fresh TCP/session context. The raw temp key may be new,
+# but the permanent auth key still identifies the same account. Do not reject
+# the first ordinary RPC merely because the per-connection UserID cache is cold.
+def patch_go_file(path: str, old: str, new: str, label: str) -> None:
+    file = Path(path)
+    content = file.read_text()
+    count = content.count(old)
+    if count != 1:
+        raise SystemExit(f"RiseGram auth-resume patch expected one {label} match in {path}, found {count}")
+    file.write_text(content.replace(old, new, 1))
+
+
+patch_go_file(
+    "internal/rpc/layer_dispatch.go",
+    """\tif r.deps.Auth != nil {
+\t\tif _, authorized := UserIDFrom(ctx); !authorized && !rpcAllowedWithoutAuthorization(canonicalID) {
+\t\t\tfields := append([]zap.Field{
+\t\t\t\tzap.String("method", method),
+\t\t\t\tzap.String("type_id", fmt.Sprintf("%#x", call.WireID())),
+\t\t\t\tzap.Int("profile", int(call.Profile())),
+\t\t\t}, r.contextLogFields(ctx)...)
+\t\t\tr.log.Info("RPC rejected before authorization", fields...)
+\t\t\treturn nil, method, authKeyUnregisteredErr()
+\t\t}
+\t}
+""",
+    """\tif r.deps.Auth != nil {
+\t\tif _, authorized := UserIDFrom(ctx); !authorized && !rpcAllowedWithoutAuthorization(canonicalID) {
+\t\t\t// On a reconnect the TCP session cache is cold even though the
+\t\t\t// permanent business auth key remains authorized in the database.
+\t\t\t// Resolve it once here and seed this request context before applying
+\t\t\t// the normal authorization gate.
+\t\t\tuserID, resolved, resolveErr := r.currentUserID(ctx)
+\t\t\tif resolveErr != nil {
+\t\t\t\tif r.log != nil {
+\t\t\t\t\tr.log.Warn("resolve reconnect authorization failed",
+\t\t\t\t\t\tzap.String("method", method),
+\t\t\t\t\t\tzap.Error(resolveErr),
+\t\t\t\t\t)
+\t\t\t\t}
+\t\t\t\treturn nil, method, internalErr()
+\t\t\t}
+\t\t\tif !resolved || userID == 0 {
+\t\t\t\tfields := append([]zap.Field{
+\t\t\t\t\tzap.String("method", method),
+\t\t\t\t\tzap.String("type_id", fmt.Sprintf("%#x", call.WireID())),
+\t\t\t\t\tzap.Int("profile", int(call.Profile())),
+\t\t\t\t}, r.contextLogFields(ctx)...)
+\t\t\t\tif r.log != nil {
+\t\t\t\t\tr.log.Info("RPC rejected before authorization", fields...)
+\t\t\t\t}
+\t\t\t\treturn nil, method, authKeyUnregisteredErr()
+\t\t\t}
+\t\t\tctx = WithUserID(ctx, userID)
+\t\t}
+\t}
+""",
+    "layer-dispatch reconnect authorization gate",
+)
+
+
+patch_go_file(
+    "internal/rpc/router.go",
+    """\t\tif r.deps.Auth != nil {
+\t\t\tif _, ok := UserIDFrom(ctx); !ok && !rpcAllowedWithoutAuthorization(id) {
+\t\t\t\tfields := append([]zap.Field{
+\t\t\t\t\tzap.String("method", tlTypeName(id)),
+\t\t\t\t\tzap.String("type_id", fmt.Sprintf("%#x", id)),
+\t\t\t\t}, r.contextLogFields(ctx)...)
+\t\t\t\tr.log.Info("RPC rejected before authorization", fields...)
+\t\t\t\treturn nil, authKeyUnregisteredErr()
+\t\t\t}
+\t\t}
+""",
+    """\t\tif r.deps.Auth != nil {
+\t\t\tif _, ok := UserIDFrom(ctx); !ok && !rpcAllowedWithoutAuthorization(id) {
+\t\t\t\tuserID, resolved, resolveErr := r.currentUserID(ctx)
+\t\t\t\tif resolveErr != nil {
+\t\t\t\t\tif r.log != nil {
+\t\t\t\t\t\tr.log.Warn("resolve reconnect authorization failed",
+\t\t\t\t\t\t\tzap.String("method", tlTypeName(id)),
+\t\t\t\t\t\t\tzap.Error(resolveErr),
+\t\t\t\t\t\t)
+\t\t\t\t\t}
+\t\t\t\t\treturn nil, internalErr()
+\t\t\t\t}
+\t\t\t\tif !resolved || userID == 0 {
+\t\t\t\t\tfields := append([]zap.Field{
+\t\t\t\t\t\tzap.String("method", tlTypeName(id)),
+\t\t\t\t\t\tzap.String("type_id", fmt.Sprintf("%#x", id)),
+\t\t\t\t\t}, r.contextLogFields(ctx)...)
+\t\t\t\t\tif r.log != nil {
+\t\t\t\t\t\tr.log.Info("RPC rejected before authorization", fields...)
+\t\t\t\t\t}
+\t\t\t\t\treturn nil, authKeyUnregisteredErr()
+\t\t\t\t}
+\t\t\t\tctx = WithUserID(ctx, userID)
+\t\t\t}
+\t\t}
+""",
+    "router reconnect authorization gate",
+)
+
+print("RiseGram MTProto reconnect authorization fallback patched.")
