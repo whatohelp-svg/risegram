@@ -147,18 +147,21 @@ async def home_screen(event, user: dict):
         f"🛠 Техработы: <b>{'ВКЛ' if maint else 'выкл'}</b>"
     )
     scam_label = f"⚠️ SCAM-заявки ({pending})" if pending else "⚠️ SCAM-заявки"
-    markup = kb(
+    rows = [
         [btn("📊 Аналитика", "adm:stats", style="primary"), btn("👥 Юзеры", "adm:users:0", style="primary")],
         [btn("💰 Выдача валюты", "adm:grant", style="success"), btn("🏷 Выдать юзернеймы", "adm:inv", style="success")],
         [btn("🎁 Дропы подарков", "adm:gifts", style="success")],
         [btn("⚡ Тумблеры функций", "adm:feat", style="success"), btn("🔨 Банхаммер", "adm:ban", style="danger")],
         [btn("🎯 Задания", "adm:tasks"), btn("🛒 Маркет", "adm:mkt:0"), btn(scam_label, "adm:scam:0", style="danger" if pending else None)],
         [btn("🧾 Покупки", "adm:buys:0"), btn("📣 Рассылка", "adm:cast")],
-        [btn("🧪 Тестеры", "adm:testers"), btn("🛡 Админы", "adm:admins")],
+        [btn("🧪 Тестеры", "adm:testers")],
         [btn("📞 Перенос номеров", "adm:legacy")],
         [btn("📜 Системные логи", "adm:logs:0"), btn(("🟢 Техработы: выключить" if maint else "🛠 Техработы: включить"), "adm:maint")],
         [btn("🏠 Выйти в меню", "menu:main")],
-    )
+    ]
+    if int(user["tg_id"]) == int(config.OWNER_ID):
+        rows.insert(6, [btn("🛡 Админы", "adm:admins")])
+    markup = kb(*rows)
     await show(event, text, markup)
 
 
@@ -1133,11 +1136,13 @@ async def adm_cb(call: CallbackQuery, state: FSMContext, user: dict):
         return await ask(call, state, "cast_text", "📣 <b>Рассылка</b>\n\nВведите текст сообщения для всех игроков:")
     if route == "testers":
         return await screen_testers(call)
-    if route == "admins":
-        return await screen_admins(call)
-    if route == "aadd":
-        return await ask(call, state, "admin_add", "🛡 Введите @юзернейм, RiseGram ID или номер пользователя, которого нужно сделать администратором:", "adm:admins")
-    if route == "arm":
+    if route in ("admins", "aadd", "arm"):
+        if int(user["tg_id"]) != int(config.OWNER_ID):
+            return await call.answer("Управление администраторами доступно только владельцу.", show_alert=True)
+        if route == "admins":
+            return await screen_admins(call)
+        if route == "aadd":
+            return await ask(call, state, "admin_add", "🛡 Введите @юзернейм, RiseGram ID или номер пользователя, которого нужно сделать администратором:", "adm:admins")
         target_id = num(parts, 2)
         if target_id == int(config.OWNER_ID):
             return await call.answer("Владельца нельзя удалить из администраторов.", show_alert=True)
