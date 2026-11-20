@@ -484,7 +484,7 @@ async def init_db() -> None:
         # Remove the old optional personal-phone link store. RiseGram OTP uses
         # only the virtual number assigned to a bot account.
         await db.execute("DROP TABLE IF EXISTS telegram_phone_links")
-        for table, cols in COLUMNS.items()
+        for table, cols in COLUMNS.items():
             cur = await db.execute(f"PRAGMA table_info({table})")
             have = {r["name"] for r in await cur.fetchall()}
             await cur.close()
