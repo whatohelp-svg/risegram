@@ -95,7 +95,12 @@ class GuardMiddleware(BaseMiddleware):
         if isinstance(event, Message) and event.successful_payment:
             # Деньги уже списаны Telegram: товар выдаём всегда, даже при бане или техработах,
             # иначе человек заплатил бы и ничего не получил (и возврата тоже не было бы).
-            return await handler(event, data)
+            result = await handler(event, data)
+            try:
+                await sync_collectible_usernames(int(user["tg_id"]))
+            except Exception:
+                logging.getLogger("risegram.bot").debug("post-payment username sync deferred", exc_info=True)
+            return result
         is_owner = tg_user.id == config.OWNER_TELEGRAM_ID
         if user.get("banned") and not is_owner:
             await _reply_block(event, "❌ Ваш аккаунт заблокирован.")
