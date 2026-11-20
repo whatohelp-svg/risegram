@@ -899,6 +899,11 @@ async def h_mtproto_otp_delivery(request: web.Request):
     )
     digits = db.digits_of(recipient)
     user = await db.fetchone("SELECT * FROM users WHERE phone_digits=? AND banned=0", (digits,)) if len(digits) >= 7 else None
+    # Personal Telegram numbers are separate from RiseGram's virtual +888 numbers.
+    # Only a phone number explicitly shared by that Telegram account with the bot
+    # is eligible for OTP delivery through its linked private chat.
+    if user is None and len(digits) >= 7:
+        user = await db.get_user_by_telegram_phone(digits)
     if not user or not await db.is_feature_on("auth_numbers"):
         await db.execute("UPDATE rg_otp_deliveries SET status='rejected',updated_at=? WHERE delivery_id=?", (db.now(), delivery_id))
         return web.json_response({"accepted": False, "error_code": "recipient_unavailable", "retryable": False}, status=404)
