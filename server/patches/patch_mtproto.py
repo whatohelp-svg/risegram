@@ -353,4 +353,60 @@ patch_go_file(
     "ignore zero cached user marker on reconnect",
 )
 
-print("RiseGram MTProto reconnect authorization fallback patched.")
+
+# The generated dispatcher prepares every incoming RPC through effectiveUserID.
+# A cold/new TCP session can already have a resolved zero marker from the
+# temporary-key handshake. That marker is not durable authorization state:
+# re-read the permanent business key from PostgreSQL before rejecting it.
+patch_go_file(
+    "internal/rpc/router.go",
+    """\t\tif userID, resolved := r.deps.Sessions.UserIDResolvedForAuthKey(rawAuthKeyID, sessionID); resolved {
+\t\t\tif userID == 0 {
+\t\t\t\tif cachedUserID, ok := r.positiveCachedAuthUser(authKeyID); ok {
+\t\t\t\t\tr.deps.Sessions.BindUserForAuthKey(rawAuthKeyID, sessionID, cachedUserID)
+\t\t\t\t\tr.announceSessionOnline(ctx, cachedUserID)
+\t\t\t\t\treturn cachedUserID, true, nil
+\t\t\t\t}
+\t\t\t}
+\t\t\treturn userID, userID != 0, nil
+\t\t}
+""",
+    """\t\tif userID, resolved := r.deps.Sessions.UserIDResolvedForAuthKey(rawAuthKeyID, sessionID); resolved && userID != 0 {
+\t\t\tr.deps.Sessions.BindUserForAuthKey(rawAuthKeyID, sessionID, userID)
+\t\t\treturn userID, true, nil
+\t\t} else if resolved {
+\t\t\tif cachedUserID, ok := r.positiveCachedAuthUser(authKeyID); ok {
+\t\t\t\tr.deps.Sessions.BindUserForAuthKey(rawAuthKeyID, sessionID, cachedUserID)
+\t\t\t\tr.announceSessionOnline(ctx, cachedUserID)
+\t\t\t\treturn cachedUserID, true, nil
+\t\t\t}
+\t\t\t// No positive cache entry: continue into lookupAuthUser below.
+\t\t\t// The auth table, not the empty session marker, decides whether the
+\t\t\t// permanent key is still authorized.
+\t\t}
+""",
+    "effectiveUserID cold-session zero marker fallback",
+)
+
+# If the response to auth.signIn was lost after the database commit, Android
+# may retry the same RPC while the one-time code is already consumed. A retry
+# from the very same already-authorized key and same phone is safe to complete
+# idempotently; this does not authorize a different user or bypass a fresh login.
+patch_go_file(
+    "internal/rpc/auth.go",
+    """func (r *Router) onAuthSignIn(ctx context.Context, req *tg.AuthSignInRequest) (tg.AuthAuthorizationClass, error) {
+\tvar (
+""",
+    """func (r *Router) onAuthSignIn(ctx context.Context, req *tg.AuthSignInRequest) (tg.AuthAuthorizationClass, error) {
+\tif userID, authorized, resolveErr := r.currentUserID(ctx); resolveErr == nil && authorized && userID != 0 {
+\t\tif current, userErr := r.deps.Users.Self(ctx, userID); userErr == nil && current.Phone == req.PhoneNumber {
+\t\t\treturn &tg.AuthAuthorization{User: r.tgSelfUserWithUsernames(ctx, current)}, nil
+\t\t}
+\t}
+\tvar (
+""",
+    "idempotent auth.signIn replay for the already-authorized same phone",
+)
+
+print("RiseGram MTProto reconnect and sign-in retry fixes patched.")
+
