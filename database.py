@@ -41,8 +41,12 @@ def digits_of(s: str | None) -> str:
 
 
 def fmt_number(d: str) -> str:
-    """Красивый вид номера по цифрам."""
+    """Красивый вид виртуального номера RiseGram по цифрам."""
     d = digits_of(d)
+    if d.startswith("8888") and len(d) == 7:
+        return f"+888 8 {d[4:]}"
+    if d.startswith("8880") and len(d) == 11:
+        return f"+888 0{d[4:7]} {d[7:]}"
     if d.startswith("888"):
         rest = d[3:]
         if len(rest) == 4 and rest[0] == "8":
@@ -158,12 +162,6 @@ SCHEMA = [
     )""",
     """CREATE TABLE IF NOT EXISTS telegram_links (
         telegram_chat_id INTEGER PRIMARY KEY,
-        tg_id INTEGER NOT NULL UNIQUE,
-        linked_at TEXT,
-        FOREIGN KEY(tg_id) REFERENCES users(tg_id) ON DELETE CASCADE
-    )""",
-    """CREATE TABLE IF NOT EXISTS telegram_phone_links (
-        phone_digits TEXT PRIMARY KEY,
         tg_id INTEGER NOT NULL UNIQUE,
         linked_at TEXT,
         FOREIGN KEY(tg_id) REFERENCES users(tg_id) ON DELETE CASCADE
@@ -483,7 +481,10 @@ async def init_db() -> None:
         await db.execute("PRAGMA journal_mode=WAL")
         for stmt in SCHEMA:
             await db.execute(stmt)
-        for table, cols in COLUMNS.items():
+        # Remove the old optional personal-phone link store. RiseGram OTP uses
+        # only the virtual number assigned to a bot account.
+        await db.execute("DROP TABLE IF EXISTS telegram_phone_links")
+        for table, cols in COLUMNS.items()
             cur = await db.execute(f"PRAGMA table_info({table})")
             have = {r["name"] for r in await cur.fetchall()}
             await cur.close()
@@ -559,8 +560,10 @@ def _new_rise_id(used: set) -> int:
 
 
 def _new_phone(used: set) -> str:
+    # New RiseGram accounts receive a virtual +888 number, never a guessed
+    # Kazakhstan mobile number. Existing assigned numbers are left untouched.
     while True:
-        v = gen_phone_digits()
+        v = gen_888_digits("b")
         if v not in used:
             return v
 
@@ -582,42 +585,6 @@ async def get_by_telegram(telegram_chat_id: int) -> dict | None:
 
 async def telegram_chat_id(user_id: int) -> int | None:
     return await scalar("SELECT telegram_chat_id FROM telegram_links WHERE tg_id=?", (int(user_id),), None)
-
-
-async def link_telegram_phone(user_id: int, phone: str) -> bool:
-    """Bind a Telegram-verified phone number to the private bot account."""
-    digits = digits_of(phone)
-    if len(digits) < 7 or len(digits) > 15:
-        return False
-    async with connect() as conn:
-        owner = await (await conn.execute(
-            "SELECT tg_id FROM telegram_phone_links WHERE phone_digits=?", (digits,)
-        )).fetchone()
-        if owner and int(owner["tg_id"]) != int(user_id):
-            return False
-        await conn.execute(
-            "DELETE FROM telegram_phone_links WHERE tg_id=? AND phone_digits<>?",
-            (int(user_id), digits),
-        )
-        await conn.execute(
-            """INSERT INTO telegram_phone_links(phone_digits,tg_id,linked_at) VALUES(?,?,?)
-               ON CONFLICT(phone_digits) DO UPDATE SET tg_id=excluded.tg_id, linked_at=excluded.linked_at""",
-            (digits, int(user_id), now()),
-        )
-        await conn.commit()
-    return True
-
-
-async def get_user_by_telegram_phone(phone: str) -> dict | None:
-    digits = digits_of(phone)
-    if len(digits) < 7 or len(digits) > 15:
-        return None
-    return await fetchone(
-        """SELECT u.* FROM users u
-           JOIN telegram_phone_links p ON p.tg_id=u.tg_id
-           WHERE p.phone_digits=? AND u.banned=0""",
-        (digits,),
-    )
 
 
 async def get_or_create_user(telegram_id: int, name: str, username: str | None) -> dict:
@@ -646,10 +613,12 @@ async def get_or_create_user(telegram_id: int, name: str, username: str | None) 
         return user
 
     async with connect() as db:
-        cur = await db.execute("SELECT rise_id FROM users")
-        used_rise = {r["rise_id"] for r in await cur.fetchall() if r["rise_id"]}
+        cur = await db.execute("SELECT rise_id, phone_digits FROM users")
+        existing = await cur.fetchall()
+        used_rise = {r["rise_id"] for r in existing if r["rise_id"]}
+        used_phone = {r["phone_digits"] for r in existing if r["phone_digits"]}
         await cur.close()
-        digits = gen_phone_digits()
+        digits = _new_phone(used_phone)
         cur = await db.execute(
             """INSERT INTO users (user_id,rise_id,name,username,phone,phone_digits,
                                   risestars,gram_balance,created_at,last_seen)
