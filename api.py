@@ -8,7 +8,7 @@
     GET  /api/me             Authorization: Bearer <token>             -> профиль
     GET  /health
 
-Во всех запросах (кроме /health и /api/me) нужен заголовок  X-API-Key: <API_SECRET>.
+Код входа подтверждается одноразовым кодом из бота; остальные запросы приложения используют Bearer-токен сессии.
 """
 from __future__ import annotations
 
@@ -16,6 +16,7 @@ from pathlib import Path
 
 import hmac
 import logging
+import math
 import time
 
 from aiohttp import web
