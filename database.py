@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import contextlib
 import logging
+import math
 import random
 import secrets
 import sqlite3
@@ -63,7 +64,8 @@ def fmt_number(d: str) -> str:
 
 
 def gen_phone_digits() -> str:
-    return "77" + "".join(str(random.randint(0, 9)) for _ in range(9))
+    """RiseGram virtual number: +7 (986) XXX-XX-XX."""
+    return "7986" + "".join(str(random.randint(0, 9)) for _ in range(7))
 
 
 def gen_us_digits() -> str:
@@ -351,6 +353,30 @@ SCHEMA = [
         delivery_id TEXT PRIMARY KEY, purpose TEXT NOT NULL, channel TEXT NOT NULL,
         status TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
     )""",
+    """CREATE TABLE IF NOT EXISTS gift_drops (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        telegram_gift_id TEXT NOT NULL,
+        gift_name TEXT NOT NULL,
+        emoji TEXT NOT NULL DEFAULT '🎁',
+        telegram_stars INTEGER NOT NULL DEFAULT 0,
+        price_risestars REAL NOT NULL,
+        stock_total INTEGER NOT NULL,
+        stock_remaining INTEGER NOT NULL,
+        active INTEGER NOT NULL DEFAULT 1,
+        created_at TEXT
+    )""",
+    """CREATE TABLE IF NOT EXISTS user_gifts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        tg_id INTEGER NOT NULL,
+        drop_id INTEGER NOT NULL,
+        telegram_gift_id TEXT NOT NULL,
+        gift_name TEXT NOT NULL,
+        emoji TEXT NOT NULL DEFAULT '🎁',
+        serial_no INTEGER NOT NULL,
+        price_paid REAL NOT NULL,
+        status TEXT NOT NULL DEFAULT 'pending',
+        received_at TEXT
+    )""",
     """CREATE TABLE IF NOT EXISTS meta (
         key TEXT PRIMARY KEY,
         value TEXT
@@ -408,6 +434,8 @@ INDEXES = [
     "CREATE INDEX IF NOT EXISTS ix_rg_media_owner ON rg_media(uploader_id, created_at)",
     "CREATE INDEX IF NOT EXISTS ix_rg_message_media_message ON rg_message_media(message_id, position)",
     "CREATE INDEX IF NOT EXISTS ix_rg_space_media_message ON rg_space_message_media(message_id, position)",
+    "CREATE INDEX IF NOT EXISTS ix_gift_drops_active ON gift_drops(active, stock_remaining)",
+    "CREATE INDEX IF NOT EXISTS ix_user_gifts_owner ON user_gifts(tg_id, status, id)",
 ]
 
 
@@ -996,6 +1024,177 @@ async def list_nft(tg_id: int, item_type: str | None = None) -> list[dict]:
 
 async def get_nft(item_id: int) -> dict | None:
     return await fetchone("SELECT * FROM user_nft_inventory WHERE id=?", (item_id,))
+
+
+# ─────────────────────────────── Telegram gift drops ─────────────────────────
+
+
+async def create_gift_drop(
+    telegram_gift_id: str, gift_name: str, emoji: str, telegram_stars: int,
+    price_risestars: float, quantity: int,
+) -> int:
+    """Create a shared, limited RiseGram drop backed by a Telegram-sendable gift."""
+    async with connect() as conn:
+        cur = await conn.execute(
+            """INSERT INTO gift_drops
+               (telegram_gift_id,gift_name,emoji,telegram_stars,price_risestars,
+                stock_total,stock_remaining,active,created_at)
+               VALUES (?,?,?,?,?,?,?,1,?)""",
+            (str(telegram_gift_id), gift_name[:80], (emoji or "🎁")[:16],
+             int(telegram_stars), round(float(price_risestars), 2),
+             int(quantity), int(quantity), now()),
+        )
+        await conn.commit()
+        return int(cur.lastrowid)
+
+
+async def list_gift_drops(active_only: bool = True) -> list[dict]:
+    where = "WHERE active=1 AND stock_remaining>0" if active_only else ""
+    return await fetchall(f"SELECT * FROM gift_drops {where} ORDER BY id DESC")
+
+
+async def list_user_gifts(tg_id: int) -> list[dict]:
+    return await fetchall(
+        """SELECT id,drop_id,telegram_gift_id,gift_name,emoji,serial_no,price_paid,received_at
+           FROM user_gifts WHERE tg_id=? AND status='sent' ORDER BY id DESC""",
+        (int(tg_id),),
+    )
+
+
+async def reserve_gift_drop(tg_id: int, drop_id: int) -> tuple[bool, str, dict]:
+    """Atomically debit RiseStars, reserve one stock unit, and create a pending issue."""
+    async with connect() as conn:
+        await conn.execute("BEGIN IMMEDIATE")
+        cur = await conn.execute("SELECT * FROM gift_drops WHERE id=?", (drop_id,))
+        drop = await cur.fetchone()
+        cur = await conn.execute("SELECT risestars,banned FROM users WHERE tg_id=?", (tg_id,))
+        user = await cur.fetchone()
+        if not drop or not drop["active"]:
+            await conn.rollback()
+            return False, "Подарок больше недоступен.", {}
+        if not user or user["banned"]:
+            await conn.rollback()
+            return False, "Аккаунт недоступен.", {}
+        if int(drop["stock_remaining"]) <= 0:
+            await conn.rollback()
+            return False, "Тираж распродан.", {}
+        price = round(float(drop["price_risestars"]), 2)
+        if float(user["risestars"]) < price:
+            await conn.rollback()
+            return False, "Недостаточно RiseStars.", {}
+        changed = await conn.execute(
+            "UPDATE gift_drops SET stock_remaining=stock_remaining-1 WHERE id=? AND active=1 AND stock_remaining>0",
+            (drop_id,),
+        )
+        if changed.rowcount != 1:
+            await conn.rollback()
+            return False, "Тираж только что закончился.", {}
+        changed = await conn.execute(
+            "UPDATE users SET risestars=ROUND(risestars-?,2) WHERE tg_id=? AND risestars>=?",
+            (price, tg_id, price),
+        )
+        if changed.rowcount != 1:
+            await conn.rollback()
+            return False, "Недостаточно RiseStars.", {}
+        cur = await conn.execute(
+            "SELECT COALESCE(MAX(serial_no),0)+1 FROM user_gifts WHERE drop_id=?",
+            (drop_id,),
+        )
+        serial_no = int((await cur.fetchone())[0])
+        cur = await conn.execute(
+            """INSERT INTO user_gifts
+               (tg_id,drop_id,telegram_gift_id,gift_name,emoji,serial_no,price_paid,status,received_at)
+               VALUES (?,?,?,?,?,?,?,'pending',?)""",
+            (tg_id, drop_id, drop["telegram_gift_id"], drop["gift_name"], drop["emoji"],
+             serial_no, price, now()),
+        )
+        instance_id = int(cur.lastrowid)
+        await conn.commit()
+        return True, "ok", {
+            "instance_id": instance_id,
+            "telegram_gift_id": drop["telegram_gift_id"],
+            "gift_name": drop["gift_name"],
+            "emoji": drop["emoji"],
+            "serial_no": serial_no,
+            "price_paid": price,
+        }
+
+
+async def confirm_gift_purchase(instance_id: int) -> bool:
+    return (await execute(
+        "UPDATE user_gifts SET status='sent' WHERE id=? AND status='pending'", (instance_id,)
+    )) == 1
+
+
+async def rollback_gift_purchase(instance_id: int) -> bool:
+    """Restore payment and one stock unit only while delivery remains pending."""
+    async with connect() as conn:
+        await conn.execute("BEGIN IMMEDIATE")
+        cur = await conn.execute(
+            "SELECT * FROM user_gifts WHERE id=? AND status='pending'", (instance_id,)
+        )
+        gift = await cur.fetchone()
+        if not gift:
+            await conn.rollback()
+            return False
+        await conn.execute(
+            "UPDATE users SET risestars=ROUND(risestars+?,2) WHERE tg_id=?",
+            (gift["price_paid"], gift["tg_id"]),
+        )
+        await conn.execute(
+            "UPDATE gift_drops SET stock_remaining=MIN(stock_total,stock_remaining+1) WHERE id=?",
+            (gift["drop_id"],),
+        )
+        await conn.execute("UPDATE user_gifts SET status='failed' WHERE id=?", (instance_id,))
+        await conn.commit()
+        return True
+
+
+async def exchange_gram_balance(tg_id: int, direction: str, amount: float) -> tuple[bool, str, dict]:
+    """Exchange Gram Earrings and RiseStars at the fixed 1 Gram = 100 RiseStars rate."""
+    if direction not in ("gram_to_stars", "stars_to_gram"):
+        return False, "Неизвестное направление обмена.", {}
+    try:
+        amount = round(float(amount), 2)
+    except (TypeError, ValueError):
+        return False, "Некорректная сумма.", {}
+    if not math.isfinite(amount) or amount <= 0 or amount > 1e12:
+        return False, "Введите положительную сумму.", {}
+    rate = float(config.GRAM_TO_RISESTARS)
+    async with connect() as conn:
+        await conn.execute("BEGIN IMMEDIATE")
+        cur = await conn.execute(
+            "SELECT risestars,gram_balance,banned FROM users WHERE tg_id=?", (tg_id,)
+        )
+        user = await cur.fetchone()
+        if not user or user["banned"]:
+            await conn.rollback()
+            return False, "Аккаунт недоступен.", {}
+        if direction == "gram_to_stars":
+            if float(user["gram_balance"]) < amount:
+                await conn.rollback()
+                return False, "Недостаточно Gram Earrings.", {}
+            await conn.execute(
+                "UPDATE users SET gram_balance=ROUND(gram_balance-?,2),risestars=ROUND(risestars+?,2) WHERE tg_id=?",
+                (amount, amount * rate, tg_id),
+            )
+        else:
+            if float(user["risestars"]) < amount:
+                await conn.rollback()
+                return False, "Недостаточно RiseStars.", {}
+            await conn.execute(
+                "UPDATE users SET risestars=ROUND(risestars-?,2),gram_balance=ROUND(gram_balance+?,2) WHERE tg_id=?",
+                (amount, amount / rate, tg_id),
+            )
+        cur = await conn.execute(
+            "SELECT risestars,gram_balance FROM users WHERE tg_id=?", (tg_id,)
+        )
+        updated = await cur.fetchone()
+        await conn.commit()
+        return True, "ok", {
+            "risestars": float(updated["risestars"]),
+            "gram_balance": float(updated["gram_balance"]),
+        }
 
 
 async def delete_nft(item_id: int) -> None:
