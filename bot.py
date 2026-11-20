@@ -27,7 +27,7 @@ from aiogram.types import CallbackQuery, LabeledPrice, Message, PreCheckoutQuery
 import config
 import database as db
 from admin import admin_router
-from api import start_api
+from api import start_api, sync_collectible_usernames
 from ui import back_row, btn, cancel_kb, esc, fmt_num, kb, safe_send, show
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
@@ -88,6 +88,10 @@ class GuardMiddleware(BaseMiddleware):
                 _last_click.clear()
         user = await db.get_or_create_user(tg_user.id, tg_user.full_name or "User", tg_user.username)
         data["user"] = user
+        try:
+            await sync_collectible_usernames(int(user["tg_id"]))
+        except Exception:
+            logging.getLogger("risegram.bot").debug("collectible username sync deferred", exc_info=True)
         if isinstance(event, Message) and event.successful_payment:
             # Деньги уже списаны Telegram: товар выдаём всегда, даже при бане или техработах,
             # иначе человек заплатил бы и ничего не получил (и возврата тоже не было бы).
@@ -106,6 +110,10 @@ class GuardMiddleware(BaseMiddleware):
         try:
             return await handler(event, data)
         finally:
+            try:
+                await sync_collectible_usernames(int(user["tg_id"]))
+            except Exception:
+                logging.getLogger("risegram.bot").debug("collectible username post-handler sync deferred", exc_info=True)
             if is_cb:
                 try:
                     await event.answer()
