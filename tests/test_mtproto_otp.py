@@ -103,6 +103,23 @@ class MtprotoOtpWebhookTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await db.telegram_chat_id(send.await_args.args[1]), self.telegram_chat_id)
         self.assertIn("Код входа", send.await_args.args[2])
 
+    async def test_mtproto_otp_uses_explicitly_shared_personal_telegram_phone(self):
+        self.assertTrue(await db.link_telegram_phone(self.user["tg_id"], "+7771234567"))
+        raw = json.dumps(self.payload("otp_personal_phone"), separators=(",", ":")).encode()
+        with patch("api.safe_send", new=AsyncMock(return_value=True)) as send:
+            response = await self.client.post(
+                "/internal/mtproto/otp", data=raw, headers=self.signed_headers(raw)
+            )
+        self.assertEqual(response.status, 200)
+        self.assertTrue((await response.json())["accepted"])
+        self.assertEqual(send.await_args.args[1], self.user["tg_id"])
+        self.assertIn("482913", send.await_args.args[2])
+
+    async def test_personal_phone_cannot_be_claimed_by_two_bot_accounts(self):
+        other = await db.get_or_create_user(910000002, "Other tester", "other_test")
+        self.assertTrue(await db.link_telegram_phone(self.user["tg_id"], "+7771234567"))
+        self.assertFalse(await db.link_telegram_phone(other["tg_id"], "+7771234567"))
+
     async def test_invalid_hmac_is_rejected_before_any_delivery(self):
         raw = json.dumps(self.payload(), separators=(",", ":")).encode()
         with patch("api.safe_send", new=AsyncMock(return_value=True)) as send:
