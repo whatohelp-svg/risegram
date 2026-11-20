@@ -560,13 +560,13 @@ def _new_rise_id(used: set) -> int:
 
 
 def _new_phone(used: set) -> str:
-    # New RiseGram accounts receive a virtual +888 number, never a guessed
-    # Kazakhstan mobile number. Existing assigned numbers are left untouched.
+    # Reserve +888 for scarce premium/collectible number releases.
+    # New accounts receive a random virtual +7 986 number from RiseGram's
+    # private namespace. This is an app identity, not a carrier-issued SIM.
     while True:
-        v = gen_888_digits("b")
+        v = "7986" + f"{secrets.randbelow(10_000_000):07d}"
         if v not in used:
             return v
-
 
 # ─────────────────────────────── пользователи ───────────────────────────────
 
