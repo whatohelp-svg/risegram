@@ -1080,7 +1080,9 @@ async def sync_collectible_usernames(user_id: int) -> dict:
                             "username": name,
                             "owner_user_id": str(mt_user_id),
                             "currency": "USD",
-                            "amount": "0",
+                            # fragment.collectibleInfo.amount uses minor currency
+                            # units: 2,243,700 = USD 22,437.00.
+                            "amount": "2243700" if int(user["tg_id"]) == int(config.OWNER_ID) else "0",
                         }
                         endpoint = "mint"
 
