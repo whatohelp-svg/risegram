@@ -1,7 +1,7 @@
 """bot.py — основной бот RiseGram: авторизация, магазин (Telegram Stars), номера, NFT, игры.
 
 Запуск:  python bot.py
-Админка: файл admin.py, вход только у владельца по команде /admin7206852053.
+Админка: владелец /owner, администраторы и тестеры /admin.
 """
 from __future__ import annotations
 
