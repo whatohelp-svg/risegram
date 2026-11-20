@@ -25,6 +25,48 @@ log = logging.getLogger("risegram.admin")
 
 PAGE = 8
 
+# Human-readable labels for well-known Telegram gift IDs. The list of IDs,
+# emoji and current Star prices still comes from getAvailableGifts at runtime.
+GIFT_LABELS = {
+    "5170145012310081615": "Love Heart",
+    "5170233102089322756": "Teddy Bear",
+    "5170250947678437525": "Gift Box",
+    "5168103777563050263": "Red Rose",
+    "5170144170496491616": "Birthday Cake",
+    "5170314324215857265": "Bouquet of Flowers",
+    "5170564780938756245": "Rocket",
+    "6028601630662853006": "Champagne Bottle",
+    "5168043875654172773": "Trophy",
+    "5170690322832818290": "Diamond Ring",
+    "5170521118301225164": "Gem",
+}
+
+
+def gift_field(gift, key: str, default=None):
+    if isinstance(gift, dict):
+        return gift.get(key, default)
+    return getattr(gift, key, default)
+
+
+async def available_telegram_gifts(bot) -> list[dict]:
+    result = await bot.get_available_gifts()
+    out = []
+    for gift in gift_field(result, "gifts", []) or []:
+        gift_id = str(gift_field(gift, "id", "") or "")
+        if not gift_id:
+            continue
+        sticker = gift_field(gift, "sticker")
+        emoji = gift_field(sticker, "emoji", "🎁") or "🎁"
+        out.append({
+            "id": gift_id,
+            "name": GIFT_LABELS.get(gift_id, f"Telegram Gift {gift_id[-4:]}"),
+            "emoji": emoji,
+            "stars": int(gift_field(gift, "star_count", 0) or 0),
+            "total_count": gift_field(gift, "total_count"),
+            "remaining_count": gift_field(gift, "remaining_count"),
+        })
+    return out
+
 
 class OwnerOnly(Filter):
     async def __call__(self, event: Message | CallbackQuery) -> bool:
@@ -97,6 +139,7 @@ async def home_screen(event, user: dict):
     markup = kb(
         [btn("📊 Аналитика", "adm:stats", style="primary"), btn("👥 Юзеры", "adm:users:0", style="primary")],
         [btn("💰 Выдача валюты", "adm:grant", style="success"), btn("🏷 Выдать юзернеймы", "adm:inv", style="success")],
+        [btn("🎁 Дропы подарков", "adm:gifts", style="success")],
         [btn("⚡ Тумблеры функций", "adm:feat", style="success"), btn("🔨 Банхаммер", "adm:ban", style="danger")],
         [btn("🎯 Задания", "adm:tasks"), btn("🛒 Маркет", "adm:mkt:0"), btn(scam_label, "adm:scam:0", style="danger" if pending else None)],
         [btn("🧾 Покупки", "adm:buys:0"), btn("📣 Рассылка", "adm:cast")],
@@ -114,6 +157,68 @@ async def cmd_admin(message: Message, state: FSMContext, user: dict):
 
 
 # ════════════════════════════ экраны ══════════════════════════════════════
+
+
+async def screen_gifts(call: CallbackQuery, page: int = 0):
+    try:
+        catalog = await available_telegram_gifts(call.bot)
+    except Exception as exc:  # noqa: BLE001
+        log.exception("Telegram getAvailableGifts failed")
+        await show(
+            call,
+            "🎁 <b>Дропы подарков</b>\n\nНе удалось получить каталог Telegram. Проверьте подключение бота и повторите попытку.",
+            kb([btn("🔄 Повторить", "adm:gifts")], home_row()),
+        )
+        return
+
+    per_page = 8
+    total = len(catalog)
+    pages = max(1, math.ceil(total / per_page))
+    page = min(max(0, page), pages - 1)
+    current = catalog[page * per_page:(page + 1) * per_page]
+    text = (
+        "🎁 <b>Дропы подарков</b>\n\n"
+        "Каталог загружен напрямую из Telegram Bot API. Выберите подарок, затем задайте тираж "
+        "и цену в RiseStars. При покупке бот отправит реальный Telegram-подарок.\n\n"
+        f"Доступно боту: <b>{total}</b> · страница {page + 1}/{pages}\n"
+    )
+    rows = []
+    pair = []
+    for gift in current:
+        label = f"{gift['emoji']} {gift['name']} · {gift['stars']}⭐"
+        pair.append(btn(label[:60], f"adm:gifts:pick:{gift['id']}"))
+        if len(pair) == 2:
+            rows.append(pair)
+            pair = []
+    if pair:
+        rows.append(pair)
+
+    if total == 0:
+        text += "\nTelegram сейчас не вернул ни одного подарка, доступного этому боту."
+    else:
+        text += "\nНажмите на подарок, чтобы выпустить ограниченный тираж."
+    active = await db.list_gift_drops(active_only=False)
+    text += "\n\n<b>Текущие дропы RiseGram</b>\n"
+    for drop in active[:12]:
+        status = "активен" if drop["active"] and drop["stock_remaining"] > 0 else "закрыт"
+        text += (
+            f"\n{esc(drop['emoji'])} {esc(drop['gift_name'])} · "
+            f"{drop['stock_remaining']}/{drop['stock_total']} · "
+            f"{fmt_num(drop['price_risestars'])} RS · {status}"
+        )
+    if not active:
+        text += "\nПока нет выпущенных дропов."
+
+    nav = []
+    if page > 0:
+        nav.append(btn("◀️", f"adm:gifts:page:{page - 1}"))
+    if page + 1 < pages:
+        nav.append(btn("▶️", f"adm:gifts:page:{page + 1}"))
+    if nav:
+        rows.append(nav)
+    rows.append([btn("🔄 Обновить каталог", "adm:gifts")])
+    rows.append(home_row())
+    await show(call, text, kb(*rows))
 
 
 async def screen_stats(call: CallbackQuery):
@@ -605,6 +710,41 @@ async def on_input(message: Message, state: FSMContext, user: dict):
         ok = await safe_send(bot, data["uid"], f"✉️ <b>Сообщение от администрации</b>\n\n{esc(text)}")
         await audit(f"Сообщение игроку {data['uid']}")
         return await done("✅ Отправлено." if ok else "❌ Не доставлено (игрок заблокировал бота).", kb([btn("👤 Карточка", f"adm:u:{data['uid']}")], home_row()))
+    # ── выпуск лимитированных Telegram-подарков ──
+    if act == "gift_stock":
+        if not text.isdigit() or not 1 <= int(text) <= 1_000_000:
+            return await again("❌ Тираж должен быть целым числом от 1 до 1 000 000:")
+        quantity = int(text)
+        await state.update_data(act="gift_price", quantity=quantity)
+        return await again(
+            f"💰 Цена одного экземпляра {esc(data.get('gift_emoji', '🎁'))} "
+            f"<b>{esc(data.get('gift_name', 'подарка'))}</b> в RiseStars:"
+        )
+    if act == "gift_price":
+        price = parse_amount(text)
+        if price is None or price <= 0:
+            return await again("❌ Цена должна быть положительным числом RiseStars:")
+        try:
+            drop_id = await db.create_gift_drop(
+                str(data["gift_id"]), str(data["gift_name"]), str(data["gift_emoji"]),
+                int(data.get("telegram_stars") or 0), price, int(data["quantity"]),
+            )
+        except Exception as exc:  # noqa: BLE001
+            log.exception("failed to create gift drop")
+            return await done(f"❌ Не удалось создать дроп: {esc(str(exc)[:250])}")
+        await audit(
+            f"Дроп подарка #{drop_id}: {data['gift_name']} ×{data['quantity']} "
+            f"за {price:g} RiseStars"
+        )
+        return await done(
+            f"✅ Дроп #{drop_id} опубликован\n\n"
+            f"{esc(data['gift_emoji'])} <b>{esc(data['gift_name'])}</b>\n"
+            f"Тираж: <b>{data['quantity']}</b>\n"
+            f"Цена: <b>{fmt_num(price)} RiseStars</b> за штуку\n"
+            f"Telegram: <b>{int(data.get('telegram_stars') or 0)} ⭐</b> с баланса бота за отправку каждого подарка",
+            kb([btn("🎁 К дропам", "adm:gifts")], home_row()),
+        )
+
     # ── задания ──
     if act == "t_title":
         if not 3 <= len(text) <= 60:
@@ -763,6 +903,29 @@ async def adm_cb(call: CallbackQuery, state: FSMContext, user: dict):
         return await home_screen(call, user)
     if route == "stats":
         return await screen_stats(call)
+    if route == "gifts":
+        if len(parts) > 2 and parts[2] == "pick":
+            gift_id = parts[3] if len(parts) > 3 else ""
+            try:
+                catalog = await available_telegram_gifts(bot)
+            except Exception:
+                log.exception("Telegram getAvailableGifts failed while selecting a gift")
+                return await call.answer("Не удалось получить каталог Telegram.", show_alert=True)
+            gift = next((item for item in catalog if item["id"] == gift_id), None)
+            if not gift:
+                return await call.answer("Этот подарок больше недоступен для отправки ботом.", show_alert=True)
+            return await ask(
+                call, state, "gift_stock",
+                f"🎁 <b>{esc(gift['emoji'])} {esc(gift['name'])}</b>\n"
+                f"Цена отправки Telegram: {gift['stars']} ⭐ с баланса бота\n\n"
+                "Введите количество экземпляров в тираже (1–1 000 000):",
+                "adm:gifts",
+                gift_id=gift["id"], gift_name=gift["name"], gift_emoji=gift["emoji"],
+                telegram_stars=gift["stars"],
+            )
+        if len(parts) > 2 and parts[2] == "page":
+            return await screen_gifts(call, num(parts, 3))
+        return await screen_gifts(call)
     if route == "maint":
         new = "0" if await db.get_meta("maintenance") == "1" else "1"
         await db.set_meta("maintenance", new)
