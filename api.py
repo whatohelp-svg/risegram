@@ -12,6 +12,7 @@ import hmac
 import hashlib
 import json
 import logging
+import math
 import secrets
 import time
 from collections import defaultdict
@@ -733,11 +734,93 @@ async def h_inventory(request: web.Request):
     if not user:
         return web.json_response({"ok": False, "error": "unauthorized"}, status=401)
     items = await db.list_nft(user["tg_id"])
+    gifts = await db.list_user_gifts(user["tg_id"])
     return web.json_response({"ok": True, "items": [
         {"id": x["id"], "type": x["item_type"], "value": x["value"],
          "created_at": x.get("created_at"), "price_stars": x.get("price_stars", 0)}
         for x in items
-    ]})
+    ], "gifts": gifts})
+
+
+async def h_gifts(request: web.Request):
+    user = await _current_user(request)
+    if not user:
+        return web.json_response({"ok": False, "error": "unauthorized"}, status=401)
+    return web.json_response({
+        "ok": True,
+        "drops": await db.list_gift_drops(active_only=True),
+        "inventory": await db.list_user_gifts(user["tg_id"]),
+        "user": public_user(user),
+    })
+
+
+async def h_buy_gift(request: web.Request):
+    user = await _current_user(request)
+    if not user:
+        return web.json_response({"ok": False, "error": "unauthorized"}, status=401)
+    try:
+        drop_id = int(request.match_info["drop_id"])
+    except (KeyError, TypeError, ValueError):
+        return web.json_response({"ok": False, "error": "bad_drop_id"}, status=400)
+
+    ok, message, gift = await db.reserve_gift_drop(user["tg_id"], drop_id)
+    if not ok:
+        return web.json_response({"ok": False, "error": message}, status=409)
+
+    # RiseGram stores an internal account ID. Bot API needs the linked Telegram user ID.
+    telegram_user_id = await db.telegram_chat_id(user["tg_id"])
+    if not telegram_user_id:
+        await db.rollback_gift_purchase(gift["instance_id"])
+        return web.json_response({
+            "ok": False, "error": "К аккаунту не привязан Telegram-чат. Тираж и RiseStars возвращены."
+        }, status=409)
+
+    try:
+        delivered = await request.app["bot"].send_gift(
+            user_id=int(telegram_user_id),
+            gift_id=gift["telegram_gift_id"],
+            text="Подарок из RiseGram 🎁",
+        )
+        if delivered is not True:
+            raise RuntimeError("Telegram returned no delivery confirmation")
+    except Exception as exc:  # noqa: BLE001
+        log.warning("Telegram gift delivery failed account=%s gift=%s: %s",
+                    user["tg_id"], gift["telegram_gift_id"], exc)
+        await db.rollback_gift_purchase(gift["instance_id"])
+        return web.json_response({
+            "ok": False,
+            "error": "Telegram не отправил подарок. RiseStars и один экземпляр тиража возвращены."
+        }, status=503)
+
+    await db.confirm_gift_purchase(gift["instance_id"])
+    fresh = await db.get_user(user["tg_id"])
+    return web.json_response({
+        "ok": True,
+        "gift": gift,
+        "user": public_user(fresh),
+        "drops": await db.list_gift_drops(active_only=True),
+        "inventory": await db.list_user_gifts(user["tg_id"]),
+    })
+
+
+async def h_exchange(request: web.Request):
+    user = await _current_user(request)
+    if not user:
+        return web.json_response({"ok": False, "error": "unauthorized"}, status=401)
+    data = await _json(request)
+    try:
+        amount = float(data.get("amount"))
+    except (TypeError, ValueError):
+        return web.json_response({"ok": False, "error": "Укажите корректную сумму."}, status=400)
+    if not math.isfinite(amount) or amount <= 0:
+        return web.json_response({"ok": False, "error": "Сумма должна быть больше нуля."}, status=400)
+    ok, message, balances = await db.exchange_gram_balance(
+        user["tg_id"], str(data.get("direction", "")), amount
+    )
+    if not ok:
+        return web.json_response({"ok": False, "error": message}, status=400)
+    fresh = await db.get_user(user["tg_id"])
+    return web.json_response({"ok": True, "user": public_user(fresh), "balances": balances})
 
 
 async def h_activate_nft(request: web.Request):
@@ -1131,6 +1214,9 @@ async def start_api(bot) -> web.AppRunner | None:
         web.delete("/api/blocks/{rise_id}", h_unblock_user),
         web.get("/api/inventory", h_inventory),
         web.post("/api/inventory/{item_id}/activate", h_activate_nft),
+        web.get("/api/gifts", h_gifts),
+        web.post("/api/gifts/{drop_id}/buy", h_buy_gift),
+        web.post("/api/exchange", h_exchange),
         web.get("/api/market", h_market),
         web.post("/api/market", h_market_list),
         web.post("/api/market/{listing_id}/buy", h_market_buy),
