@@ -214,37 +214,9 @@
     padding: 8px 14px; border-radius: 99px; font-size: 12px; font-weight: 700;
     z-index: 80; display: none; box-shadow: 0 8px 24px rgba(0,0,0,0.5);
   }
-  .auth-overlay {
-    position: fixed; inset: 0; z-index: 120; display: none;
-    align-items: center; justify-content: center; padding: 18px;
-    background: rgba(5, 10, 16, 0.94); backdrop-filter: blur(14px);
-  }
-  .auth-card {
-    width: 100%; max-width: 420px; background: var(--card);
-    border: 1px solid var(--border); border-radius: 20px; padding: 20px;
-  }
-  .auth-card p { color: var(--muted); font-size: 13px; line-height: 1.45; margin: 8px 0 14px; }
-  .auth-card .field { margin: 6px 0 12px; }
-  .auth-card [hidden] { display: none !important; }
-  .hint { font-size: 11px; color: var(--muted); line-height: 1.4; margin-top: 8px; }
 </style>
 </head>
 <body>
-
-<div id="authOverlay" class="auth-overlay">
-  <div class="auth-card">
-    <div class="brand"><div class="brand-badge">🚀</div><span>Вход в RiseGram</span></div>
-    <p>Введите номер RiseGram. Одноразовый код придёт сообщением от официального бота RiseGram</p>
-    <input id="authPhone" class="field" type="tel" autocomplete="tel" placeholder="+7 (986) XXX-XX-XX">
-    <button id="authRequestBtn" class="btn" onclick="requestLoginCode()">Получить код</button>
-    <div id="authCodeStep" hidden>
-      <input id="authCode" class="field" inputmode="numeric" autocomplete="one-time-code" maxlength="8" placeholder="Код из бота">
-      <button id="authVerifyBtn" class="btn green" onclick="verifyLoginCode()">Войти</button>
-    </div>
-    <div class="hint">Новый аккаунт создаётся через бота. Сначала нажмите /start в боте RiseGram</div>
-    <div id="authError" class="hint"></div>
-  </div>
-</div>
 
 <div id="toast" class="toast"></div>
 
@@ -254,8 +226,8 @@
     <span>RiseGram</span>
   </div>
   <div class="balances">
-    <div class="pill blue">💎 Gram <span id="gramBalance">0</span></div>
-    <div class="pill gold">⭐ <span id="riseStars">0</span></div>
+    <div class="pill blue">TG ⭐ <span id="tgStars">150</span></div>
+    <div class="pill gold">⭐ <span id="riseStars">2 500</span></div>
     <button id="adminBtn" class="admin-btn" onclick="openTab('admin')">⚡ Админка</button>
   </div>
 </div>
@@ -271,21 +243,21 @@
         <div class="orbit-gift og-2" id="slot1">💎</div>
         <div class="orbit-gift og-3" id="slot2">🔥</div>
         <div class="orbit-gift og-4" id="slot3">🛸</div>
-        <div class="avatar" id="avatarLetter">R</div>
+        <div class="avatar" id="avatarLetter">K</div>
       </div>
       <div class="profile-name">
-        <span id="dispName">RiseGram User</span>
+        <span id="dispName">koyyzz</span>
         <span id="dispVerify" class="badge-verify" style="display:none;">☑️</span>
         <span id="dispScam" class="badge-scam" style="display:none;">SCAM</span>
       </div>
       <div class="profile-meta">
-        <span id="dispUser">@username</span> • <span id="dispPhone">+7 (986) XXX-XX-XX</span>
+        <span id="dispUser">@koyzzov</span> • <span id="dispPhone">+888 0420 6969</span>
       </div>
       <div class="profile-meta" style="font-size:11px; margin-top:2px;">
-        RiseGram ID: <span id="dispId">—</span>
+        ID: <span id="dispId">7206852053</span>
       </div>
       <div class="lvl-chip" onclick="openLevelModal()">
-        🛡️ Уровень <span id="dispLvl">1</span>
+        🛡️ Уровень <span id="dispLvl">57</span> • 1.3M / 1.3M 👑
       </div>
     </div>
 
@@ -298,17 +270,6 @@
 
   <!-- TAB 2: MARKET -->
   <div id="tab-market" class="tab">
-    <div class="section-title"><span>💎 Gram Earrings</span></div>
-    <div class="card">
-      <div class="item-title">Курс обмена</div>
-      <div class="item-sub">1 Gram = 100 RiseStars. Обе валюты хранятся на сервере аккаунта</div>
-      <input id="exchangeAmount" class="field" type="number" min="0.01" step="0.01" placeholder="Количество">
-      <div class="grid-2">
-        <button class="btn" onclick="exchangeCurrency('gram_to_stars')">Gram → RiseStars</button>
-        <button class="btn gold" onclick="exchangeCurrency('stars_to_gram')">RiseStars → Gram</button>
-      </div>
-    </div>
-
     <div class="section-title"><span>🔥 Акция (1 раз на аккаунт)</span></div>
     <div class="card" style="border-color: rgba(251,191,36,0.4);">
       <div style="display:flex; justify-content:space-between; align-items:center;">
@@ -432,15 +393,22 @@
     </div>
 
     <div class="card">
-      <div style="font-weight:700; margin-bottom:6px;">🎁 Каталог подарков Telegram</div>
-      <div class="item-sub">Список загружается напрямую из getAvailableGifts. При покупке бот отправляет настоящий подарок в Telegram, а Stars списываются с баланса бота</div>
-      <select id="newDropGift" class="field" style="width:100%;">
-        <option value="">Загрузка каталога Telegram…</option>
-      </select>
-      <input id="newDropPrice" class="field" type="number" min="1" step="1" placeholder="Цена для игроков в RiseStars" value="800">
-      <input id="newDropStock" class="field" type="number" min="1" step="1" placeholder="Тираж, шт." value="3">
-      <button class="btn green" onclick="adminCreateDrop()">Выпустить дроп</button>
-      <div id="adminGiftCatalogHint" class="hint">Тираж и цена задаются тобой. При неудачной отправке Telegram деньги и остаток тиража возвращаются</div>
+      <div style="font-weight:700; margin-bottom:8px;">💰 Быстрая выдача и тесты</div>
+      <div class="grid-2">
+        <button class="btn gold" onclick="adminAddStars()">+5 000 RiseStars</button>
+        <button class="btn" onclick="adminAddTgStars()">+100 TG ⭐</button>
+        <button class="btn green" onclick="adminLvlUp()">+1 Уровень</button>
+        <button class="btn ghost" onclick="adminResetStarter()">Сброс пака 0/1</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <div style="font-weight:700; margin-bottom:6px;">🎁 Запустить новый лимит-дроп</div>
+      <input id="newDropEmoji" class="field" placeholder="Эмодзи (например: 🐉)" value="🐉">
+      <input id="newDropName" class="field" placeholder="Название (например: Cyber Dragon)" value="Cyber Dragon">
+      <input id="newDropPrice" class="field" type="number" placeholder="Цена в RiseStars" value="800">
+      <input id="newDropStock" class="field" type="number" placeholder="Тираж (шт.)" value="3">
+      <button class="btn green" onclick="adminCreateDrop()">Опубликовать в Маркет</button>
     </div>
   </div>
 
@@ -460,118 +428,50 @@
 </div>
 
 <script>
+  const ADMIN_ID = 7206852053;
   const tg = window.Telegram && window.Telegram.WebApp ? window.Telegram.WebApp : null;
-  let sessionToken = localStorage.getItem("risegramSession") || "";
+
   let state = {
-    tgId: 0, riseId: 0, name: "", username: "", phone: "",
-    tgStars: 0, riseStars: 0, gramBalance: 0, level: 1,
-    verified: false, scam: false, isAdmin: false,
-    starterClaimed: false, wheelSpun: false,
-    orbit: ["", "", "", ""], inventory: [], drops: []
+    tgId: ADMIN_ID,
+    name: "koyyzz",
+    username: "@koyzzov",
+    phone: "+888 0420 6969",
+    tgStars: 150,
+    riseStars: 2500,
+    level: 57,
+    verified: false,
+    scam: false,
+    starterClaimed: false,
+    wheelSpun: false,
+    orbit: ["👑", "💎", "🔥", "🛸"],
+    inventory: [
+      { emoji: "👑", name: "Royal Crown", val: 500 },
+      { emoji: "💎", name: "Ocean Diamond", val: 450 },
+      { emoji: "🔥", name: "Inferno Flame", val: 300 },
+      { emoji: "🛸", name: "UFO X-1", val: 600 }
+    ],
+    drops: [
+      { id: 1, emoji: "🧸", name: "Plush Pepe", price: 650, stock: 3, max: 5 },
+      { id: 2, emoji: "🎩", name: "Durov Cap", price: 900, stock: 2, max: 5 }
+    ]
   };
 
-  if (tg) { tg.ready(); tg.expand(); }
+  // Init Telegram WebApp
+  if (tg) {
+    tg.ready();
+    tg.expand();
+    const u = tg.initDataUnsafe && tg.initDataUnsafe.user;
+    if (u) {
+      state.tgId = u.id;
+      state.name = u.first_name || "Player";
+      state.username = u.username ? "@" + u.username : "@id" + u.id;
+    }
+  }
 
-  function showAuth() {
-    document.getElementById("authOverlay").style.display = "flex";
-  }
-  function hideAuth() {
-    document.getElementById("authOverlay").style.display = "none";
-  }
-  function setAuthError(message) {
-    document.getElementById("authError").textContent = message || "";
-  }
-  function escapeHtml(value) {
-    return String(value == null ? "" : value).replace(/[&<>"']/g, ch => ({
-      "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;"
-    }[ch]));
-  }
-  async function apiRequest(path, options = {}) {
-    const headers = Object.assign({"Content-Type":"application/json"}, options.headers || {});
-    if (sessionToken) headers.Authorization = "Bearer " + sessionToken;
-    const response = await fetch(path, Object.assign({}, options, {headers}));
-    const data = await response.json().catch(() => ({}));
-    if (response.status === 401) {
-      sessionToken = "";
-      localStorage.removeItem("risegramSession");
-      showAuth();
-    }
-    if (!response.ok || data.ok === false) throw new Error(data.error || "Ошибка запроса");
-    return data;
-  }
-  async function requestLoginCode() {
-    const phone = document.getElementById("authPhone").value.trim();
-    const button = document.getElementById("authRequestBtn");
-    if (!phone) return setAuthError("Введите номер из бота RiseGram");
-    button.disabled = true;
-    setAuthError("");
-    try {
-      const response = await fetch("/api/auth/request", {
-        method:"POST", headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({phone})
-      });
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(data.error || "Не удалось запросить код");
-      document.getElementById("authCodeStep").hidden = false;
-      setAuthError("Запрос обработан. Проверьте сообщения от бота RiseGram");
-    } catch (error) {
-      setAuthError(error.message || "Ошибка сети");
-    } finally {
-      button.disabled = false;
-    }
-  }
-  async function verifyLoginCode() {
-    const phone = document.getElementById("authPhone").value.trim();
-    const code = document.getElementById("authCode").value.trim();
-    const button = document.getElementById("authVerifyBtn");
-    if (!phone || !code) return setAuthError("Введите номер и код из бота");
-    button.disabled = true;
-    setAuthError("");
-    try {
-      const response = await fetch("/api/auth/verify", {
-        method:"POST", headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({phone, code})
-      });
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok || !data.token) throw new Error("Неверный код или срок его действия истёк");
-      sessionToken = data.token;
-      localStorage.setItem("risegramSession", sessionToken);
-      await loadAppData();
-    } catch (error) {
-      setAuthError(error.message || "Ошибка входа");
-    } finally {
-      button.disabled = false;
-    }
-  }
-  async function loadAppData() {
-    const me = await apiRequest("/api/me");
-    state.tgId = me.user.tg_id;
-    state.riseId = me.user.rise_id;
-    state.name = me.user.name || "RiseGram User";
-    state.username = me.user.username ? "@" + me.user.username : "@id" + me.user.tg_id;
-    state.phone = me.user.phone || "";
-    state.riseStars = Number(me.user.risestars || 0);
-    state.gramBalance = Number(me.user.gram_balance || 0);
-    state.verified = !!me.user.verified;
-    state.isAdmin = !!me.user.is_admin;
-    const gifts = await apiRequest("/api/gifts");
-    state.drops = gifts.drops || [];
-    state.inventory = gifts.inventory || [];
-    document.getElementById("adminBtn").classList.toggle("visible", state.isAdmin);
-    hideAuth();
-    render();
-    if (state.isAdmin) loadAdminGiftCatalog();
-  }
-  async function restoreSession() {
-    if (!sessionToken) { showAuth(); return; }
-    try {
-      await loadAppData();
-    } catch (error) {
-      sessionToken = "";
-      localStorage.removeItem("risegramSession");
-      showAuth();
-      setAuthError(error.message || "Войдите в RiseGram");
-    }
+  // Check Admin Rights (Telegram ID or ?admin=7206852053)
+  const urlParams = new URLSearchParams(window.location.search);
+  if (state.tgId === ADMIN_ID || urlParams.get("admin") === String(ADMIN_ID)) {
+    document.getElementById("adminBtn").classList.add("visible");
   }
 
   function toast(msg) {
@@ -583,13 +483,13 @@
   }
 
   function render() {
-    document.getElementById("gramBalance").textContent = Number(state.gramBalance || 0).toLocaleString("ru-RU");
-    document.getElementById("riseStars").textContent = Number(state.riseStars || 0).toLocaleString("ru-RU");
-    document.getElementById("dispName").textContent = state.name || "RiseGram User";
-    document.getElementById("avatarLetter").textContent = (state.name || "R").charAt(0).toUpperCase();
-    document.getElementById("dispUser").textContent = state.username || "@username";
-    document.getElementById("dispPhone").textContent = state.phone || "—";
-    document.getElementById("dispId").textContent = state.riseId || "—";
+    document.getElementById("tgStars").textContent = state.tgStars;
+    document.getElementById("riseStars").textContent = state.riseStars.toLocaleString("ru-RU");
+    document.getElementById("dispName").textContent = state.name;
+    document.getElementById("avatarLetter").textContent = state.name.charAt(0).toUpperCase();
+    document.getElementById("dispUser").textContent = state.username;
+    document.getElementById("dispPhone").textContent = state.phone;
+    document.getElementById("dispId").textContent = state.tgId;
     document.getElementById("dispLvl").textContent = state.level;
     document.getElementById("dispVerify").style.display = state.verified ? "inline" : "none";
     document.getElementById("dispScam").style.display = state.scam ? "inline" : "none";
@@ -613,37 +513,35 @@
 
     // Inventory
     const invGrid = document.getElementById("inventoryGrid");
-    invGrid.innerHTML = state.inventory.length ? state.inventory.map((item, idx) => `
+    invGrid.innerHTML = state.inventory.map((item, idx) => `
       <div class="item-card">
         <div>
-          <div class="item-icon">${escapeHtml(item.emoji)}</div>
-          <div class="item-title">${escapeHtml(item.gift_name)}</div>
-          <div class="item-sub">Экземпляр #${item.serial_no} · получен ${escapeHtml((item.received_at || "").slice(0, 10))}</div>
+          <div class="item-icon">${item.emoji}</div>
+          <div class="item-title">${item.name}</div>
+          <div class="item-sub">Ценность: ${item.val} ⭐</div>
         </div>
         <button class="btn ghost" onclick="equipGift(${idx})">На орбиту</button>
       </div>
-    `).join("") : '<div class="card">Подарков пока нет. Откройте Маркет и посмотрите активные дропы</div>';
+    `).join("");
 
-    // Drops are loaded from the same database used by every player.
+    // Drops
     const dropsGrid = document.getElementById("dropsGrid");
-    dropsGrid.innerHTML = state.drops.length ? state.drops.map(d => `
+    dropsGrid.innerHTML = state.drops.map(d => `
       <div class="item-card">
         <div>
-          <div class="item-icon">${escapeHtml(d.emoji)}</div>
-          <div class="item-title">${escapeHtml(d.gift_name)}</div>
-          <div class="item-sub">Осталось: ${d.stock_remaining}/${d.stock_total} шт. · Telegram: ${d.telegram_stars} ⭐</div>
+          <div class="item-icon">${d.emoji}</div>
+          <div class="item-title">${d.name}</div>
+          <div class="item-sub">Осталось: ${d.stock}/${d.max} шт.</div>
         </div>
-        <button class="btn" ${d.stock_remaining <= 0 ? "disabled" : ""} onclick="buyDrop(${d.id})">
-          ${d.stock_remaining > 0 ? Number(d.price_risestars).toLocaleString("ru-RU") + " RiseStars" : "Распродано"}
+        <button class="btn" ${d.stock <= 0 ? "disabled" : ""} onclick="buyDrop(${d.id})">
+          ${d.stock > 0 ? d.price + " ⭐" : "Распродано"}
         </button>
       </div>
-    `).join("") : '<div class="card">Активных дропов пока нет</div>';
+    `).join("");
   }
 
   function openTab(name, btnEl) {
-    if (name === "admin" && !state.isAdmin) return toast("Нет доступа");
     document.querySelectorAll(".tab").forEach(t => t.classList.remove("active"));
-    if (name === "admin" && state.isAdmin) loadAdminGiftCatalog();
     document.getElementById("tab-" + name).classList.add("active");
     if (btnEl) {
       document.querySelectorAll(".nav-btn").forEach(b => b.classList.remove("active"));
@@ -653,47 +551,10 @@
 
   function equipGift(idx) {
     const gift = state.inventory[idx];
-    if (!gift) return;
     state.orbit.pop();
     state.orbit.unshift(gift.emoji);
-    toast(`${gift.emoji} ${gift.gift_name} добавлен на орбиту!`);
+    toast(`${gift.emoji} ${gift.name} добавлен на орбиту!`);
     render();
-  }
-  async function buyDrop(id) {
-    try {
-      const result = await apiRequest("/api/gifts/buy", {
-        method:"POST", body:JSON.stringify({drop_id:id})
-      });
-      state.riseStars = Number(result.user.risestars || 0);
-      state.gramBalance = Number(result.user.gram_balance || 0);
-      state.drops = result.drops || [];
-      state.inventory = result.inventory || [];
-      toast("🎁 Подарок отправлен в Telegram и добавлен в инвентарь RiseGram");
-      render();
-    } catch (error) {
-      toast(error.message || "Не удалось купить подарок");
-      try {
-        const fresh = await apiRequest("/api/gifts");
-        state.drops = fresh.drops || [];
-        state.inventory = fresh.inventory || [];
-        render();
-      } catch (_) {}
-    }
-  }
-  async function exchangeCurrency(direction) {
-    const amount = Number(document.getElementById("exchangeAmount").value);
-    if (!Number.isFinite(amount) || amount <= 0) return toast("Введите сумму больше нуля");
-    try {
-      const result = await apiRequest("/api/exchange", {
-        method:"POST", body:JSON.stringify({direction, amount})
-      });
-      state.riseStars = Number(result.user.risestars || 0);
-      state.gramBalance = Number(result.user.gram_balance || 0);
-      toast("Обмен выполнен по курсу 1 Gram = 100 RiseStars");
-      render();
-    } catch (error) {
-      toast(error.message || "Не удалось выполнить обмен");
-    }
   }
 
   // Market Actions
@@ -929,51 +790,18 @@
   function adminAddTgStars() { state.tgStars += 100; toast("+100 TG ⭐"); render(); }
   function adminLvlUp() { state.level += 1; toast("Уровень повышен!"); render(); }
   function adminResetStarter() { state.starterClaimed = false; toast("Пак сброшен в 0/1"); render(); }
-  async function loadAdminGiftCatalog() {
-    const select = document.getElementById("newDropGift");
-    if (!select || !state.isAdmin) return;
-    try {
-      const data = await apiRequest("/api/admin/gifts/catalog");
-      select.innerHTML = "";
-      (data.gifts || []).forEach(g => {
-        const option = document.createElement("option");
-        option.value = g.gift_id;
-        option.textContent = `${g.emoji} ${g.name} · ${g.telegram_stars} Telegram Stars`;
-        select.appendChild(option);
-      });
-      if (!select.options.length) select.innerHTML = '<option value="">Telegram не вернул доступные подарки</option>';
-      document.getElementById("adminGiftCatalogHint").textContent =
-        `В каталоге: ${(data.gifts || []).length} подарков, полученных от Telegram Bot API`;
-    } catch (error) {
-      select.innerHTML = '<option value="">Не удалось загрузить каталог</option>';
-      document.getElementById("adminGiftCatalogHint").textContent = error.message || "Ошибка загрузки каталога";
-    }
-  }
-  async function adminCreateDrop() {
-    const giftId = document.getElementById("newDropGift").value;
-    const price = Number(document.getElementById("newDropPrice").value);
-    const stock = Number(document.getElementById("newDropStock").value);
-    if (!giftId || !Number.isInteger(stock) || stock < 1 || !Number.isFinite(price) || price <= 0) {
-      return toast("Выберите подарок, укажите тираж и цену");
-    }
-    try {
-      const result = await apiRequest("/api/admin/gifts/drop", {
-        method:"POST",
-        body:JSON.stringify({gift_id:giftId, quantity:stock, price_risestars:price})
-      });
-      const gifts = await apiRequest("/api/gifts");
-      state.drops = gifts.drops || [];
-      state.inventory = gifts.inventory || [];
-      toast(`🎁 Дроп #${result.drop_id} опубликован · ${stock} шт.`);
-      render();
-      loadAdminGiftCatalog();
-    } catch (error) {
-      toast(error.message || "Не удалось создать дроп");
-    }
+  function adminCreateDrop() {
+    const emoji = document.getElementById("newDropEmoji").value || "🎁";
+    const name = document.getElementById("newDropName").value || "Limited Gift";
+    const price = parseInt(document.getElementById("newDropPrice").value) || 500;
+    const stock = parseInt(document.getElementById("newDropStock").value) || 3;
+    state.drops.unshift({ id: Date.now(), emoji, name, price, stock, max: stock });
+    toast(`🚀 Дроп «${name}» запущен!`);
+    render();
   }
 
   buildMinesBoard();
-  restoreSession();
+  render();
 </script>
 </body>
 </html>
