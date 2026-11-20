@@ -22,7 +22,7 @@ from aiogram.filters import Command, CommandStart, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
-from aiogram.types import CallbackQuery, KeyboardButton, LabeledPrice, Message, PreCheckoutQuery, ReplyKeyboardMarkup, ReplyKeyboardRemove
+from aiogram.types import CallbackQuery, LabeledPrice, Message, PreCheckoutQuery
 
 import config
 import database as db
@@ -166,44 +166,6 @@ def main_kb():
 async def cmd_start(message: Message, state: FSMContext, user: dict):
     await state.clear()
     await message.answer(await main_text(user), reply_markup=main_kb())
-
-
-@router.message(Command("linkphone"))
-async def cmd_link_phone(message: Message):
-    keyboard = ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text="📲 Поделиться моим номером", request_contact=True)]],
-        resize_keyboard=True,
-        one_time_keyboard=True,
-        input_field_placeholder="Поделитесь своим номером",
-    )
-    await message.answer(
-        "Чтобы получать коды входа в RiseGram на этот Telegram-аккаунт, "
-        "поделитесь своим номером через кнопку ниже. Номер будет привязан только "
-        "к вашему аккаунту бота.",
-        reply_markup=keyboard,
-    )
-
-
-@router.message(F.contact)
-async def handle_link_phone_contact(message: Message, user: dict):
-    contact = message.contact
-    if not contact or contact.user_id != message.from_user.id:
-        await message.answer(
-            "Нужно отправить именно свой контакт через кнопку «Поделиться моим номером».",
-            reply_markup=ReplyKeyboardRemove(),
-        )
-        return
-    linked = await db.link_telegram_phone(user["tg_id"], contact.phone_number)
-    if not linked:
-        await message.answer(
-            "Этот номер уже привязан к другому аккаунту RiseGram. Обратитесь в поддержку.",
-            reply_markup=ReplyKeyboardRemove(),
-        )
-        return
-    await message.answer(
-        "Номер привязан. Теперь коды входа на этот номер можно доставлять в этот чат RiseGram.",
-        reply_markup=ReplyKeyboardRemove(),
-    )
 
 
 @router.callback_query(F.data == "menu:main")
