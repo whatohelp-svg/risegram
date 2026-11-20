@@ -299,4 +299,43 @@ patch_go_file(
     "router reconnect authorization gate",
 )
 
+# A freshly-bound TCP session can explicitly cache user_id=0 before the
+# permanent auth key's authorization is copied into the session. Treat that
+# zero as a cold-session placeholder, not as proof that the permanent key is
+# unregistered: fall through to the durable auth-key lookup below. Revoked or
+# never-authorized keys still fail because lookupAuthUser checks PostgreSQL.
+patch_go_file(
+    "internal/rpc/convert_auth.go",
+    """\t\t\tif userID, resolved := r.deps.Sessions.UserIDResolvedForAuthKey(rawAuthKeyID, sessionID); resolved {
+\t\t\t\tif userID == 0 {
+\t\t\t\t\tif authKeyID, ok := AuthKeyIDFrom(ctx); ok {
+\t\t\t\t\t\tif cachedUserID, ok := r.positiveCachedAuthUser(authKeyID); ok {
+\t\t\t\t\t\t\tr.deps.Sessions.BindUserForAuthKey(rawAuthKeyID, sessionID, cachedUserID)
+\t\t\t\t\t\t\tr.announceSessionOnline(ctx, cachedUserID)
+\t\t\t\t\t\t\treturn cachedUserID, true, nil
+\t\t\t\t\t\t}
+\t\t\t\t\t}
+\t\t\t\t}
+\t\t\t\treturn userID, userID != 0, nil
+\t\t\t}
+""",
+    """\t\t\tif userID, resolved := r.deps.Sessions.UserIDResolvedForAuthKey(rawAuthKeyID, sessionID); resolved {
+\t\t\t\tif userID != 0 {
+\t\t\t\t\treturn userID, true, nil
+\t\t\t\t}
+\t\t\t\tif authKeyID, ok := AuthKeyIDFrom(ctx); ok {
+\t\t\t\t\tif cachedUserID, ok := r.positiveCachedAuthUser(authKeyID); ok {
+\t\t\t\t\t\tr.deps.Sessions.BindUserForAuthKey(rawAuthKeyID, sessionID, cachedUserID)
+\t\t\t\t\t\tr.announceSessionOnline(ctx, cachedUserID)
+\t\t\t\t\t\treturn cachedUserID, true, nil
+\t\t\t\t\t}
+\t\t\t\t}
+\t\t\t\t// The connection cache may contain a pre-sign-in zero marker even
+\t\t\t\t// after auth.bindTempAuthKey attached a durable business key.
+\t\t\t\t// Fall through to lookupAuthUser instead of returning 401 here.
+\t\t\t}
+""",
+    "cold session zero-user fallback to durable authorization",
+)
+
 print("RiseGram MTProto reconnect authorization fallback patched.")
