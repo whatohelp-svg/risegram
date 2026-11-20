@@ -95,6 +95,7 @@ class MtprotoOtpWebhookTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_regular_login_delivery_passes_internal_user_id_to_safe_send(self):
         api._last_request.clear()
+        api._last_request[db.digits_of(self.user["phone"])] = time.monotonic() - api.REQUEST_COOLDOWN - 1
         with patch("api.safe_send", new=AsyncMock(return_value=True)) as send:
             status, body = await api.core_request_code(object(), self.user["phone"])
         self.assertEqual(status, 200)
