@@ -31,7 +31,8 @@ OWNER_USERNAME = os.getenv("OWNER_USERNAME", "koyyzzback").strip().lstrip("@").l
 STARTER_NFT_USERNAMES = tuple(dict.fromkeys(
     n.strip().lstrip("@").lower() for n in os.getenv("STARTER_NFT_USERNAMES", "koyyzz,owner,rise").split(",") if n.strip()
 ))
-ADMIN_COMMAND = "admin7206852053"
+ADMIN_COMMAND = "admin"
+OWNER_COMMAND = "owner"
 DB_PATH = os.getenv("DB_PATH", "risegram.db").strip() or "risegram.db"
 MEDIA_PATH = os.getenv("MEDIA_PATH", "/data/risegram-media").strip() or "/data/risegram-media"
 MTPROTO_OTP_SECRET = os.getenv("MTPROTO_OTP_SECRET", "").strip()
@@ -123,8 +124,11 @@ MARKET_MIN_PRICE = 10.0
 MARKET_MAX_PRICE = 1_000_000_000.0
 MARKET_PAGE = 6
 
-# ── Владелец: ∞ балансы и ID 1 ──────────────────────────────────────────────
-INFINITE = 1e15                          # в интерфейсе значения от 1e12 показываются как ∞
+# ── Владелец: обычный кошелёк ───────────────────────────────────────────────
+# Стартовые значения совпадают с текущим RiseGram wallet в Android-клиенте.
+OWNER_START_RISESTARS = 1_000.0
+OWNER_START_GRAM = 10.0
+INFINITE = 1e15  # legacy sentinel; owner balances are no longer infinite
 OWNER_RISE_ID = 0  # assigned a random unique 8-digit value on first initialization
 
 
