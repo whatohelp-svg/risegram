@@ -19,6 +19,7 @@ from aiogram.types import CallbackQuery, Message
 
 import config
 import database as db
+from api import sync_mtproto_verification
 from ui import btn, esc, fmt_num, kb, safe_send, show
 
 log = logging.getLogger("risegram.admin")
@@ -1001,6 +1002,7 @@ async def adm_cb(call: CallbackQuery, state: FSMContext, user: dict):
             return await screen_user(call, uid, "✅ Готово.")
         if route == "uver":
             await db.set_verified(uid, not u["verified"])
+            await sync_mtproto_verification(uid, force=True)
             await audit(f"Верификация RiseGram {'снята' if u['verified'] else 'выдана'}: {uid}")
             return await screen_user(call, uid, "✅ Готово.")
         if route == "ucode":

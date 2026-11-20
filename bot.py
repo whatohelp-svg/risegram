@@ -27,7 +27,7 @@ from aiogram.types import CallbackQuery, LabeledPrice, Message, PreCheckoutQuery
 import config
 import database as db
 from admin import admin_router
-from api import start_api, sync_collectible_usernames
+from api import start_api, sync_collectible_usernames, sync_mtproto_verification
 from ui import back_row, btn, cancel_kb, esc, fmt_num, kb, safe_send, show
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
@@ -90,16 +90,18 @@ class GuardMiddleware(BaseMiddleware):
         data["user"] = user
         try:
             await sync_collectible_usernames(int(user["tg_id"]))
+            await sync_mtproto_verification(int(user["tg_id"]))
         except Exception:
-            logging.getLogger("risegram.bot").debug("collectible username sync deferred", exc_info=True)
+            logging.getLogger("risegram.bot").debug("RiseGram account sync deferred", exc_info=True)
         if isinstance(event, Message) and event.successful_payment:
             # Деньги уже списаны Telegram: товар выдаём всегда, даже при бане или техработах,
             # иначе человек заплатил бы и ничего не получил (и возврата тоже не было бы).
             result = await handler(event, data)
             try:
                 await sync_collectible_usernames(int(user["tg_id"]))
+                await sync_mtproto_verification(int(user["tg_id"]), force=True)
             except Exception:
-                logging.getLogger("risegram.bot").debug("post-payment username sync deferred", exc_info=True)
+                logging.getLogger("risegram.bot").debug("post-payment RiseGram sync deferred", exc_info=True)
             return result
         is_admin = tg_user.id == config.OWNER_TELEGRAM_ID or await db.is_admin(int(user["tg_id"]))
         data["is_admin"] = is_admin

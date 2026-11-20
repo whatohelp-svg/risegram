@@ -223,7 +223,8 @@ patch_go_file(
 \t}
 """,
     """\tif r.deps.Auth != nil {
-\t\tif _, authorized := UserIDFrom(ctx); !authorized && !rpcAllowedWithoutAuthorization(canonicalID) {
+\t\tcachedUserID, authorized := UserIDFrom(ctx)
+\t\tif (!authorized || cachedUserID == 0) && !rpcAllowedWithoutAuthorization(canonicalID) {
 \t\t\t// On a reconnect the TCP session cache is cold even though the
 \t\t\t// permanent business auth key remains authorized in the database.
 \t\t\t// Resolve it once here and seed this request context before applying
@@ -271,7 +272,8 @@ patch_go_file(
 \t\t}
 """,
     """\t\tif r.deps.Auth != nil {
-\t\t\tif _, ok := UserIDFrom(ctx); !ok && !rpcAllowedWithoutAuthorization(id) {
+\t\t\tcachedUserID, ok := UserIDFrom(ctx)
+\t\t\tif (!ok || cachedUserID == 0) && !rpcAllowedWithoutAuthorization(id) {
 \t\t\t\tuserID, resolved, resolveErr := r.currentUserID(ctx)
 \t\t\t\tif resolveErr != nil {
 \t\t\t\t\tif r.log != nil {
@@ -336,6 +338,19 @@ patch_go_file(
 \t\t\t}
 """,
     "cold session zero-user fallback to durable authorization",
+)
+
+patch_go_file(
+    "internal/rpc/convert_auth.go",
+    """\tif userID, ok := UserIDFrom(ctx); ok {
+\t\treturn userID, true, nil
+\t}
+""",
+    """\tif userID, ok := UserIDFrom(ctx); ok && userID != 0 {
+\t\treturn userID, true, nil
+\t}
+""",
+    "ignore zero cached user marker on reconnect",
 )
 
 print("RiseGram MTProto reconnect authorization fallback patched.")

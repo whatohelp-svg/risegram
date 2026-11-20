@@ -10,6 +10,7 @@ from pathlib import Path
 import asyncio
 import hmac
 import hashlib
+import html
 import json
 import logging
 import math
@@ -933,6 +934,85 @@ async def h_purchases(request: web.Request):
     ]})
 
 
+_verification_sync_last: dict[int, float] = {}
+_verification_sync_state: dict[int, tuple[str, bool]] = {}
+_verification_sync_locks: dict[int, asyncio.Lock] = {}
+
+
+async def sync_mtproto_verification(user_id: int, force: bool = False) -> dict:
+    """Mirror the RiseGram bot's verified flag onto its native MTProto peer."""
+    base = str(getattr(config, "MTPROTO_ADMIN_API_URL", "") or "").rstrip("/")
+    token = str(getattr(config, "MTPROTO_ADMIN_API_TOKEN", "") or "")
+    if not base or not token or int(user_id) <= 0:
+        return {"configured": False, "synced": False}
+    user = await db.get_user(int(user_id))
+    if not user or user.get("banned"):
+        return {"configured": True, "synced": False}
+    phone = str(user.get("phone") or "")
+    digits = db.digits_of(phone)
+    if len(digits) < 7:
+        return {"configured": True, "synced": False}
+    verified = bool(user.get("verified"))
+    fingerprint = (digits, verified)
+    now_mono = time.monotonic()
+    if not force and _verification_sync_state.get(int(user_id)) == fingerprint and now_mono - _verification_sync_last.get(int(user_id), 0.0) < 300:
+        return {"configured": True, "synced": True, "cached": True}
+
+    lock = _verification_sync_locks.setdefault(int(user_id), asyncio.Lock())
+    if lock.locked():
+        return {"configured": True, "synced": False, "pending": True}
+    async with lock:
+        now_mono = time.monotonic()
+        if not force and _verification_sync_state.get(int(user_id)) == fingerprint and now_mono - _verification_sync_last.get(int(user_id), 0.0) < 300:
+            return {"configured": True, "synced": True, "cached": True}
+        timeout = ClientTimeout(total=8, connect=3)
+        headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
+        try:
+            async with ClientSession(timeout=timeout, headers=headers) as session:
+                async with session.post(f"{base}/v1/accounts/resolve-by-phone", json={"phone": phone}) as response:
+                    if response.status != 200:
+                        log.warning("MTProto verification account lookup returned HTTP %s", response.status)
+                        _verification_sync_last[int(user_id)] = time.monotonic() - 270
+                        return {"configured": True, "synced": False, "http_status": response.status}
+                    resolved = await response.json(content_type=None)
+                if not resolved.get("found") or not resolved.get("user_id"):
+                    # The MTProto peer can appear after this bot update. Retry shortly.
+                    _verification_sync_last[int(user_id)] = time.monotonic() - 270
+                    return {"configured": True, "synced": False, "pending_account": True}
+                payload = {
+                    "command_id": f"risegram-verified-{int(user_id)}-{time.time_ns()}",
+                    "actor": "risegram-bot",
+                    "reason": "Synchronize RiseGram account verification with native MTProto",
+                    "dry_run": False,
+                    "user_id": int(resolved["user_id"]),
+                    "verified": verified,
+                }
+                async with session.post(f"{base}/v1/accounts/set-verified", json=payload) as response:
+                    result = await response.json(content_type=None)
+                    if response.status != 200 or result.get("error"):
+                        log.warning("MTProto verification update returned HTTP %s", response.status)
+                        _verification_sync_last[int(user_id)] = time.monotonic() - 270
+                        return {"configured": True, "synced": False, "http_status": response.status}
+            _verification_sync_state[int(user_id)] = fingerprint
+            _verification_sync_last[int(user_id)] = time.monotonic()
+            return {"configured": True, "synced": True}
+        except Exception:
+            log.exception("MTProto verification sync failed for RiseGram user %s", user_id)
+            _verification_sync_last[int(user_id)] = time.monotonic() - 270
+            return {"configured": True, "synced": False, "error": True}
+
+
+async def h_public_link(request: web.Request):
+    username = str(request.match_info.get("username", "")).strip().lstrip("@")
+    if (len(username) < 5 or len(username) > 32 or not username[0].isalpha()
+            or not username.isascii() or not all(ch.isalnum() or ch == "_" for ch in username)):
+        return web.Response(text="Not found", status=404)
+    safe_name = html.escape(username)
+    deep_link = html.escape(f"tg://resolve?domain={username}", quote=True)
+    page = f"""<!doctype html><html lang="ru"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>@{safe_name} — RiseGram</title><meta name="theme-color" content="#17232f"><style>body{{margin:0;background:#17232f;color:#fff;font:16px Arial,sans-serif;display:grid;min-height:100vh;place-items:center}}main{{max-width:420px;padding:32px;text-align:center}}a{{display:inline-block;margin-top:18px;padding:13px 22px;border-radius:14px;background:#229ed9;color:white;text-decoration:none;font-weight:700}}</style><main><h1>RiseGram</h1><p>Открыть <b>@{safe_name}</b> в приложении RiseGram</p><a href="{deep_link}">Открыть в RiseGram</a></main></html>"""
+    return web.Response(text=page, content_type="text/html", charset="utf-8")
+
+
 async def h_index(request: web.Request):
     index_path = Path(__file__).with_name("index.html")
     if not index_path.is_file():
@@ -1226,6 +1306,7 @@ async def start_api(bot) -> web.AppRunner | None:
         web.get("/api/purchases", h_purchases),
         web.post("/internal/mtproto/otp", h_mtproto_otp_delivery),
         web.get("/health", h_health),
+        web.get("/{username}", h_public_link),
     ])
     runner = web.AppRunner(app)
     await runner.setup()
