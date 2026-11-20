@@ -16,7 +16,7 @@ import secrets
 import time
 from collections import defaultdict
 
-from aiohttp import web
+from aiohttp import ClientSession, ClientTimeout, web
 
 import config
 import database as db
@@ -130,6 +130,9 @@ async def core_request_code(bot, phone: str) -> tuple[int, dict]:
     if not user or user["banned"] or not await db.is_feature_on("auth_numbers"):
         return 200, {"ok": True}
     # tg_id is the internal RiseGram key; Telegram is only the private delivery channel.
+    # Refresh owned collectible usernames using the assigned +888 number only.
+    # Missing MTProto accounts are handled on the bot's next update after sign-in.
+    await sync_collectible_usernames(int(user["tg_id"]))
     chat_id = await db.telegram_chat_id(user["tg_id"])
     if not chat_id:
         log.warning("login number has no Telegram delivery chat for Rise ID %s", user.get("rise_id"))
@@ -853,6 +856,174 @@ async def h_index(request: web.Request):
         return web.Response(text="RiseGram UI not found", status=404)
     return web.FileResponse(index_path)
 
+
+
+_username_sync_last: dict[int, float] = {}
+_username_sync_fingerprints: dict[int, tuple[tuple[int, str], ...]] = {}
+_username_sync_locks: dict[int, asyncio.Lock] = {}
+
+
+async def sync_collectible_usernames(user_id: int) -> dict:
+    """Mirror the bot-owned username inventory into the matching MTProto peer.
+
+    The bot-issued +888 number is the only cross-system identity key. Personal
+    Telegram phone numbers are never read or sent to the MTProto Admin API.
+    """
+    base = config.MTPROTO_ADMIN_API_URL
+    token = config.MTPROTO_ADMIN_API_TOKEN
+    if not base or not token or user_id <= 0:
+        return {"synced": 0, "skipped": 0, "configured": False}
+
+    user = await db.get_user(int(user_id))
+    if not user:
+        return {"synced": 0, "skipped": 0, "configured": True}
+    phone = str(user.get("phone") or "")
+    phone_digits = db.digits_of(phone)
+    if not phone_digits.startswith("888") or len(phone_digits) < 7:
+        return {"synced": 0, "skipped": 0, "configured": True}
+
+    inventory = await db.list_nft(int(user_id), "username")
+    wanted = []
+    for item in inventory:
+        name = db.norm_username(str(item.get("value") or ""))
+        if (not name or len(name) < 4 or len(name) > 32
+                or not name[0].isalpha()
+                or not all(ch.isascii() and (ch.isalnum() or ch == "_") for ch in name)):
+            continue
+        wanted.append((int(item["id"]), name))
+    fingerprint = tuple(sorted(set(wanted)))
+    if not fingerprint:
+        return {"synced": 0, "skipped": 0, "configured": True}
+
+    now_mono = time.monotonic()
+    previous = _username_sync_fingerprints.get(int(user_id))
+    last = _username_sync_last.get(int(user_id), 0.0)
+    if previous == fingerprint and now_mono - last < 180:
+        return {"synced": 0, "skipped": len(fingerprint), "configured": True}
+
+    lock = _username_sync_locks.setdefault(int(user_id), asyncio.Lock())
+    if lock.locked():
+        return {"synced": 0, "skipped": len(fingerprint), "configured": True}
+    async with lock:
+        now_mono = time.monotonic()
+        previous = _username_sync_fingerprints.get(int(user_id))
+        last = _username_sync_last.get(int(user_id), 0.0)
+        if previous == fingerprint and now_mono - last < 180:
+            return {"synced": 0, "skipped": len(fingerprint), "configured": True}
+        _username_sync_last[int(user_id)] = now_mono
+
+        timeout = ClientTimeout(total=8, connect=3)
+        headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
+        synced = 0
+        skipped = 0
+        try:
+            async with ClientSession(timeout=timeout, headers=headers) as session:
+                async with session.post(
+                    f"{base}/v1/accounts/resolve-by-phone",
+                    json={"phone": phone},
+                ) as response:
+                    if response.status != 200:
+                        log.warning("MTProto username sync: account resolution returned HTTP %s", response.status)
+                        return {"synced": 0, "skipped": len(fingerprint), "configured": True}
+                    resolved = await response.json(content_type=None)
+                if not resolved.get("found") or not resolved.get("user_id"):
+                    # First-time logins are not in the MTProto account store until
+                    # auth.signIn completes. Retry on a later bot interaction.
+                    _username_sync_last[int(user_id)] = time.monotonic() - 165
+                    return {"synced": 0, "skipped": len(fingerprint), "configured": True}
+                mt_user_id = int(resolved["user_id"])
+
+                async with session.get(
+                    f"{base}/v1/collectible-usernames",
+                    params={"owner_user_id": str(mt_user_id), "limit": "100"},
+                ) as response:
+                    if response.status != 200:
+                        log.warning("MTProto username sync: current profile lookup returned HTTP %s", response.status)
+                        return {"synced": 0, "skipped": len(fingerprint), "configured": True}
+                    owned_data = await response.json(content_type=None)
+                owned = {
+                    db.norm_username(str(asset.get("username") or ""))
+                    for asset in owned_data.get("assets", [])
+                    if asset.get("status") == "owned"
+                    and asset.get("owner_type") == "user"
+                    and str(asset.get("owner_id") or "") == str(mt_user_id)
+                }
+
+                for item_id, name in fingerprint:
+                    if name in owned:
+                        skipped += 1
+                        continue
+                    async with session.get(
+                        f"{base}/v1/collectible-usernames",
+                        params={"q": name, "limit": "100"},
+                    ) as response:
+                        if response.status != 200:
+                            skipped += 1
+                            continue
+                        search_data = await response.json(content_type=None)
+                    asset = next(
+                        (entry for entry in search_data.get("assets", [])
+                         if db.norm_username(str(entry.get("username") or "")) == name),
+                        None,
+                    )
+                    command_id = f"risegram-{int(user_id)}-{item_id}"
+                    if asset:
+                        status = asset.get("status")
+                        owner_type = asset.get("owner_type")
+                        owner_id = str(asset.get("owner_id") or "")
+                        if status == "vault":
+                            payload = {
+                                "command_id": f"{command_id}-transfer",
+                                "actor": "risegram-bot-sync",
+                                "reason": "Sync bot-owned username inventory to MTProto profile",
+                                "username": name,
+                                "to_user_id": str(mt_user_id),
+                            }
+                            endpoint = "transfer"
+                        elif status == "owned" and owner_type == "user" and owner_id == str(mt_user_id):
+                            owned.add(name)
+                            skipped += 1
+                            continue
+                        else:
+                            # Never seize a name that is already owned by a
+                            # different peer or has been permanently burned.
+                            skipped += 1
+                            continue
+                    else:
+                        payload = {
+                            "command_id": f"{command_id}-mint",
+                            "actor": "risegram-bot-sync",
+                            "reason": "Import bot-owned username inventory into MTProto profile",
+                            "username": name,
+                            "owner_user_id": str(mt_user_id),
+                            "currency": "USD",
+                            "amount": "0",
+                        }
+                        endpoint = "mint"
+
+                    async with session.post(
+                        f"{base}/v1/collectible-usernames/{endpoint}",
+                        json=payload,
+                    ) as response:
+                        result = await response.json(content_type=None)
+                        if response.status == 200 and result.get("status") == "completed":
+                            synced += 1
+                            owned.add(name)
+                        else:
+                            skipped += 1
+                            log.warning(
+                                "MTProto username sync: %s rejected for item %s (HTTP %s, status %s)",
+                                endpoint, item_id, response.status, result.get("status"),
+                            )
+        except Exception as exc:
+            log.warning("MTProto username sync unavailable (%s)", type(exc).__name__)
+            return {"synced": synced, "skipped": skipped, "configured": True}
+
+        _username_sync_fingerprints[int(user_id)] = fingerprint
+        _username_sync_last[int(user_id)] = time.monotonic()
+        if synced:
+            log.info("MTProto collectible usernames synced for RiseGram account %s: %s", user.get("rise_id"), synced)
+        return {"synced": synced, "skipped": skipped, "configured": True}
 
 
 async def h_mtproto_otp_delivery(request: web.Request):
