@@ -39,7 +39,7 @@ public class MainActivity extends Activity {
                 api("GET", "/api/me", token, null, (res, err) -> {
                     JSONObject u = res.optJSONObject("user");
                     if (err == null && u != null && balanceView != null) {
-                        balanceView.setText("⭐ RiseStars   " + number(u.optDouble("risestars")) + "\n💎 Gram   " + number(u.optDouble("gram_balance")));
+                        balanceView.setText("⭐ RiseStars   " + number(u.optDouble("risestars")) + "\n💎 Gram Earrings   " + number(u.optDouble("gram_balance")));
                     }
                 });
             }
@@ -242,7 +242,7 @@ public class MainActivity extends Activity {
         content.removeAllViews();
         title(user.optString("name", "Профиль"));
         card("@" + user.optString("username", "user") + "   ·   Rise ID " + user.optString("rise_id"));
-        balanceView = label("⭐ RiseStars   " + number(user.optDouble("risestars")) + "\\n💎 Gram   " + number(user.optDouble("gram_balance")));
+        balanceView = label("⭐ RiseStars   " + number(user.optDouble("risestars")) + "\\n💎 Gram Earrings   " + number(user.optDouble("gram_balance")));
         balanceView.setTextColor(text);
         balanceView.setTextSize(16);
         balanceView.setPadding(dp(15), dp(15), dp(15), dp(15));
@@ -275,9 +275,15 @@ public class MainActivity extends Activity {
         Button market = button("🛒 Открыть маркет", green);
         content.addView(market);
         market.setOnClickListener(v -> loadMarket());
-        Button inventory = button("🎒 Мои NFT", accent);
+        Button inventory = button("🎒 Мой инвентарь и подарки", accent);
         content.addView(inventory);
         inventory.setOnClickListener(v -> loadInventory());
+        Button gifts = button("🎁 Магазин подарков", green);
+        content.addView(gifts);
+        gifts.setOnClickListener(v -> loadGiftDrops());
+        Button exchange = button("💱 Обмен Gram Earrings ↔ RiseStars", panel);
+        content.addView(exchange);
+        exchange.setOnClickListener(v -> showGramExchange());
         Button games = button("🎮 Статистика игр", panel);
         content.addView(games);
         games.setOnClickListener(v -> loadGameStats());
@@ -530,8 +536,20 @@ public class MainActivity extends Activity {
             if (err != null) { toast(err); loadProfile(); return; }
             content.removeAllViews();
             title("Мои NFT и номера");
+            JSONArray gifts = res.optJSONArray("gifts");
+            if (gifts != null && gifts.length() > 0) {
+                title("🎁 Подарки Telegram");
+                for (int i = 0; i < gifts.length(); i++) {
+                    JSONObject gift = gifts.optJSONObject(i);
+                    if (gift == null) continue;
+                    card(gift.optString("emoji", "🎁") + " " + gift.optString("gift_name", "Telegram Gift") +
+                        "\nЭкземпляр #" + gift.optInt("serial_no") +
+                        "\nПолучен: " + gift.optString("received_at", ""));
+                }
+            }
+            title("🏷 NFT и номера");
             JSONArray items = res.optJSONArray("items");
-            if (items == null || items.length() == 0) content.addView(label("Инвентарь пока пуст"));
+            if (items == null || items.length() == 0) content.addView(label("NFT и номеров пока нет"));
             else for (int i = 0; i < items.length(); i++) {
                 JSONObject item = items.optJSONObject(i);
                 if (item == null) continue;
@@ -558,6 +576,115 @@ public class MainActivity extends Activity {
             content.addView(back);
             back.setOnClickListener(v -> loadProfile());
         });
+    }
+
+    private void loadGiftDrops() {
+        showLoading("Загружаем подарки Telegram…");
+        api("GET", "/api/gifts", token, null, (res, err) -> {
+            if (err != null) { toast(err); loadProfile(); return; }
+            content.removeAllViews();
+            title("🎁 Подарки RiseGram");
+            JSONObject user = res.optJSONObject("user");
+            if (user != null) {
+                card("Баланс: " + number(user.optDouble("risestars")) + " RiseStars");
+            }
+            card("Подарки отправляются ботом в Telegram и сохраняются в вашем инвентаре RiseGram. Цена списывается в RiseStars.");
+            JSONArray drops = res.optJSONArray("drops");
+            if (drops == null || drops.length() == 0) {
+                content.addView(label("Сейчас нет активных лимитированных дропов. Загляните позже."));
+            } else {
+                for (int i = 0; i < drops.length(); i++) {
+                    JSONObject drop = drops.optJSONObject(i);
+                    if (drop == null) continue;
+                    final int dropId = drop.optInt("id");
+                    int remaining = drop.optInt("stock_remaining");
+                    String emoji = drop.optString("emoji", "🎁");
+                    String name = drop.optString("gift_name", "Telegram Gift");
+                    double price = drop.optDouble("price_risestars");
+                    card(emoji + " " + name + "\nОсталось: " + remaining + "/" + drop.optInt("stock_total") +
+                         "\nЦена: " + number(price) + " RiseStars" +
+                         "\nСтоимость отправки боту: " + drop.optInt("telegram_stars") + " Telegram Stars");
+                    Button buy = button(remaining > 0 ? "Купить и отправить подарок" : "Распродано", green);
+                    buy.setEnabled(remaining > 0);
+                    content.addView(buy);
+                    buy.setOnClickListener(v -> new android.app.AlertDialog.Builder(this)
+                        .setTitle("Получить подарок")
+                        .setMessage("Отправить " + emoji + " " + name + " за " + number(price) + " RiseStars?")
+                        .setNegativeButton("Отмена", null)
+                        .setPositiveButton("Получить", (dialog, which) -> buyGiftDrop(dropId, buy))
+                        .show());
+                }
+            }
+            Button inventory = button("🎒 Мой инвентарь подарков", accent);
+            content.addView(inventory);
+            inventory.setOnClickListener(v -> loadInventory());
+            Button back = button("Назад", panel);
+            content.addView(back);
+            back.setOnClickListener(v -> loadProfile());
+        });
+    }
+
+    private void buyGiftDrop(int dropId, Button button) {
+        button.setEnabled(false);
+        api("POST", "/api/gifts/" + dropId + "/buy", token, new JSONObject(), (res, err) -> {
+            if (err != null) {
+                toast(err);
+                loadGiftDrops();
+                return;
+            }
+            toast("🎁 Telegram отправил подарок. Он сохранён в инвентаре RiseGram");
+            loadGiftDrops();
+        });
+    }
+
+    private void showGramExchange() {
+        content.removeAllViews();
+        title("💱 Обмен валют");
+        card("Фиксированный курс: 1 Gram Earrings = 100 RiseStars. Обмен выполняется на сервере без комиссии.");
+        EditText amount = field("Количество");
+        amount.setInputType(android.text.InputType.TYPE_CLASS_NUMBER |
+                            android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL);
+        content.addView(amount);
+        Button toStars = button("💎 Gram Earrings → ⭐ RiseStars", green);
+        content.addView(toStars);
+        toStars.setOnClickListener(v -> exchangeCurrency("gram_to_stars", amount));
+        Button toGram = button("⭐ RiseStars → 💎 Gram Earrings", accent);
+        content.addView(toGram);
+        toGram.setOnClickListener(v -> exchangeCurrency("stars_to_gram", amount));
+        Button back = button("Назад", panel);
+        content.addView(back);
+        back.setOnClickListener(v -> loadProfile());
+        api("GET", "/api/me", token, null, (res, err) -> {
+            if (err == null) {
+                JSONObject user = res.optJSONObject("user");
+                if (user != null) card("Ваш баланс\n⭐ " + number(user.optDouble("risestars")) +
+                    " RiseStars\n💎 " + number(user.optDouble("gram_balance")) + " Gram Earrings");
+            }
+        });
+    }
+
+    private void exchangeCurrency(String direction, EditText amountField) {
+        String raw = amountField.getText().toString().trim().replace(',', '.');
+        try {
+            double amount = Double.parseDouble(raw);
+            if (!Double.isFinite(amount) || amount <= 0) {
+                toast("Введите сумму больше нуля");
+                return;
+            }
+            JSONObject body = new JSONObject();
+            body.put("direction", direction);
+            body.put("amount", amount);
+            api("POST", "/api/exchange", token, body, (res, err) -> {
+                if (err != null) { toast(err); return; }
+                JSONObject user = res.optJSONObject("user");
+                if (user != null) toast("Обмен выполнен. RiseStars: " +
+                    number(user.optDouble("risestars")) + " · Gram Earrings: " +
+                    number(user.optDouble("gram_balance")));
+                loadProfile();
+            });
+        } catch (Exception e) {
+            toast("Введите корректное число");
+        }
     }
 
     private void showSellDialog() {
