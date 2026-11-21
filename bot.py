@@ -194,11 +194,6 @@ async def cb_webapp(call: CallbackQuery):
     await call.answer("Приложение пока не подключено. Владелец ещё не указал ссылку.", show_alert=True)
 
 
-# ═══════════════════════════ NFT-подарки и дропы ════════════════════════════
-
-GIFT_PAGE_SIZE = 6
-
-
 # ─── код входа и номер ──────────────────────────────────────────────────────
 
 
@@ -265,7 +260,7 @@ HELP_TEXT = (
     "Всё купленное действует внутри экосистемы RiseGram, а не в официальном Telegram.\n\n"
     "/start — меню\n/shop — донат\n/code — код входа\n"
     f"/doxnumber — номер +1 с бонусом {config.CURRENCY_NAME}\n/migrate — привязать старый номер\n"
-    "/top — топ игроков\n/bonus — ежедневный бонус\n/games — Crash Rocket и Хай-Лоу\n/gifts — NFT-подарки\n/market — маркет\n/send — перевод"
+    "/top — топ игроков\n/bonus — ежедневный бонус\n/games — Crash Rocket и Хай-Лоу\n/market — маркет\n/send — перевод"
 )
 
 
