@@ -25,6 +25,8 @@ COPY server/patches/signup-channels.patch /tmp/signup-channels.patch
 RUN git apply /tmp/signup-channels.patch
 COPY server/patches/gram-exchange.patch /tmp/gram-exchange.patch
 RUN git apply /tmp/gram-exchange.patch
+COPY server/patches/personal-gift-upgrade.patch /tmp/personal-gift-upgrade.patch
+RUN git apply /tmp/personal-gift-upgrade.patch
 RUN go mod download
 ENV CGO_ENABLED=0
 
