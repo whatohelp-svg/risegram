@@ -153,6 +153,8 @@ SCHEMA = [
         gram_balance REAL NOT NULL DEFAULT 0,
         banned INTEGER NOT NULL DEFAULT 0,
         verified INTEGER NOT NULL DEFAULT 0,
+        verified_risegram INTEGER NOT NULL DEFAULT 0,
+        verified_major INTEGER NOT NULL DEFAULT 0,
         auth_code TEXT,
         auth_code_expires TEXT,
         active_username TEXT,
@@ -395,7 +397,9 @@ COLUMNS: dict[str, dict[str, str]] = {
         "user_id": "TEXT",
         "rise_id": "INTEGER", "name": "TEXT", "username": "TEXT", "phone": "TEXT",
         "phone_digits": "TEXT", "risestars": "REAL DEFAULT 0", "gram_balance": "REAL DEFAULT 0",
-        "banned": "INTEGER DEFAULT 0", "verified": "INTEGER DEFAULT 0", "auth_code": "TEXT",
+        "banned": "INTEGER DEFAULT 0", "verified": "INTEGER DEFAULT 0",
+        "verified_risegram": "INTEGER DEFAULT 0", "verified_major": "INTEGER DEFAULT 0",
+        "auth_code": "TEXT",
         "auth_code_expires": "TEXT", "active_username": "TEXT", "gift_mode": "TEXT DEFAULT 'real'",
         "last_bonus_at": "TEXT", "dox_claimed": "INTEGER DEFAULT 0", "created_at": "TEXT",
         "last_seen": "TEXT",
@@ -737,8 +741,20 @@ async def set_banned(tg_id: int, banned: bool) -> None:
     await execute("UPDATE users SET banned=? WHERE tg_id=?", (1 if banned else 0, tg_id))
 
 
+async def set_verification(tg_id: int, kind: str, enabled: bool) -> None:
+    if kind not in ("risegram", "major"):
+        raise ValueError("Unknown verification kind")
+    column = "verified_risegram" if kind == "risegram" else "verified_major"
+    async with connect() as conn:
+        await conn.execute(f"UPDATE users SET {column}=? WHERE tg_id=?", (1 if enabled else 0, tg_id))
+        await conn.execute(
+            "UPDATE users SET verified=CASE WHEN verified_risegram=1 OR verified_major=1 THEN 1 ELSE 0 END WHERE tg_id=?",
+            (tg_id,),
+        )
+
+
 async def set_verified(tg_id: int, verified: bool) -> None:
-    await execute("UPDATE users SET verified=? WHERE tg_id=?", (1 if verified else 0, tg_id))
+    await set_verification(tg_id, "risegram", verified)
 
 
 async def set_gift_mode(tg_id: int, mode: str) -> None:
