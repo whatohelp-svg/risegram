@@ -22,6 +22,7 @@ from aiogram.types import CallbackQuery, Message
 import config
 import database as db
 import gift_admin
+import native_economy as economy
 from api import client_wallet_line, sync_mtproto_verification
 from ui import btn, esc, fmt_num, kb, safe_send, show
 
@@ -114,7 +115,7 @@ async def home_screen(event, user: dict):
     scam_label = f"⚠️ SCAM-заявки ({pending})" if pending else "⚠️ SCAM-заявки"
     rows = [
         [btn("📊 Аналитика", "adm:stats", style="primary"), btn("👥 Юзеры", "adm:users:0", style="primary")],
-        [btn("🏷 Выдать юзернеймы", "adm:inv", style="success")],
+        [btn("💰 Выдача валюты", "adm:grant", style="success"), btn("🏷 Выдать юзернеймы", "adm:inv", style="success")],
         [btn("🗑 Удалить аккаунт по номеру", "adm:delphone", style="danger")],
         [btn("🎁 Дроп подарков", "adm:localgifts:0", style="success")],
         [btn("☑️ Верификация RiseGram", "adm:verifyrise", style="primary"), btn("💠 Верификация Major", "adm:verifymajor", style="primary")],
@@ -351,6 +352,7 @@ async def screen_user(event, uid: int, note: str = ""):
     rise_label = "❎ Снять RiseGram" if u.get("verified_risegram") else "☑️ Выдать RiseGram"
     major_label = "❎ Снять Major" if u.get("verified_major") else "💠 Выдать Major"
     markup = kb(
+        [btn("⭐ RiseStars ±", f"adm:g:{uid}:stars"), btn("💎 Gram ±", f"adm:g:{uid}:gram")],
         [btn(ban_label, f"adm:uban:{uid}", style="success" if u["banned"] else "danger")],
         [btn(rise_label, f"adm:uverrise:{uid}:{0 if u.get('verified_risegram') else 1}"), btn(major_label, f"adm:uvermajor:{uid}:{0 if u.get('verified_major') else 1}")],
         [btn("📞 Сменить номер", f"adm:unum:{uid}"), btn("🏷 Выдать юзернейм", f"adm:uun:{uid}")],
@@ -435,12 +437,14 @@ async def revoke_goods(p: dict) -> str:
     uid = p["tg_id"]
     try:
         if kind == "rs":
-            amount = int(a[0]) * config.RISESTARS_PER_STAR
-            u = await db.get_user(int(a[1]))
-            if u:
-                new = max(0.0, u["risestars"] - amount)
-                await db.set_balance(u["tg_id"], "risestars", new)
-            return f"списано до {fmt_num(amount)} RiseStars"
+            async with economy.transaction() as conn:
+                receipt = await (await conn.execute("SELECT movements FROM risegram_bot_receipts WHERE key=%s",
+                                                    ("invoice:" + p["charge_id"],))).fetchone()
+                if not receipt:
+                    return "историческая покупка, проверьте исходное начисление вручную"
+                movements = [(uid, cur, -amount) for uid, cur, amount in receipt["movements"]]
+                await economy.post(conn, "invoice-refund:"+p["charge_id"], movements, "Возврат покупки")
+            return "начисление RiseStars отменено"
         if kind == "vm" and a[0] == "a":
             await db.set_verification(uid, "major", False)
             return "снят Мажор"
@@ -456,6 +460,8 @@ async def revoke_goods(p: dict) -> str:
         if kind == "sc":
             await db.execute("UPDATE scam_requests SET status='refunded' WHERE id=? AND status IN ('pending','approved')", (int(a[1]),))
             return "метка SCAM снята"
+    except economy.WalletError as exc:
+        return f"требуется ручная проверка списания: {exc}"
     except (IndexError, ValueError):
         pass
     return "откат вручную не требуется"
@@ -463,7 +469,10 @@ async def revoke_goods(p: dict) -> str:
 
 async def refund_stars(bot: Bot, uid: int, charge: str) -> tuple[bool, str]:
     try:
-        await bot.refund_star_payment(user_id=uid, telegram_payment_charge_id=charge)
+        chat = await db.telegram_chat_id(uid)
+        if chat is None:
+            return False, "Нет связи с плательщиком Telegram"
+        await bot.refund_star_payment(user_id=chat, telegram_payment_charge_id=charge)
         return True, "ok"
     except Exception as e:  # noqa: BLE001 — Telegram возвращает разные ошибки
         log.warning("refund failed: %s", e)
@@ -647,20 +656,15 @@ def parse_amount(text: str) -> float | None:
     return v if math.isfinite(v) and abs(v) <= 1e12 else None
 
 
-async def apply_balance(bot: Bot, uid: int, cur: str, delta: float) -> str:
+async def apply_balance(bot, uid, cur, delta, key):
     col = "risestars" if cur == "stars" else "gram_balance"
-    sym = "⭐" if cur == "stars" else "💎"
-    u = await db.get_user(uid)
-    if not u:
-        return "❌ Игрок не найден."
-    if delta < 0 and -delta > u[col]:
-        await db.set_balance(uid, col, 0)
-        new = 0.0
-    else:
-        new = await db.add_balance(uid, col, delta)
-    await audit(f"Баланс {db.shown_username(u)} ({uid}): {delta:+g} {col} → {new}")
-    await safe_send(bot, uid, f"🛠 Администрация изменила ваш баланс: <b>{delta:+g} {sym}</b>.")
-    return f"✅ {esc(db.shown_username(u))}: <b>{delta:+g} {sym}</b>, теперь {fmt_num(new, 2)}"
+    try:
+        balance = await db.add_balance(uid,col,delta,key=key,title="Операция администратора")
+    except economy.WalletError as exc:
+        return str(exc)
+    await audit(f"Баланс {uid}: {delta:+g} {cur}")
+    await safe_send(bot,uid,f"Изменение баланса: {delta:+g} {cur}.")
+    return f"Готово. Баланс: {fmt_num(balance)} {cur}."
 
 
 async def native_account_request(path, fields):
@@ -746,8 +750,6 @@ async def on_input(message: Message, state: FSMContext, user: dict):
     # ── поиск и выбор игрока ──
     if act == "delete_phone":
         return await deletion_preview(message, state, text)
-    if act in ("grant_target", "g_amount"):
-        return await done("Операции с балансом доступны в приложении RiseGram.")
     if act == "usearch":
         await state.clear()
         total = await db.count_users(text)
@@ -798,7 +800,7 @@ async def on_input(message: Message, state: FSMContext, user: dict):
         v = parse_amount(text)
         if v is None or v == 0:
             return await again("❌ Введите число, например <code>1000</code> или <code>-500</code>:")
-        note = await apply_balance(bot, data["uid"], data["cur"], v)
+        note = await apply_balance(bot, data["uid"], data["cur"], v, f"admin:{message.chat.id}:{message.message_id}")
         return await done(note, kb([btn("👤 Карточка", f"adm:u:{data['uid']}")], home_row()))
 
     # ── действия над игроком ──
@@ -1067,7 +1069,7 @@ async def adm_cb(call: CallbackQuery, state: FSMContext, user: dict):
         return await ask(call, state, "delete_phone", "Введите номер удаляемого аккаунта RiseGram с кодом страны.")
     if route == "delconfirm":
         return await confirm_account_deletion(call, state, parts[2] if len(parts) == 3 else "")
-    if route in ("grant", "g", "refok", "refund", "gifts"):
+    if route == "gifts":
         return await call.answer("Операции с балансом доступны в приложении RiseGram.", show_alert=True)
 
     if route == "castgo":

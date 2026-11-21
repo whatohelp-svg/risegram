@@ -40,11 +40,10 @@ class NativeWalletTests(unittest.IsolatedAsyncioTestCase):
             self.assertIsNone((await api.self_profile(self.account))["risestars"])
             self.assertIn("недоступен", await api.client_wallet_line(self.account))
 
-    async def test_miniapp_and_browser_cannot_exchange(self):
-        for headers in ({"Authorization": "Bearer web-token"},
-                        {"Authorization": "Bearer client.token", "Origin": "https://example.org"}):
-            req = make_mocked_request("POST", "/api/exchange", headers=headers)
-            self.assertIn((await api.h_exchange(req)).status, (403, 410))
+    async def test_exchange_requires_account(self):
+        req = make_mocked_request("POST", "/api/exchange")
+        with patch.object(api, "_current_user", AsyncMock(return_value=None)):
+            self.assertEqual((await api.h_exchange(req)).status, 401)
         self.assertEqual(self.calls, [])
 
     async def test_exchange_one_hundredth_of_gram(self):

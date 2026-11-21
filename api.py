@@ -763,10 +763,6 @@ async def h_exchange(request: web.Request):
     user = await _current_user(request)
     if not user:
         return web.json_response({"ok": False, "error": "unauthorized"}, status=401)
-    if "Origin" in request.headers or "Sec-Fetch-Site" in request.headers:
-        return await h_native_only(request)
-    if not _bearer(request).startswith("client."):
-        return web.json_response({"ok": False, "error": "Для обмена заново привяжите номер в приложении RiseGram."}, status=403)
     data = await _json(request)
     try:
         amount = Decimal(str(data["amount"]))
@@ -814,6 +810,75 @@ async def h_activate_nft(request: web.Request):
     await db.set_active_username(user["tg_id"], item["value"])
     fresh = await db.get_user(user["tg_id"])
     return web.json_response({"ok": True, "user": await self_profile(fresh), "active_username": item["value"]})
+
+
+async def h_market(request: web.Request):
+    user = await _current_user(request)
+    if not user:
+        return web.json_response({"ok": False, "error": "unauthorized"}, status=401)
+    if not await db.is_feature_on("market"):
+        return web.json_response({"ok": False, "error": "market_disabled"}, status=403)
+    kind = request.query.get("type") or None
+    if kind not in (None, "username", "number"):
+        return web.json_response({"ok": False, "error": "bad_type"}, status=400)
+    try:
+        limit = min(50, max(1, int(request.query.get("limit", "20"))))
+        offset = max(0, int(request.query.get("offset", "0")))
+    except ValueError:
+        return web.json_response({"ok": False, "error": "bad_pagination"}, status=400)
+    rows = await db.market_page(kind, limit, offset)
+    return web.json_response({"ok": True, "items": [
+        {"id": x["id"], "type": x["item_type"], "value": x["value"],
+         "price": float(x["price"]), "seller_username": x.get("seller_username")}
+        for x in rows
+    ], "balance": (await self_profile(user))["risestars"]})
+
+
+async def h_market_list(request: web.Request):
+    user = await _current_user(request)
+    if not user:
+        return web.json_response({"ok": False, "error": "unauthorized"}, status=401)
+    if not await db.is_feature_on("market"):
+        return web.json_response({"ok": False, "error": "market_disabled"}, status=403)
+    data = await _json(request)
+    try:
+        item_id, price = int(data.get("item_id")), float(data.get("price"))
+    except (TypeError, ValueError):
+        return web.json_response({"ok": False, "error": "bad_item_or_price"}, status=400)
+    ok, message, listing_id = await db.create_listing(user["tg_id"], item_id, price)
+    if not ok:
+        return web.json_response({"ok": False, "error": "listing_rejected", "message": message}, status=400)
+    return web.json_response({"ok": True, "listing_id": listing_id})
+
+
+async def h_market_buy(request: web.Request):
+    user = await _current_user(request)
+    if not user:
+        return web.json_response({"ok": False, "error": "unauthorized"}, status=401)
+    if not await db.is_feature_on("market"):
+        return web.json_response({"ok": False, "error": "market_disabled"}, status=403)
+    try:
+        listing_id = int(request.match_info["listing_id"])
+    except ValueError:
+        return web.json_response({"ok": False, "error": "bad_listing_id"}, status=400)
+    ok, message, result = await db.buy_listing(user["tg_id"], listing_id)
+    if not ok:
+        return web.json_response({"ok": False, "error": "purchase_failed", "message": message}, status=409)
+    # The DB transaction already transferred ownership and debited/credited balances.
+    # Bot and client therefore see the same result immediately.
+    seller_chat_id = await db.telegram_chat_id(result["seller_id"])
+    buyer_chat_id = await db.telegram_chat_id(user["tg_id"])
+    if seller_chat_id:
+        await safe_send(request.app["bot"], seller_chat_id,
+            f"🛒 Ваш лот «{esc(result['value'])}» куплен за {result['price']:g} RiseStars.")
+    if buyer_chat_id:
+        await safe_send(request.app["bot"], buyer_chat_id,
+            f"✅ Покупка завершена: «{esc(result['value'])}» теперь в вашем инвентаре.")
+    fresh = await db.get_user(user["tg_id"])
+    return web.json_response({"ok": True, "purchase": {
+        "type": result["item_type"], "value": result["value"],
+        "price": result["price"], "fee": result["fee"],
+    }, "user": await self_profile(fresh)})
 
 
 async def h_game_stats(request: web.Request):
@@ -1362,9 +1427,9 @@ async def start_api(bot) -> web.AppRunner | None:
         web.get("/api/gifts", h_native_only),
         web.post("/api/gifts/{drop_id}/buy", h_native_only),
         web.post("/api/exchange", h_exchange),
-        web.get("/api/market", h_native_only),
-        web.post("/api/market", h_native_only),
-        web.post("/api/market/{listing_id}/buy", h_native_only),
+        web.get("/api/market", h_market),
+        web.post("/api/market", h_market_list),
+        web.post("/api/market/{listing_id}/buy", h_market_buy),
         web.get("/api/games/stats", h_game_stats),
         web.get("/api/purchases", h_purchases),
         web.post("/internal/mtproto/otp", h_mtproto_otp_delivery),

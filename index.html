@@ -88,15 +88,25 @@ async function render(){
  nav.innerHTML=views.map((v,i)=>'<button data-tab="'+i+'" '+(i===section?'aria-current="page"':'')+'>'+v+'</button>').join('');
  screen.textContent='Загрузка…';
  try{
- const paths=[['inventory','purchases'],[],['games/stats'],[]][section];
+ const paths=[['inventory','purchases'],[],['games/stats'],['market?limit=20&offset='+offset,'inventory']][section];
  const [profile,...data]=await Promise.all(['me',...paths].map(path=>api(path)));
  if(id!==serial)return;
  const u=profile.user;$('#identity').textContent=(u.name||'RiseGram')+' · ID '+u.rise_id;
  if(section===0){const [inv,log]=data;
  screen.innerHTML=balances(u)+card('Моя коллекция',[...inv.items.map(x=>x.value),...inv.gifts.map(x=>x.gift_name||'Подарок')].map(x=>row(escapeText(x))).join('')||'<p>В коллекции пока пусто</p>')+card('Последние покупки',log.purchases.map(x=>row(escapeText(x.description||x.type),'<small>'+escapeText(x.created_at)+'</small>')).join('')||'<p>Покупок пока нет</p>')}
- if(section===1)screen.innerHTML=balances(u)+card('Обмен валют','<p>Обмен GRAM и RiseStars доступен в приложении RiseGram.</p>');
- if(section===2){const s=data[0].stats;screen.innerHTML=card('История игр',row('Завершено игр',fmt(s.played))+row('Победы',fmt(s.wins)))}
- if(section===3)screen.innerHTML=card('Подарки','<p>Откройте профиль получателя в приложении RiseGram и нажмите «Подарок».</p>');
+ if(section===1){screen.innerHTML=balances(u)+card('Обмен валют','<p>1 Gram = 100 RiseStars</p><form class="compact" id="swap"><label>Направление<select name="direction"><option value="gram_to_stars">Gram → RiseStars</option><option value="stars_to_gram">RiseStars → Gram</option></select></label><label>Отдаёшь<input name="amount" type="number" min="0.01" step="0.01" required></label><p id="quote"></p><button class="primary">Подтвердить обмен</button></form>');
+ const form=$('#swap'),amount=form.elements.amount,dir=form.elements.direction;
+ function quote(){const gram=dir.value==='gram_to_stars';amount.min=amount.step=gram?'0.01':'1';$('#quote').textContent='Получишь '+fmt(Number(amount.value)*(gram?100:0.01))+(gram?' RiseStars':' Gram')}
+ form.oninput=quote;quote();form.onsubmit=e=>{e.preventDefault();run(form.querySelector('button'),async()=>{await api('exchange',{direction:dir.value,amount:Number(amount.value)});await render();if(token&&!notice.textContent)notice.textContent='Обмен выполнен'})}}
+ if(section===2){const s=data[0].stats;screen.innerHTML=card('Crash Rocket и Хай-Лоу','<p>Открой игровой зал в @risegrambot и выбери игру. Баланс общий с кошельком RiseGram</p><a class="cta" href="https://t.me/risegrambot?start=games" rel="noreferrer">Открыть игры в боте</a>')+card('Твои результаты',row('Завершено игр',fmt(s.played))+row('Победы',fmt(s.wins))+'<button id="refresh">Обновить</button>');$('#refresh').onclick=render}
+ if(section===3){const [market,inv]=data;
+ screen.innerHTML=card('Лоты','<p>Доступно '+fmt(market.balance)+' RiseStars</p>'+(market.items.map(x=>row(escapeText(x.value),'<button data-buy="'+Number(x.id)+'">'+fmt(x.price)+' RiseStars · Купить</button>')).join('')||'<p>На этой странице нет активных лотов</p>')+'<p>'+(offset?'<button id="prev">Назад</button> ':'')+(market.items.length===20?'<button id="next">Дальше</button>':'')+'</p>')+card('Выставить на продажу',inv.items.length?'<form id="sell" class="compact"><label>Предмет<select name="item_id" required>'+inv.items.map(x=>'<option value="'+Number(x.id)+'">'+escapeText(x.value)+'</option>').join('')+'</select></label><label>Цена в RiseStars<input name="price" type="number" min="0.01" step="0.01" required></label><button>Выставить лот</button></form>':'<p>Нет NFT-номеров или юзернеймов для продажи</p>');
+ for(const btn of screen.querySelectorAll('[data-buy]'))btn.onclick=()=>{const item=market.items.find(x=>x.id==btn.dataset.buy);if(confirm('Купить '+item.value+' за '+fmt(item.price)+' RiseStars?'))run(btn,async()=>{await api('market/'+Number(item.id)+'/buy',{});await render();if(token&&!notice.textContent)notice.textContent='Предмет добавлен в коллекцию'})};
+ if($('#prev'))$('#prev').onclick=()=>{offset-=20;render()};if($('#next'))$('#next').onclick=()=>{offset+=20;render()};
+ if($('#sell'))$('#sell').onsubmit=e=>{e.preventDefault();const form=e.target;run(form.querySelector('button'),async()=>{const fields=new FormData(form);
+ const itemId=Number(fields.get('item_id')),price=Number(fields.get('price'));
+ if(!Number.isSafeInteger(itemId)||itemId<=0||!Number.isFinite(price)||price<=0)throw Error('Выбери предмет и введи положительную цену в RiseStars');
+ await api('market',{item_id:itemId,price});offset=0;await render();if(token&&!notice.textContent)notice.textContent='Лот выставлен'})}}
  }catch(e){if(id===serial){notice.textContent=e.message;screen.innerHTML='<button id="retry">Повторить загрузку</button>';$('#retry').onclick=render}else if(!token)notice.textContent=e.message}
 }
 const routes=['wallet','exchange','games','market'];
