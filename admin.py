@@ -1355,3 +1355,17 @@ async def cmd_risk_mark(message: Message):
     await db.set_risk_label(parts[1], label, int(config.OWNER_ID), parts[2])
     await audit(f"Метка {label} установлена для {parts[1]}")
     await message.answer(f"✅ Метка {label} назначена для {esc(parts[1])} внутри RiseGram")
+
+
+@admin_router.message(Command("tickets"))
+async def cmd_support_tickets(message: Message):
+    if int(message.from_user.id) != int(config.OWNER_TELEGRAM_ID):
+        return await message.answer("❌ Только владелец может просматривать обращения")
+    rows = await db.fetchall("SELECT id,tg_id,message,created_at FROM support_tickets WHERE status='open' ORDER BY id DESC LIMIT 15")
+    if not rows:
+        return await message.answer("🆘 Открытых обращений нет")
+    chunks = ["🆘 <b>Открытые обращения RiseGram</b>"]
+    for ticket in rows:
+        preview = ticket["message"][:180]
+        chunks.append(f"\n<b>#{ticket['id']}</b> · ID <code>{ticket['tg_id']}</code>\n{esc(preview)}\n<code>/reply {ticket['id']} ответ</code>")
+    await message.answer("\n".join(chunks))
