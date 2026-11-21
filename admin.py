@@ -19,6 +19,7 @@ from aiogram.types import CallbackQuery, Message
 
 import config
 import database as db
+import gift_admin
 from ui import btn, esc, fmt_num, kb, safe_send, show
 
 log = logging.getLogger("risegram.admin")
@@ -98,6 +99,7 @@ async def home_screen(event, user: dict):
         [btn("📊 Аналитика", "adm:stats", style="primary"), btn("👥 Юзеры", "adm:users:0", style="primary")],
         [btn("💰 Выдача валюты", "adm:grant", style="success"), btn("🏷 Выдать юзернеймы", "adm:inv", style="success")],
         [btn("⚡ Тумблеры функций", "adm:feat", style="success"), btn("🔨 Банхаммер", "adm:ban", style="danger")],
+        [btn("🎁 Дроп NFT-подарков", "adm:gifts:0", style="primary")],
         [btn("🎯 Задания", "adm:tasks"), btn("🛒 Маркет", "adm:mkt:0"), btn(scam_label, "adm:scam:0", style="danger" if pending else None)],
         [btn("🧾 Покупки", "adm:buys:0"), btn("📣 Рассылка", "adm:cast")],
         [btn("🧪 Тестеры", "adm:testers"), btn("📞 Перенос номеров", "adm:legacy")],
@@ -484,6 +486,9 @@ async def on_input(message: Message, state: FSMContext, user: dict):
     async def again(note: str):
         await message.answer(note, reply_markup=kb(cancel_row()))
 
+    if act in ("gift_qty", "gift_price", "gift_time"):
+        return await gift_admin.on_input(message, state, data)
+
     # ── поиск и выбор игрока ──
     if act == "usearch":
         await state.clear()
@@ -746,6 +751,9 @@ async def adm_cb(call: CallbackQuery, state: FSMContext, user: dict):
         task.add_done_callback(_bg.discard)
         await show(call, "📣 Рассылка запущена. Отчёт придёт сюда, когда закончится.", kb(home_row()))
         return
+
+    if route in ("gifts", "gift"):
+        return await gift_admin.on_callback(call, state, parts)
 
     await state.clear()
 
