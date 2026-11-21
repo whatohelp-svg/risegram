@@ -431,6 +431,15 @@ patch_go_file(
 \t\t\tzap.Int64("session_id", sessionID),
 \t\t)
 \t}
+\tdefer func() {
+\t\tif r.log != nil {
+\t\t\tr.log.Info("auth.signIn handler finished",
+\t\t\t\tzap.String("auth_key_id", fmt.Sprintf("%x", authID[:])),
+\t\t\t\tzap.Int64("session_id", sessionID),
+\t\t\t\tzap.Int64("duration_ms", time.Since(startedAt).Milliseconds()),
+\t\t\t)
+\t\t}
+\t}()
 \tif userID, authorized, resolveErr := r.currentUserID(ctx); resolveErr == nil && authorized && userID != 0 {
 \t\tif current, userErr := r.deps.Users.Self(ctx, userID); userErr == nil && current.Phone == req.PhoneNumber {
 \t\t\treturn &tg.AuthAuthorization{User: r.tgSelfUserWithUsernames(ctx, current)}, nil
