@@ -99,7 +99,7 @@ function selectTab(tab){
 function art(title){return /ring|locket|signet/i.test(title)?"💍":/heart|love/i.test(title)?"💝":/cup|glass/i.test(title)?"🏆":/hat|cap/i.test(title)?"🎩":"🎁"}
 async function loadDrops(){
  try {
-  const j=await req("/api/gifts/drops");state.drops=j.items;
+  const j=await req("/api/local-gifts/drops");state.drops=j.items;
   $("cards").innerHTML=state.drops.length?state.drops.map(d=>
    '<article class="tile"><div class="art">'+art(d.title)+'</div><b>'+safe(d.title)+'</b><div class="small" style="margin-top:6px">Осталось '+fmt(d.supply-d.sold)+' из '+fmt(d.supply)+'</div><div class="row" style="margin-top:12px"><span class="price">'+fmt(d.price_stars)+' ⭐</span><button class="buy" data-buy="'+d.id+'">Купить</button></div></article>').join("") :
    '<div class="empty" style="grid-column:1/-1">Сейчас активных дропов нет<br>Новые появятся после запуска администратором</div>';
@@ -107,7 +107,7 @@ async function loadDrops(){
 }
 async function loadInventory(){
  try{
-  const j=await req("/api/gifts/inventory");
+  const j=await req("/api/local-gifts/inventory");
   $("owned").innerHTML=j.items.length?j.items.map(g=>
    '<article class="tile"><div class="art">'+art(g.title)+'</div><b>'+safe(g.title)+'</b><p class="small">№ '+g.serial+(g.upgraded?' · ✨ Улучшен':'')+'</p>'+
    (g.can_upgrade&&!g.upgraded?'<button class="buy" data-upgrade="'+g.id+'">✨ Улучшить</button>':'')+'</article>').join("") :
@@ -143,7 +143,7 @@ $("dismiss").onclick=()=>$("modal").style.display="none";
 $("pay").onclick=async()=>{
  if(!state.selected)return;
  $("pay").disabled=true;
- try{const j=await req("/api/gifts/buy",{method:"POST",body:JSON.stringify({
+ try{const j=await req("/api/local-gifts/buy",{method:"POST",body:JSON.stringify({
  drop_id:state.selected.id,request_id:"gift_"+(crypto.randomUUID?crypto.randomUUID():Date.now()+"_"+Math.random().toString(36).slice(2))})});
  $("modal").style.display="none";toast("🎉 Подарок добавлен в инвентарь!");
  await syncUser();await loadDrops();
@@ -152,7 +152,7 @@ $("pay").onclick=async()=>{
 $("owned").onclick=async e=>{
  const b=e.target.closest("[data-upgrade]");if(!b)return;
  b.disabled=true;
- try{await req("/api/gifts/upgrade",{method:"POST",body:JSON.stringify({instance_id:Number(b.dataset.upgrade)})});
+ try{await req("/api/local-gifts/upgrade",{method:"POST",body:JSON.stringify({instance_id:Number(b.dataset.upgrade)})});
  toast("✨ Подарок улучшен внутри RiseGram");await loadInventory()}
  catch(err){toast(err.message);b.disabled=false}
 };
