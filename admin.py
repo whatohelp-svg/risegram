@@ -9,6 +9,7 @@ import asyncio
 import logging
 import math
 import re
+import secrets
 
 from aiohttp import ClientError, ClientSession, ClientTimeout
 from aiogram import Bot, F, Router
@@ -55,6 +56,7 @@ admin_router.callback_query.filter(AdminOnly(), F.message.chat.type == "private"
 
 class Adm(StatesGroup):
     input = State()      # универсальный ввод; действие лежит в data["act"]
+    delete_confirm = State()
     cast_confirm = State()
 
 
@@ -104,8 +106,7 @@ async def home_screen(event, user: dict):
     text = (
         f"💎 <b>{config.BRAND} Ecosystem — GOD MODE</b>\n\n"
         f"{config.BRAND} ID: <b>{me['rise_id']}</b>\n"
-        f"⭐ {config.CURRENCY_NAME}: <b>{fmt_num(me['risestars'])}</b>\n"
-        f"💎 Gram: <b>{fmt_num(me['gram_balance'], 2)}</b>\n"
+        f"{await client_wallet_line(me)}\n"
         f"☑️ Статус: <b>{'Официальный владелец' if int(user['tg_id']) == int(config.OWNER_ID) else 'Администратор / тестер'}</b>\n"
         "🏷 NFT каналу или супергруппе: <code>/grantnft @чат @имя</code>\nПроверка чата: <code>/grantverify @чат official|major|risegram</code>\n"
         f"🛠 Техработы: <b>{'ВКЛ' if maint else 'выкл'}</b>"
@@ -113,7 +114,8 @@ async def home_screen(event, user: dict):
     scam_label = f"⚠️ SCAM-заявки ({pending})" if pending else "⚠️ SCAM-заявки"
     rows = [
         [btn("📊 Аналитика", "adm:stats", style="primary"), btn("👥 Юзеры", "adm:users:0", style="primary")],
-        [btn("💰 Выдача валюты", "adm:grant", style="success"), btn("🏷 Выдать юзернеймы", "adm:inv", style="success")],
+        [btn("🏷 Выдать юзернеймы", "adm:inv", style="success")],
+        [btn("🗑 Удалить аккаунт по номеру", "adm:delphone", style="danger")],
         [btn("🎁 Дроп подарков", "adm:localgifts:0", style="success")],
         [btn("☑️ Верификация RiseGram", "adm:verifyrise", style="primary"), btn("💠 Верификация Major", "adm:verifymajor", style="primary")],
         [btn("⚡ Тумблеры функций", "adm:feat", style="success"), btn("🔨 Банхаммер", "adm:ban", style="danger")],
@@ -302,8 +304,6 @@ async def screen_stats(call: CallbackQuery):
         f"✅ Верифицировано: {s['verified']} · 🚫 в бане: {s['banned']} · 🧪 тестеров: {s['testers']}\n\n"
         f"⭐ Собрано Stars: <b>{fmt_num(s['stars_total'])}</b> за {s['purchases']} покупок (за сутки {fmt_num(s['stars_day'])})\n"
         f"↩️ Возвращено: {fmt_num(s['refunded'])}\n"
-        f"💰 Эмиссия {config.CURRENCY_NAME}: {fmt_num(s['risestars_emission'])}\n"
-        f"💎 Эмиссия Gram: {fmt_num(s['gram_emission'], 2)}\n\n"
         f"🏷 NFT-юзернеймов: {s['nft_usernames']} · 📞 номеров продано: {s['numbers_sold']}\n"
         f"⚠️ SCAM на проверке: {s['scam_pending']}\n"
         f"🛒 Маркет: активных {s['market_active']} · продано {s['market_sold']} на {fmt_num(s['market_volume'])} RiseStars\n"
@@ -318,7 +318,7 @@ async def screen_users(call: CallbackQuery, page: int, search: str = ""):
     text = f"👥 <b>Игроки</b> ({total})" + (f"\n🔎 Поиск: <code>{esc(search)}</code>" if search else "") + "\n\n"
     buttons = []
     for u in rows:
-        text += f"• {user_line(u)} · ⭐{fmt_num(u['risestars'])}\n"
+        text += f"• {user_line(u)}\n"
         buttons.append([btn(f"{db.shown_username(u)} · {u['tg_id']}", f"adm:u:{u['tg_id']}")])
     if not rows:
         text += "Никого не найдено."
@@ -340,7 +340,6 @@ async def screen_user(event, uid: int, note: str = ""):
         f"Номер: <code>{esc(u['phone'])}</code>\n"
         f"Активный юзернейм: {esc(u.get('active_username') or '—')}\n\n"
         f"{await client_wallet_line(u)}\n"
-        f"Баланс бота: ⭐ {config.CURRENCY_NAME}: <b>{fmt_num(u['risestars'])}</b> · 💎 <b>{fmt_num(u['gram_balance'], 2)}</b>\n"
         f"🏷 NFT/номера: {nfts}\n"
         f"💳 Потратил: {fmt_num(spent)} ⭐ · 🎮 игр: {st['played']}\n"
         f"📅 Регистрация: {esc((u.get('created_at') or '')[:16])}\n"
@@ -352,7 +351,6 @@ async def screen_user(event, uid: int, note: str = ""):
     rise_label = "❎ Снять RiseGram" if u.get("verified_risegram") else "☑️ Выдать RiseGram"
     major_label = "❎ Снять Major" if u.get("verified_major") else "💠 Выдать Major"
     markup = kb(
-        [btn("⭐ RiseStars ±", f"adm:g:{uid}:stars", style="success"), btn("💎 Gram ±", f"adm:g:{uid}:gram", style="success")],
         [btn(ban_label, f"adm:uban:{uid}", style="success" if u["banned"] else "danger")],
         [btn(rise_label, f"adm:uverrise:{uid}:{0 if u.get('verified_risegram') else 1}"), btn(major_label, f"adm:uvermajor:{uid}:{0 if u.get('verified_major') else 1}")],
         [btn("📞 Сменить номер", f"adm:unum:{uid}"), btn("🏷 Выдать юзернейм", f"adm:uun:{uid}")],
@@ -665,6 +663,69 @@ async def apply_balance(bot: Bot, uid: int, cur: str, delta: float) -> str:
     return f"✅ {esc(db.shown_username(u))}: <b>{delta:+g} {sym}</b>, теперь {fmt_num(new, 2)}"
 
 
+async def native_account_request(path, fields):
+    if not config.MTPROTO_ADMIN_API_TOKEN or not config.MTPROTO_ADMIN_API_URL:
+        raise ValueError("native account service unavailable")
+    async with ClientSession(headers={"Authorization": "Bearer " + config.MTPROTO_ADMIN_API_TOKEN},
+                             timeout=ClientTimeout(total=12)) as session:
+        async with session.post(config.MTPROTO_ADMIN_API_URL.rstrip("/") + "/v1/accounts/" + path,
+                                json=fields) as response:
+            response.raise_for_status()
+            return await response.json()
+
+
+async def deletion_preview(event, state, raw):
+    if not re.fullmatch(r"\+?[0-9 ()-]{7,32}", raw) or not 7 <= len(db.digits_of(raw)) <= 15:
+        return await event.answer("Введите полный номер RiseGram, включая код страны.")
+    phone = db.digits_of(raw)
+    local = await db.fetchone("SELECT tg_id,name FROM users WHERE phone_digits=?", (phone,))
+    if local and local["tg_id"] == config.OWNER_ID:
+        return await event.answer("Удаление аккаунта владельца запрещено.")
+    try:
+        peer = await native_account_request("resolve-by-phone", {"phone": phone})
+        native_id = int(peer["user_id"]) if peer["found"] else 0
+    except (ClientError, TimeoutError, KeyError, TypeError, ValueError):
+        return await event.answer("Не удалось проверить номер на сервере. Попробуйте ещё раз.")
+    if not native_id and not local:
+        return await event.answer("Аккаунт с таким номером не найден.")
+    key = secrets.token_hex(12)
+    await state.set_state(Adm.delete_confirm)
+    await state.set_data(dict(key=key, phone=phone, native_id=native_id, local_id=local["tg_id"] if local else 0))
+    target = esc(local["name"]) if local else f"ID {native_id}"
+    await show(event, f"Удалить аккаунт {target} с номером <code>+{phone}</code>? Сессии будут завершены. Восстановить аккаунт нельзя.",
+               kb([btn("Удалить аккаунт", "adm:delconfirm:" + key, style="danger")], cancel_row()))
+
+
+async def confirm_account_deletion(call, state, key):
+    target = await state.get_data()
+    if not key or key != target.get("key") or await state.get_state() != Adm.delete_confirm.state:
+        return await call.answer("Подтверждение устарело. Выберите номер заново.", show_alert=True)
+    uid, peer, phone = target["local_id"], target["native_id"], target["phone"]
+    if uid == config.OWNER_ID:
+        return await call.answer("Удаление аккаунта владельца запрещено.", show_alert=True)
+    try:
+        current = await db.fetchone("SELECT tg_id FROM users WHERE phone_digits=?", (phone,))
+        resolved = await native_account_request("resolve-by-phone", {"phone": phone})
+        actual_peer = int(resolved["user_id"]) if resolved["found"] else 0
+        if (current and current["tg_id"] != uid) or (actual_peer and actual_peer != peer):
+            await state.clear()
+            return await call.answer("У номера изменился владелец. Повторите поиск.", show_alert=True)
+        if peer:
+            result = await native_account_request("delete", {
+                "user_id": peer, "command_id": "delete-" + key,
+                "actor": f"risegram-admin-{call.from_user.id}", "reason": "Confirmed account removal",
+            })
+            if result.get("status") != "completed":
+                raise ValueError("deletion pending")
+        if uid and current:
+            await db.delete_user(uid, expected_phone=phone)
+    except (ClientError, TimeoutError, ValueError, KeyError, TypeError):
+        return await call.answer("Удаление не подтверждено. Повторите проверку этой кнопкой.", show_alert=True)
+    await state.clear()
+    await audit(f"Удаление аккаунта подтверждено: admin={call.from_user.id}, peer={peer}, account={uid}")
+    await show(call, "Аккаунт удалён.", kb(home_row()))
+
+
 @admin_router.message(StateFilter(Adm.input), F.text)
 async def on_input(message: Message, state: FSMContext, user: dict):
     data = await state.get_data()
@@ -683,6 +744,10 @@ async def on_input(message: Message, state: FSMContext, user: dict):
         await message.answer(note, reply_markup=kb(cancel_row()))
 
     # ── поиск и выбор игрока ──
+    if act == "delete_phone":
+        return await deletion_preview(message, state, text)
+    if act in ("grant_target", "g_amount"):
+        return await done("Операции с балансом доступны в приложении RiseGram.")
     if act == "usearch":
         await state.clear()
         total = await db.count_users(text)
@@ -998,6 +1063,13 @@ async def adm_cb(call: CallbackQuery, state: FSMContext, user: dict):
     route = parts[1] if len(parts) > 1 else "home"
     bot = call.bot
 
+    if route == "delphone":
+        return await ask(call, state, "delete_phone", "Введите номер удаляемого аккаунта RiseGram с кодом страны.")
+    if route == "delconfirm":
+        return await confirm_account_deletion(call, state, parts[2] if len(parts) == 3 else "")
+    if route in ("grant", "g", "refok", "refund", "gifts"):
+        return await call.answer("Операции с балансом доступны в приложении RiseGram.", show_alert=True)
+
     if route == "castgo":
         data = await state.get_data()
         await state.clear()
@@ -1095,20 +1167,8 @@ async def adm_cb(call: CallbackQuery, state: FSMContext, user: dict):
             code = await db.issue_auth_code(uid)
             await audit(f"Выдан код входа игроку {uid}")
             return await screen_user(call, uid, f"🔑 Код для {esc(u['phone'])}: <code>{code}</code> (действует {config.AUTH_CODE_TTL_SECONDS // 60} мин)")
-        if route == "udel":
-            if uid == config.OWNER_ID:
-                return await call.answer("Владельца удалить нельзя.", show_alert=True)
-            return await show(
-                call,
-                f"🗑 Удалить {user_line(u)} со всеми данными? Это необратимо.",
-                kb([btn("🗑 Да, удалить", f"adm:udelok:{uid}", style="danger")], [btn("✖️ Нет", back)]),
-            )
-        if route == "udelok":
-            if uid == config.OWNER_ID:
-                return await call.answer("Владельца удалить нельзя.", show_alert=True)
-            await db.delete_user(uid)
-            await audit(f"Удалён игрок {db.shown_username(u)} ({uid})")
-            return await show(call, "🗑 Игрок удалён.", kb([btn("👥 Юзеры", "adm:users:0")], home_row()))
+        if route in ("udel", "udelok"):
+            return await deletion_preview(call, state, u["phone"])
         if route == "uph":
             return await ask(
                 call, state, "uph",

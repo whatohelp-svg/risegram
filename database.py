@@ -586,16 +586,6 @@ async def init_db() -> None:
 
         for name in config.FEATURES:
             await db.execute("INSERT OR IGNORE INTO feature_flags (feature_name, is_enabled) VALUES (?, 1)", (name,))
-        # Игры, прерванные перезапуском: возвращаем ставку.
-        cur = await db.execute("SELECT id, tg_id, bet, COALESCE(currency,'gram') AS currency FROM games WHERE status='active'")
-        stuck = await cur.fetchall()
-        await cur.close()
-        for g in stuck:
-            await db.execute("UPDATE games SET status='refunded', finished_at=? WHERE id=?", (now(), g["id"]))
-            col = "risestars" if g["currency"] == "stars" else "gram_balance"
-            await db.execute(f"UPDATE users SET {col}=ROUND({col}+?,2) WHERE tg_id=?", (g["bet"], g["tg_id"]))
-        if stuck:
-            log.info("refunded %d interrupted games", len(stuck))
         await db.execute("DELETE FROM reservations WHERE expires_at < ?", (now(),))
         await db.execute("UPDATE market_listings SET status='cancelled' WHERE status='active' AND item_id NOT IN (SELECT id FROM user_nft_inventory)")
         await db.commit()
@@ -769,13 +759,21 @@ async def set_gift_mode(tg_id: int, mode: str) -> None:
     await execute("UPDATE users SET gift_mode=? WHERE tg_id=?", (mode, tg_id))
 
 
-async def delete_user(tg_id: int) -> None:
+async def delete_user(tg_id: int, *, expected_phone: str) -> None:
     async with connect() as db:
+        await db.execute("BEGIN IMMEDIATE")
+        cursor = await db.execute("SELECT phone_digits FROM users WHERE tg_id=?", (tg_id,))
+        target = await cursor.fetchone()
+        if target is None:
+            return
+        if tg_id == config.OWNER_ID or target["phone_digits"] != expected_phone:
+            raise ValueError("account changed")
         await db.execute("UPDATE market_listings SET status='cancelled' WHERE seller_id=? AND status='active'", (tg_id,))
         for table, col in [
-            ("users", "tg_id"), ("user_nft_inventory", "tg_id"),
+            ("admins", "tg_id"), ("telegram_links", "tg_id"), ("verified_peer_links", "account_id"),
+            ("user_nft_inventory", "tg_id"),
             ("task_claims", "tg_id"), ("auth_codes", "tg_id"), ("sessions", "tg_id"),
-            ("reservations", "tg_id"), ("games", "tg_id"), ("testers", "tg_id"),
+            ("reservations", "tg_id"), ("games", "tg_id"), ("testers", "tg_id"), ("users", "tg_id"),
         ]:
             await db.execute(f"DELETE FROM {table} WHERE {col}=?", (tg_id,))
         await db.commit()
@@ -931,8 +929,8 @@ async def verify_auth_code(phone_digits: str, code: str) -> dict | None:
     return user
 
 
-async def create_session(tg_id: int, days: int = 30) -> str:
-    token = secrets.token_urlsafe(32)
+async def create_session(tg_id: int, days: int = 30, *, native=False) -> str:
+    token = ("client." if native else "") + secrets.token_urlsafe(32)
     await execute(
         "INSERT INTO sessions (token, tg_id, created_at, expires_at) VALUES (?,?,?,?)",
         (token, tg_id, now(), now_plus(days * 86400)),
@@ -1755,17 +1753,7 @@ async def ensure_owner() -> None:
                 "INSERT INTO users (tg_id,user_id,rise_id,name,username,phone,phone_digits,risestars,gram_balance,verified,created_at,last_seen) "
                 "VALUES (?,?,?,?,?,?,?,?,?,1,?,?)",
                 (oid, str(uuid.uuid4()), owner_rise_id, "RiseGram Owner", config.OWNER_USERNAME,
-                 "+70000000000", "70000000000", config.OWNER_START_RISESTARS, config.OWNER_START_GRAM, now(), now()),
-            )
-        else:
-            # One-time migration: remove legacy ∞ values without resetting a
-            # finite wallet every time the bot restarts.
-            await db.execute(
-                """UPDATE users SET
-                     risestars=CASE WHEN risestars>=1000000000000 THEN ? ELSE risestars END,
-                     gram_balance=CASE WHEN gram_balance>=1000000000000 THEN ? ELSE gram_balance END
-                   WHERE tg_id=?""",
-                (config.OWNER_START_RISESTARS, config.OWNER_START_GRAM, oid),
+                 "+70000000000", "70000000000", 0, 0, now(), now()),
             )
         await db.execute(
             "INSERT INTO telegram_links (telegram_chat_id,tg_id,linked_at) VALUES (?,?,?) "

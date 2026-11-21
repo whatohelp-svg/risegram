@@ -20,7 +20,7 @@ from urllib.parse import parse_qsl
 import time
 from collections import defaultdict
 
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from aiohttp import ClientError, ClientSession, ClientTimeout, web
 from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError, TelegramRetryAfter
 
@@ -106,8 +106,6 @@ def public_user(u: dict) -> dict:
         "verified": verified_risegram or verified_major,
         "verified_risegram": verified_risegram,
         "verified_major": verified_major,
-        "risestars": float(u.get("risestars") or 0),
-        "gram_balance": float(u.get("gram_balance") or 0),
         "active_username": u.get("active_username"),
     }
 
@@ -166,12 +164,12 @@ async def core_request_code(bot, phone: str) -> tuple[int, dict]:
     return 200, {"ok": True}
 
 
-async def core_verify(phone: str, code: str) -> tuple[int, dict]:
+async def core_verify(phone: str, code: str, *, native=False) -> tuple[int, dict]:
     user = await db.verify_auth_code(phone, code)
     if not user:
         return 401, {"ok": False, "error": "invalid_code"}
-    token = await db.create_session(user["tg_id"])
-    return 200, {"ok": True, "token": token, "user": public_user(user)}
+    token = await db.create_session(user["tg_id"], native=native)
+    return 200, {"ok": True, "token": token, "user": await self_profile(user)}
 
 
 async def _json(request: web.Request) -> dict:
@@ -201,7 +199,7 @@ async def h_request(request: web.Request):
 
 async def h_verify(request: web.Request):
     data = await _json(request)
-    status, body = await core_verify(str(data.get("phone", "")), str(data.get("code", "")))
+    status, body = await core_verify(str(data.get("phone", "")), str(data.get("code", "")), native=True)
     return web.json_response(body, status=status)
 
 
@@ -209,7 +207,7 @@ async def h_me(request: web.Request):
     user = await _current_user(request)
     if not user:
         return web.json_response({"ok": False, "error": "unauthorized"}, status=401)
-    return web.json_response({"ok": True, "user": public_user(user)})
+    return web.json_response({"ok": True, "user": await self_profile(user)})
 
 
 async def h_user_search(request: web.Request):
@@ -760,147 +758,40 @@ async def _telegram_bot_star_balance(bot) -> int:
     return max(0, int(getattr(balance, "amount", 0)))
 
 
-async def h_gifts(request: web.Request):
-    user = await _current_user(request)
-    if not user:
-        return web.json_response({"ok": False, "error": "unauthorized"}, status=401)
-    try:
-        catalog = await available_telegram_gifts(request.app["bot"])
-        await db.sync_gift_catalog_drops([gift for gift in catalog if gift.get("can_upgrade")])
-    except Exception:  # noqa: BLE001
-        # Published drops remain available if Telegram catalog refresh is down.
-        log.warning("NFT gift catalog refresh deferred in API", exc_info=True)
-
-    try:
-        bot_stars = await _telegram_bot_star_balance(request.app["bot"])
-    except Exception:  # noqa: BLE001
-        bot_stars = None
-        log.warning("Unable to read Telegram bot Stars balance", exc_info=True)
-
-    drops = await db.list_gift_drops(active_only=True)
-    for drop in drops:
-        required = int(drop.get("telegram_stars", 0) or 0)
-        if drop.get("pay_for_upgrade"):
-            required += int(drop.get("upgrade_stars", 0) or 0)
-        drop["telegram_stars_required"] = required
-        drop["can_deliver"] = None if bot_stars is None else bot_stars >= required
-
-    return web.json_response({
-        "ok": True,
-        "drops": drops,
-        "inventory": await db.list_user_gifts(user["tg_id"], include_pending=True),
-        "bot_stars_balance": bot_stars,
-        "user": public_user(user),
-    })
-
-
-async def h_buy_gift(request: web.Request):
-    user = await _current_user(request)
-    if not user:
-        return web.json_response({"ok": False, "error": "unauthorized"}, status=401)
-    try:
-        drop_id = int(request.match_info["drop_id"])
-    except (KeyError, TypeError, ValueError):
-        return web.json_response({"ok": False, "error": "bad_drop_id"}, status=400)
-
-    ok, message, gift = await db.reserve_gift_drop(user["tg_id"], drop_id)
-    if not ok:
-        return web.json_response({"ok": False, "error": message}, status=409)
-
-    # Telegram separately charges the bot's own Stars balance for the base gift
-    # and the unique-gift upgrade. Check it before attempting delivery.
-    required_bot_stars = int(gift.get("telegram_stars", 0) or 0)
-    if gift.get("pay_for_upgrade"):
-        required_bot_stars += int(gift.get("upgrade_stars", 0) or 0)
-    try:
-        available_bot_stars = await _telegram_bot_star_balance(request.app["bot"])
-    except Exception:  # noqa: BLE001
-        await db.rollback_gift_purchase(gift["instance_id"])
-        log.exception("Unable to verify Telegram Stars before NFT delivery")
-        return web.json_response({
-            "ok": False,
-            "error": "Не удалось проверить резерв Telegram Stars. RiseStars и тираж возвращены.",
-        }, status=503)
-    if available_bot_stars < required_bot_stars:
-        await db.rollback_gift_purchase(gift["instance_id"])
-        return web.json_response({
-            "ok": False,
-            "error": (
-                f"На боте не хватает Telegram Stars: нужно {required_bot_stars}, "
-                f"доступно {available_bot_stars}. RiseStars и тираж возвращены."
-            ),
-            "required_bot_stars": required_bot_stars,
-            "available_bot_stars": available_bot_stars,
-        }, status=409)
-
-    # RiseGram stores an internal account ID. Bot API needs the linked Telegram user ID.
-    telegram_user_id = await db.telegram_chat_id(user["tg_id"])
-    if not telegram_user_id:
-        await db.rollback_gift_purchase(gift["instance_id"])
-        return web.json_response({
-            "ok": False, "error": "К аккаунту не привязан Telegram-чат. Тираж и RiseStars возвращены."
-        }, status=409)
-
-    try:
-        delivered = await request.app["bot"].send_gift(
-            user_id=int(telegram_user_id),
-            gift_id=gift["telegram_gift_id"],
-            pay_for_upgrade=bool(gift.get("pay_for_upgrade")),
-            text="Подарок из RiseGram · NFT 🎁",
-        )
-        if delivered is not True:
-            await db.rollback_gift_purchase(gift["instance_id"])
-            return web.json_response({
-                "ok": False,
-                "error": "Telegram не подтвердил отправку. RiseStars и тираж возвращены."
-            }, status=503)
-    except (TelegramBadRequest, TelegramForbiddenError, TelegramRetryAfter) as exc:
-        log.warning("Telegram rejected gift delivery account=%s gift=%s: %s",
-                    user["tg_id"], gift["telegram_gift_id"], exc)
-        await db.rollback_gift_purchase(gift["instance_id"])
-        return web.json_response({
-            "ok": False,
-            "error": "Telegram отклонил отправку. RiseStars и тираж возвращены."
-        }, status=503)
-    except Exception as exc:  # noqa: BLE001
-        # Transport timeouts can happen after Telegram accepted the gift.
-        # Keep the reservation pending so a client retry cannot send a duplicate.
-        log.warning("Ambiguous Telegram gift delivery account=%s gift=%s: %s",
-                    user["tg_id"], gift["telegram_gift_id"], exc)
-        return web.json_response({
-            "ok": False,
-            "error": "Результат отправки не подтверждён. Покупка оставлена в обработке; не повторяйте запрос."
-        }, status=503)
-
-    await db.confirm_gift_purchase(gift["instance_id"])
-    fresh = await db.get_user(user["tg_id"])
-    return web.json_response({
-        "ok": True,
-        "gift": gift,
-        "user": public_user(fresh),
-        "drops": await db.list_gift_drops(active_only=True),
-        "inventory": await db.list_user_gifts(user["tg_id"]),
-    })
-
-
 async def h_exchange(request: web.Request):
     user = await _current_user(request)
     if not user:
         return web.json_response({"ok": False, "error": "unauthorized"}, status=401)
+    if not _bearer(request).startswith("client."):
+        return web.json_response({"ok": False, "error": "Для обмена заново привяжите номер в приложении RiseGram."}, status=403)
     data = await _json(request)
     try:
-        amount = float(data.get("amount"))
-    except (TypeError, ValueError):
-        return web.json_response({"ok": False, "error": "Укажите корректную сумму."}, status=400)
-    if not math.isfinite(amount) or amount <= 0:
-        return web.json_response({"ok": False, "error": "Сумма должна быть больше нуля."}, status=400)
-    ok, message, balances = await db.exchange_gram_balance(
-        user["tg_id"], str(data.get("direction", "")), amount
-    )
-    if not ok:
-        return web.json_response({"ok": False, "error": message}, status=400)
-    fresh = await db.get_user(user["tg_id"])
-    return web.json_response({"ok": True, "user": public_user(fresh), "balances": balances})
+        amount = Decimal(str(data["amount"]))
+        direction = data["direction"]
+        if not amount.is_finite() or amount <= 0 or amount > 900000000000 or direction not in ("gram_to_stars", "stars_to_gram"):
+            raise ValueError
+        delta = amount * 100 if direction == "gram_to_stars" else -amount
+        if delta != delta.to_integral_value() or abs(delta) > 900000000000:
+            raise ValueError
+    except (InvalidOperation, ValueError, KeyError):
+        return web.json_response({"ok": False, "error": "Сумма обмена должна соответствовать целому числу звёзд."}, status=400)
+    key = request.headers.get("Idempotency-Key") or secrets.token_hex(16)
+    if not (16 <= len(key) <= 64 and key.isascii() and all(c.isalnum() or c in "-_" for c in key)):
+        raise web.HTTPBadRequest()
+    try:
+        async with ClientSession(timeout=ClientTimeout(total=10), headers={
+            "Authorization": "Bearer " + config.MTPROTO_ADMIN_API_TOKEN
+        }) as session:
+            async with session.post(config.MTPROTO_ADMIN_API_URL.rstrip("/") + "/v1/accounts/exchange-gram",
+                                    json={"phone": user["phone"], "stars_delta": int(delta), "request_id": key}) as response:
+                if response.status == 409:
+                    return web.json_response({"ok": False, "error": "Недостаточно средств."}, status=409)
+                response.raise_for_status()
+                values = wallet_amounts(await response.json())
+    except (ClientError, TimeoutError, ValueError, KeyError):
+        return web.json_response({"ok": False, "error": "Проверьте баланс в приложении перед повторным обменом."}, status=503)
+    balances = dict(values, gram_balance=float(values["gram_balance"]))
+    return web.json_response({"ok": True, "user": dict(public_user(user), **balances), "balances": balances})
 
 
 async def h_activate_nft(request: web.Request):
@@ -919,76 +810,7 @@ async def h_activate_nft(request: web.Request):
         return web.json_response({"ok": False, "error": "username_nft_not_found"}, status=404)
     await db.set_active_username(user["tg_id"], item["value"])
     fresh = await db.get_user(user["tg_id"])
-    return web.json_response({"ok": True, "user": public_user(fresh), "active_username": item["value"]})
-
-
-async def h_market(request: web.Request):
-    user = await _current_user(request)
-    if not user:
-        return web.json_response({"ok": False, "error": "unauthorized"}, status=401)
-    if not await db.is_feature_on("market"):
-        return web.json_response({"ok": False, "error": "market_disabled"}, status=403)
-    kind = request.query.get("type") or None
-    if kind not in (None, "username", "number"):
-        return web.json_response({"ok": False, "error": "bad_type"}, status=400)
-    try:
-        limit = min(50, max(1, int(request.query.get("limit", "20"))))
-        offset = max(0, int(request.query.get("offset", "0")))
-    except ValueError:
-        return web.json_response({"ok": False, "error": "bad_pagination"}, status=400)
-    rows = await db.market_page(kind, limit, offset)
-    return web.json_response({"ok": True, "items": [
-        {"id": x["id"], "type": x["item_type"], "value": x["value"],
-         "price": float(x["price"]), "seller_username": x.get("seller_username")}
-        for x in rows
-    ], "balance": float(user.get("risestars") or 0)})
-
-
-async def h_market_list(request: web.Request):
-    user = await _current_user(request)
-    if not user:
-        return web.json_response({"ok": False, "error": "unauthorized"}, status=401)
-    if not await db.is_feature_on("market"):
-        return web.json_response({"ok": False, "error": "market_disabled"}, status=403)
-    data = await _json(request)
-    try:
-        item_id, price = int(data.get("item_id")), float(data.get("price"))
-    except (TypeError, ValueError):
-        return web.json_response({"ok": False, "error": "bad_item_or_price"}, status=400)
-    ok, message, listing_id = await db.create_listing(user["tg_id"], item_id, price)
-    if not ok:
-        return web.json_response({"ok": False, "error": "listing_rejected", "message": message}, status=400)
-    return web.json_response({"ok": True, "listing_id": listing_id})
-
-
-async def h_market_buy(request: web.Request):
-    user = await _current_user(request)
-    if not user:
-        return web.json_response({"ok": False, "error": "unauthorized"}, status=401)
-    if not await db.is_feature_on("market"):
-        return web.json_response({"ok": False, "error": "market_disabled"}, status=403)
-    try:
-        listing_id = int(request.match_info["listing_id"])
-    except ValueError:
-        return web.json_response({"ok": False, "error": "bad_listing_id"}, status=400)
-    ok, message, result = await db.buy_listing(user["tg_id"], listing_id)
-    if not ok:
-        return web.json_response({"ok": False, "error": "purchase_failed", "message": message}, status=409)
-    # The DB transaction already transferred ownership and debited/credited balances.
-    # Bot and client therefore see the same result immediately.
-    seller_chat_id = await db.telegram_chat_id(result["seller_id"])
-    buyer_chat_id = await db.telegram_chat_id(user["tg_id"])
-    if seller_chat_id:
-        await safe_send(request.app["bot"], seller_chat_id,
-            f"🛒 Ваш лот «{esc(result['value'])}» куплен за {result['price']:g} RiseStars.")
-    if buyer_chat_id:
-        await safe_send(request.app["bot"], buyer_chat_id,
-            f"✅ Покупка завершена: «{esc(result['value'])}» теперь в вашем инвентаре.")
-    fresh = await db.get_user(user["tg_id"])
-    return web.json_response({"ok": True, "purchase": {
-        "type": result["item_type"], "value": result["value"],
-        "price": result["price"], "fee": result["fee"],
-    }, "user": public_user(fresh)})
+    return web.json_response({"ok": True, "user": await self_profile(fresh), "active_username": item["value"]})
 
 
 async def h_game_stats(request: web.Request):
@@ -998,7 +820,7 @@ async def h_game_stats(request: web.Request):
     stats = await db.game_stats(user["tg_id"])
     # Read balances fresh: bot games and client always share the same source of truth.
     fresh = await db.get_user(user["tg_id"])
-    return web.json_response({"ok": True, "stats": stats, "user": public_user(fresh)})
+    return web.json_response({"ok": True, "stats": stats, "user": await self_profile(fresh)})
 
 
 async def h_purchases(request: web.Request):
@@ -1018,28 +840,44 @@ _verification_sync_state: dict[int, tuple[str, bool]] = {}
 _verification_sync_locks: dict[int, asyncio.Lock] = {}
 
 
+async def native_wallet(user):
+    """Read the same account ledgers as MTProto payments.getStarsStatus."""
+    if not config.MTPROTO_ADMIN_API_TOKEN or not config.MTPROTO_ADMIN_API_URL or not user.get("phone"):
+        return None
+    async with ClientSession(timeout=ClientTimeout(total=5), headers={
+        "Authorization": "Bearer " + config.MTPROTO_ADMIN_API_TOKEN
+    }) as session:
+        async with session.post(config.MTPROTO_ADMIN_API_URL.rstrip("/") + "/v1/accounts/client-balances",
+                                json={"phone": user["phone"]}) as response:
+            response.raise_for_status()
+            data = await response.json()
+    return wallet_amounts(data) if data["found"] else None
+
+
+def wallet_amounts(data):
+    return {"risestars": int(data["stars"]), "gram_balance": Decimal(int(data["gram_nano"])).scaleb(-9)}
+
+
 async def client_wallet_line(user: dict) -> str:
-    """Render the linked native wallet in private bot views."""
-    base = config.MTPROTO_ADMIN_API_URL
-    token = config.MTPROTO_ADMIN_API_TOKEN
-    phone = user.get("phone")
-    if not base or not token or not phone:
-        return "Баланс приложения недоступен"
     try:
-        async with ClientSession(timeout=ClientTimeout(total=5)) as session:
-            async with session.post(
-                base.rstrip("/") + "/v1/accounts/client-balances",
-                headers={"Authorization": f"Bearer {token}"}, json={"phone": phone},
-            ) as response:
-                response.raise_for_status()
-                data = await response.json()
-        if not data["found"]:
-            return "К номеру ещё не привязан кошелёк приложения"
-        stars = int(data["stars"])
-        grams = format(Decimal(int(data["gram_nano"])).scaleb(-9), "f").rstrip("0").rstrip(".") or "0"
-        return f"Баланс приложения: ⭐ {stars:,} · 💎 {grams} GRAM".replace(",", " ")
+        wallet = await native_wallet(user)
     except (ClientError, TimeoutError, KeyError, ValueError, TypeError):
         return "Баланс приложения временно недоступен"
+    if wallet is None:
+        return "К номеру ещё не привязан кошелёк приложения"
+    gram = format(wallet["gram_balance"], "f").rstrip("0").rstrip(".") or "0"
+    return f"⭐ {wallet['risestars']:,} RiseStars · 💎 {gram} GRAM".replace(",", " ")
+
+
+async def self_profile(user):
+    result = public_user(user)
+    try:
+        wallet = await native_wallet(user)
+    except (ClientError, TimeoutError, KeyError, ValueError, TypeError):
+        wallet = None
+    result.update(risestars=wallet["risestars"] if wallet else None,
+                  gram_balance=float(wallet["gram_balance"]) if wallet else None)
+    return result
 
 
 async def sync_mtproto_verification(user_id: int, force: bool = False) -> dict:
@@ -1205,20 +1043,8 @@ async def h_local_inventory(request: web.Request):
     items=await asyncio.to_thread(local_gifts.inventory,user["tg_id"])
     return web.json_response({"ok":True,"items":items})
 
-async def h_local_buy(request: web.Request):
-    return web.json_response({"ok":False,"error":"Покупка доступна в приложении RiseGram"}, status=410)
-
-async def h_local_upgrade(request: web.Request):
-    user=await _current_user(request)
-    if not user:
-        return web.json_response({"ok":False,"error":"unauthorized"},status=401)
-    data=await _json(request)
-    try:instance_id=int(data.get("instance_id"))
-    except (TypeError,ValueError):
-        return web.json_response({"ok":False,"error":"invalid_instance"},status=400)
-    ok=await asyncio.to_thread(local_gifts.upgrade,user["tg_id"],instance_id)
-    return web.json_response({"ok":ok,"error":None if ok else "upgrade_not_allowed"},status=200 if ok else 409)
-
+async def h_native_only(request: web.Request):
+    return web.json_response({"ok":False,"error":"Откройте нативный раздел в приложении RiseGram."}, status=410)
 
 async def h_index(request: web.Request):
     index_path = Path(__file__).with_name("index.html")
@@ -1502,8 +1328,8 @@ async def start_api(bot) -> web.AppRunner | None:
         web.get("/api/local-gifts/catalog", h_local_catalog),
         web.get("/api/local-gifts/drops", h_local_drops),
         web.get("/api/local-gifts/inventory", h_local_inventory),
-        web.post("/api/local-gifts/buy", h_local_buy),
-        web.post("/api/local-gifts/upgrade", h_local_upgrade),
+        web.post("/api/local-gifts/buy", h_native_only),
+        web.post("/api/local-gifts/upgrade", h_native_only),
         web.post("/api/auth/request", h_request),
         web.post("/api/auth/verify", h_verify),
         web.get("/api/me", h_me),
@@ -1530,12 +1356,12 @@ async def start_api(bot) -> web.AppRunner | None:
         web.delete("/api/blocks/{rise_id}", h_unblock_user),
         web.get("/api/inventory", h_inventory),
         web.post("/api/inventory/{item_id}/activate", h_activate_nft),
-        web.get("/api/gifts", h_gifts),
-        web.post("/api/gifts/{drop_id}/buy", h_buy_gift),
+        web.get("/api/gifts", h_native_only),
+        web.post("/api/gifts/{drop_id}/buy", h_native_only),
         web.post("/api/exchange", h_exchange),
-        web.get("/api/market", h_market),
-        web.post("/api/market", h_market_list),
-        web.post("/api/market/{listing_id}/buy", h_market_buy),
+        web.get("/api/market", h_native_only),
+        web.post("/api/market", h_native_only),
+        web.post("/api/market/{listing_id}/buy", h_native_only),
         web.get("/api/games/stats", h_game_stats),
         web.get("/api/purchases", h_purchases),
         web.post("/internal/mtproto/otp", h_mtproto_otp_delivery),
