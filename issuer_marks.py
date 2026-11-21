@@ -52,6 +52,11 @@ async def install():
                 "title": f"{label} Verification", "short_name": f"rg_{slug}_verification",
                 "kind": "emoji", "emoji": "☑️",
             }, Path(__file__).parent / "data" / f"{slug}-issuer.webp")
+            if "document_id" not in pack:
+                # Older servers returned only the set ID when creating a pack.
+                pack = await command(session, "/v1/stickers/add", prefix + "-material",
+                                     {"set_id": str(pack["set_id"]), "emoji": "☑️"},
+                                     Path(__file__).parent / "data" / f"{slug}-issuer.webp")
             doc = int(pack["document_id"])
             await command(session, "/v1/botverification/icons/upsert", prefix + "-icon", {
                 "document_id": doc, "name": label, "owner_bot_id": bot_id,
@@ -77,4 +82,4 @@ async def bootstrap():
             if _ready.is_set():
                 return
         except Exception as exc:
-            log.warning("Issuer setup pending (%s)", str(exc)[:180] if isinstance(exc, ValueError) else type(exc).__name__)
+            log.warning("Issuer setup pending (%s)", str(exc)[:180] if isinstance(exc, (KeyError, ValueError)) else type(exc).__name__)
