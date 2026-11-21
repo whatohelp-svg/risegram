@@ -301,6 +301,28 @@ patch_go_file(
     "router reconnect authorization gate",
 )
 
+# effectiveUserID is also used by the connection/session path. A zero user ID
+# is only a cold-session placeholder; it must not be returned as an authorized
+# identity before the durable permanent auth key has been checked.
+patch_go_file(
+    "internal/rpc/router.go",
+    """\tif userID, ok := UserIDFrom(ctx); ok {
+\t\tif r.deps.Sessions != nil {
+\t\t\tr.deps.Sessions.BindUserForAuthKey(rawAuthKeyID, sessionID, userID)
+\t\t}
+\t\treturn userID, true, nil
+\t}
+""",
+    """\tif userID, ok := UserIDFrom(ctx); ok && userID != 0 {
+\t\tif r.deps.Sessions != nil {
+\t\t\tr.deps.Sessions.BindUserForAuthKey(rawAuthKeyID, sessionID, userID)
+\t\t}
+\t\treturn userID, true, nil
+\t}
+""",
+    "effectiveUserID zero-user reconnect fallback",
+)
+
 # A freshly-bound TCP session can explicitly cache user_id=0 before the
 # permanent auth key's authorization is copied into the session. Treat that
 # zero as a cold-session placeholder, not as proof that the permanent key is
