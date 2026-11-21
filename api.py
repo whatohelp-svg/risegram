@@ -765,7 +765,7 @@ async def h_gifts(request: web.Request):
     return web.json_response({
         "ok": True,
         "drops": await db.list_gift_drops(active_only=True),
-        "inventory": await db.list_user_gifts(user["tg_id"]),
+        "inventory": await db.list_user_gifts(user["tg_id"], include_pending=True),
         "user": public_user(user),
     })
 
