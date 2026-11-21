@@ -276,20 +276,25 @@ async def cb_gift_page(call: CallbackQuery, user: dict):
 
 @router.callback_query(F.data == "gift:mine")
 async def cb_gift_inventory(call: CallbackQuery, user: dict):
-    items = await db.list_user_gifts(user["tg_id"])
+    items = await db.list_user_gifts(user["tg_id"], include_pending=True)
+    sent_count = sum(1 for item in items if item.get("status") == "sent")
+    pending_count = sum(1 for item in items if item.get("status") == "pending")
     text = (
         "📦 <b>Мои подарки</b>\n\n"
-        f"Получено: <b>{len(items)}</b>\n"
+        f"Получено: <b>{sent_count}</b> · в обработке: <b>{pending_count}</b>\n"
     )
     if not items:
         text += "\nЗдесь появятся подарки, купленные в дропах RiseGram."
     else:
         for item in items[:30]:
+            pending = item.get("status") == "pending"
             text += (
-                f"\n{esc(item['emoji'])} <b>{esc(item['gift_name'])}</b> "
+                f"\n{'⏳' if pending else esc(item['emoji'])} <b>{esc(item['gift_name'])}</b> "
                 f"· №{item['serial_no']}\n"
                 f"Оплачено: {fmt_num(item['price_paid'])} RiseStars\n"
             )
+            if pending:
+                text += "Доставка не подтверждена Telegram — не покупай повторно, дождись проверки\n"
     await show(
         call,
         text,
