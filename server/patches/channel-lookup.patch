@@ -1,0 +1,76 @@
+diff --git a/internal/admin/service.go b/internal/admin/service.go
+index 5d85701..9b5d1c5 100644
+--- a/internal/admin/service.go
++++ b/internal/admin/service.go
+@@ -3380,6 +3380,16 @@ func ErrorCode(err error) string {
+ 	return ""
+ }
+ 
++func (s *Service) ResolvePublicChannelForAdmin(ctx context.Context, username string) (domain.Channel, bool, error) {
++	lookup, ok := s.channels.(interface {
++		ResolvePublicChannelForAdmin(context.Context, string) (domain.Channel, bool, error)
++	})
++	if !ok {
++		return domain.Channel{}, false, fmt.Errorf("public channel lookup unavailable")
++	}
++	return lookup.ResolvePublicChannelForAdmin(ctx, username)
++}
++
+ func (s *Service) SetChannelVerified(ctx context.Context, req SetChannelVerifiedRequest) (CommandResult, error) {
+ 	if req.ChannelID <= 0 {
+ 		return CommandResult{}, fmt.Errorf("channel_id is required")
+diff --git a/internal/adminapi/server.go b/internal/adminapi/server.go
+index fa238df..c032254 100644
+--- a/internal/adminapi/server.go
++++ b/internal/adminapi/server.go
+@@ -264,6 +264,7 @@ func (s *Server) routes() http.Handler {
+ 	mux.HandleFunc("POST /v1/accounts/set-color", s.authenticated(s.handleSetUserColor))
+ 	mux.HandleFunc("POST /v1/accounts/set-emoji-status", s.authenticated(s.handleSetUserEmojiStatus))
+ 	mux.HandleFunc("POST /v1/accounts/revoke-sessions", s.authenticated(s.handleRevokeSessions))
++	mux.HandleFunc("GET /v1/channels/resolve-username", s.authenticated(s.handleResolveChannelUsername))
+ 	mux.HandleFunc("POST /v1/channels/set-verified", s.authenticated(s.handleSetChannelVerified))
+ 	mux.HandleFunc("POST /v1/channels/set-flags", s.authenticated(s.handleSetChannelFlags))
+ 	mux.HandleFunc("POST /v1/channels/set-settings", s.authenticated(s.handleSetChannelSettings))
+@@ -552,6 +553,22 @@ func (s *Server) handleSetVerified(w http.ResponseWriter, r *http.Request) {
+ 	writeCommandResult(w, result, err)
+ }
+ 
++func (s *Server) handleResolveChannelUsername(w http.ResponseWriter, r *http.Request) {
++	resolver, ok := s.svc.(interface {
++		ResolvePublicChannelForAdmin(context.Context, string) (domain.Channel, bool, error)
++	})
++	if !ok {
++		writeError(w, http.StatusNotImplemented, "channel lookup unavailable")
++		return
++	}
++	channel, found, err := resolver.ResolvePublicChannelForAdmin(r.Context(), r.URL.Query().Get("username"))
++	if err != nil {
++		writeError(w, http.StatusBadRequest, "channel lookup failed")
++		return
++	}
++	writeJSON(w, http.StatusOK, map[string]any{"found": found, "channel_id": strconv.FormatInt(channel.ID, 10)})
++}
++
+ func (s *Server) handleSetChannelVerified(w http.ResponseWriter, r *http.Request) {
+ 	var req admin.SetChannelVerifiedRequest
+ 	if !decodeJSON(w, r, &req) {
+diff --git a/internal/app/channels/service.go b/internal/app/channels/service.go
+index 6477718..08eb2c8 100644
+--- a/internal/app/channels/service.go
++++ b/internal/app/channels/service.go
+@@ -681,6 +681,15 @@ func (s *Service) ListSendAsChannels(ctx context.Context, userID int64) ([]domai
+ 	return s.channels.ListSendAsChannels(ctx, userID)
+ }
+ 
++// ResolvePublicChannelForAdmin returns a public registry match without a viewer.
++func (s *Service) ResolvePublicChannelForAdmin(ctx context.Context, username string) (domain.Channel, bool, error) {
++	username = domain.NormalizeUsername(username)
++	if !domain.ValidCollectibleUsername(username) {
++		return domain.Channel{}, false, domain.ErrUsernameInvalid
++	}
++	return s.channels.ResolvePublicChannelUsername(ctx, 0, username)
++}
++
+ // ResolvePublicUsername resolves a public channel/supergroup username visible to userID.
+ func (s *Service) ResolvePublicUsername(ctx context.Context, userID int64, username string) (domain.Channel, bool, error) {
+ 	if s == nil || s.channels == nil || userID == 0 {

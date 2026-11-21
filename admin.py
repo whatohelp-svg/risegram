@@ -107,7 +107,7 @@ async def home_screen(event, user: dict):
         f"⭐ {config.CURRENCY_NAME}: <b>{fmt_num(me['risestars'])}</b>\n"
         f"💎 Gram: <b>{fmt_num(me['gram_balance'], 2)}</b>\n"
         f"☑️ Статус: <b>{'Официальный владелец' if int(user['tg_id']) == int(config.OWNER_ID) else 'Администратор / тестер'}</b>\n"
-        "🏷 NFT каналу или супергруппе: <code>/grantnft ID @имя</code>\n"
+        "🏷 NFT каналу или супергруппе: <code>/grantnft @чат @имя</code>\nПроверка чата: <code>/grantverify @чат official|major|risegram</code>\n"
         f"🛠 Техработы: <b>{'ВКЛ' if maint else 'выкл'}</b>"
     )
     scam_label = f"⚠️ SCAM-заявки ({pending})" if pending else "⚠️ SCAM-заявки"
@@ -130,46 +130,81 @@ async def home_screen(event, user: dict):
     await show(event, text, markup)
 
 
-@admin_router.message(Command("grantnft"))
+@admin_router.message(Command("grantnft", "grantverify"))
 async def grant_channel_username(message: Message):
     parts = (message.text or "").split()
-    if len(parts) != 3 or not re.fullmatch(r"(?:-100)?[1-9][0-9]{0,18}", parts[1]) or not re.fullmatch(r"@?[A-Za-z][A-Za-z0-9_]{3,31}", parts[2]):
-        await message.answer("Используйте /grantnft ID @имя. Укажите ID канала или супергруппы RiseGram.")
+    verify = parts[0].split("@")[0].lower() == "/grantverify"
+    name_pattern = r"[A-Za-z][A-Za-z0-9_]{3,31}"
+    usage = ("Используйте /grantverify @чат official|risegram|major" if verify
+             else "Используйте /grantnft @чат @новое_имя. Вместо @чата можно указать ID.")
+    if len(parts) != 3:
+        await message.answer(usage)
         return
-    channel_id = int(parts[1].removeprefix("-100"))
-    if channel_id > 2**63 - 1:
-        await message.answer("ID канала или супергруппы слишком большой.")
+    target, value = parts[1], parts[2].lower()
+    numeric = re.fullmatch(r"(?:-100)?[1-9][0-9]{0,18}", target)
+    if not numeric and not re.fullmatch("@" + name_pattern, target):
+        await message.answer(usage)
         return
-    name = parts[2].lstrip("@").lower()
-    if not config.MTPROTO_ADMIN_API_URL or not config.MTPROTO_ADMIN_API_TOKEN:
-        await message.answer("Сервер выдачи NFT не настроен.")
+    if (verify and value not in ("official", "risegram", "major")) or (
+        not verify and not re.fullmatch("@?" + name_pattern, value)
+    ):
+        await message.answer(usage)
         return
+    base = config.MTPROTO_ADMIN_API_URL.rstrip("/")
+    if not base or not config.MTPROTO_ADMIN_API_TOKEN:
+        await message.answer("Сервер выдачи не настроен.")
+        return
+    headers = {"Authorization": f"Bearer {config.MTPROTO_ADMIN_API_TOKEN}"}
     payload = {
-        "command_id": f"channel-nft-{message.chat.id}-{message.message_id}",
+        "command_id": f"channel-grant-{message.chat.id}-{message.message_id}",
         "actor": f"risegram-admin-{message.from_user.id}",
-        "reason": "Issue a collectible username to a channel or supergroup",
-        "username": name,
-        "owner_channel_id": str(channel_id),
-        "purchase_date": int(message.date.timestamp()),
-        "currency": "USD",
-        "amount": "0",
+        "reason": "Administrator grant to a RiseGram group or channel",
     }
     try:
-        async with ClientSession(timeout=ClientTimeout(total=10)) as session:
-            async with session.post(
-                config.MTPROTO_ADMIN_API_URL.rstrip("/") + "/v1/collectible-usernames/mint",
-                headers={"Authorization": f"Bearer {config.MTPROTO_ADMIN_API_TOKEN}"},
-                json=payload,
-            ) as response:
-                result = await response.json(content_type=None)
-                completed = response.status == 200 and result.get("status") == "completed"
-    except (ClientError, TimeoutError, ValueError):
-        await message.answer("Сервер не подтвердил выдачу. Проверьте имя в профиле канала или супергруппы.")
+        async with ClientSession(timeout=ClientTimeout(total=10), headers=headers) as session:
+            if numeric:
+                channel_id = int(target.removeprefix("-100"))
+            else:
+                async with session.get(base + "/v1/channels/resolve-username",
+                                       params={"username": target[1:].lower()}) as response:
+                    response.raise_for_status()
+                    peer = await response.json()
+                if not peer.get("found"):
+                    await message.answer("Публичная группа или канал с таким именем не найдены.")
+                    return
+                channel_id = int(peer["channel_id"])
+            if not 0 < channel_id < 2**63:
+                await message.answer("Некорректный ID чата.")
+                return
+            if not verify:
+                endpoint = "/v1/collectible-usernames/mint"
+                name = value.lstrip("@")
+                payload.update(username=name, owner_channel_id=str(channel_id), currency="USD",
+                               amount="0", purchase_date=int(message.date.timestamp()))
+                success = f"NFT @{name} выдан чату {channel_id}."
+            elif value == "official":
+                endpoint = "/v1/channels/set-verified"
+                payload.update(channel_id=channel_id, verified=True)
+                success = f"Чату {channel_id} выдана официальная галочка."
+            else:
+                async with session.get(base + "/v1/botverification/verifiers",
+                                       params={"enabled_only": "true", "limit": "200"}) as response:
+                    response.raise_for_status()
+                    verifiers = (await response.json())["rows"]
+                matches = [v for v in verifiers if v["Enabled"] and v["CompanyName"].strip().lower() == value]
+                if len(matches) != 1:
+                    await message.answer(f"Для {value} не настроен однозначный активный верификатор.")
+                    return
+                endpoint = "/v1/botverification/marks/grant"
+                payload.update(peer_type="channel", peer_id=channel_id, verifier_bot_id=int(matches[0]["BotID"]))
+                success = f"Чату {channel_id} выдана верификация {value}."
+            async with session.post(base + endpoint, json=payload) as response:
+                response.raise_for_status()
+                completed = (await response.json()).get("status") == "completed"
+    except (ClientError, TimeoutError, ValueError, KeyError):
+        await message.answer("Сервер не подтвердил выдачу. Проверьте чат и статус в профиле.")
         return
-    if completed:
-        await message.answer(f"NFT @{name} выдан каналу или супергруппе {channel_id}.")
-    else:
-        await message.answer("Сервер отклонил выдачу. Проверьте ID и доступность имени.")
+    await message.answer(success if completed else "Сервер не подтвердил выдачу.")
 
 
 @admin_router.message(Command(config.ADMIN_COMMAND))
