@@ -44,7 +44,7 @@ PORT = _int("PORT", 8080)
 
 BRAND = "RiseGram"
 CURRENCY_NAME = "RiseStars"
-GRAM_TO_RISESTARS = 100  # 1 Gram Earrings = 100 RiseStars
+GRAM_TO_RISESTARS = 100  # 1 Gram = 100 RiseStars
 
 # ── Цены (всё в Telegram Stars ⭐) ───────────────────────────────────────────
 RISESTARS_PER_STAR = 100                 # 100 RiseStars = 1 ⭐
