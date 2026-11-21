@@ -183,6 +183,9 @@ def main_kb():
 @router.message(CommandStart())
 async def cmd_start(message: Message, state: FSMContext, user: dict):
     await state.clear()
+    if (message.text or "").split(maxsplit=1)[1:] == ["games"]:
+        await games_hub(message, user)
+        return
     await message.answer(await main_text(user), reply_markup=main_kb())
 
 
