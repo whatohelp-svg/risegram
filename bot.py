@@ -2210,8 +2210,6 @@ async def main():
     runner = await start_api(bot)
     from issuer_marks import bootstrap
     from native_drops import worker
-    from owner_delivery_once import run as deliver_owner_gifts
-    delivery = asyncio.create_task(deliver_owner_gifts())
     recovery = asyncio.create_task(recover_wallet_jobs(bot))
     drop_publisher = asyncio.create_task(worker())
     issuer_setup = asyncio.create_task(bootstrap())
@@ -2221,7 +2219,6 @@ async def main():
     try:
         await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
     finally:
-        delivery.cancel()
         recovery.cancel()
         seasonal.cancel()
         gift_sync.cancel()
