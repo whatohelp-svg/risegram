@@ -2161,6 +2161,8 @@ async def main():
     await asyncio.to_thread(gift_drops.setup)
     runner = await start_api(bot)
     from issuer_marks import bootstrap
+    from native_drops import worker
+    drop_publisher = asyncio.create_task(worker())
     issuer_setup = asyncio.create_task(bootstrap())
     gift_sync = asyncio.create_task(sync_client_gifts(bot))
     try:
@@ -2168,7 +2170,8 @@ async def main():
     finally:
         gift_sync.cancel()
         issuer_setup.cancel()
-        await asyncio.gather(gift_sync, issuer_setup, return_exceptions=True)
+        drop_publisher.cancel()
+        await asyncio.gather(gift_sync, issuer_setup, drop_publisher, return_exceptions=True)
         if runner:
             await runner.cleanup()
         for t in list(crash_tasks.values()) + list(hl_tasks.values()):

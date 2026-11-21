@@ -1196,8 +1196,7 @@ async def h_local_catalog(request: web.Request):
     return web.json_response({"ok":True,"items":rows,"total":total,"page":page})
 
 async def h_local_drops(request: web.Request):
-    rows=await asyncio.to_thread(local_gifts.list_live_drops)
-    return web.json_response({"ok":True,"items":rows})
+    return web.json_response({"ok":True,"items":[]})
 
 async def h_local_inventory(request: web.Request):
     user=await _current_user(request)
@@ -1207,21 +1206,7 @@ async def h_local_inventory(request: web.Request):
     return web.json_response({"ok":True,"items":items})
 
 async def h_local_buy(request: web.Request):
-    user=await _current_user(request)
-    if not user:
-        return web.json_response({"ok":False,"error":"unauthorized"},status=401)
-    data=await _json(request)
-    try:
-        drop_id=int(data.get("drop_id"))
-        request_id=str(data.get("request_id",""))
-        instance=await asyncio.to_thread(local_gifts.purchase,user["tg_id"],drop_id,request_id)
-    except (ValueError,TypeError) as err:
-        return web.json_response({"ok":False,"error":str(err)},status=409)
-    except sqlite3.OperationalError:
-        return web.json_response({"ok":False,"error":"database_busy"},status=503)
-    fresh=await db.get_user(user["tg_id"])
-    return web.json_response({"ok":True,"instance_id":instance,
-                              "risestars":float(fresh["risestars"])})
+    return web.json_response({"ok":False,"error":"Покупка доступна в приложении RiseGram"}, status=410)
 
 async def h_local_upgrade(request: web.Request):
     user=await _current_user(request)

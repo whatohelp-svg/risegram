@@ -124,7 +124,7 @@ async def on_callback(call,state,parts):
         await db.log_admin_action(config.OWNER_ID,f"Создан дроп #{drop_id}: {data['gift_id']}")
         await state.clear()
         return await show(call,f"✅ <b>Дроп #{drop_id} создан</b>\n"
-            "Покупки доступны в Mini App RiseGram и API клиента",
+            "Публикация в каталоге приложения RiseGram поставлена в очередь",
             kb([btn("📦 Дропы","adm:localgift:list")],[btn("🎁 Каталог","adm:localgifts:0")]))
     if sub=="list":
         await state.clear()

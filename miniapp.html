@@ -46,8 +46,7 @@ nav span{display:block;font-size:22px;margin-bottom:4px}
  <button class="primary" type="submit">Войти</button><button class="secondary" style="margin-top:10px" type="button" id="changePhone">Изменить номер</button></form>
 </section>
 <section id="content" class="hidden">
- <div id="shop"><p class="small">Лимитированные Telegram-тематические подарки, выпущенные внутри RiseGram — не настоящие NFT в TON</p>
- <div class="row" style="margin:18px 0"><span class="pill">🎁 Доступные дропы</span><button class="secondary" id="reload">Обновить</button></div><div id="cards" class="grid"></div></div>
+ <div id="shop"><p>Дропы доступны в приложении RiseGram в разделе «Отправить подарок».</p></div>
  <div id="inventory" class="hidden"><h2>Мои подарки</h2><div id="owned" class="grid"></div></div>
  <div id="account" class="hidden"><div class="info"><h2 style="margin:0 0 14px">Аккаунт RiseGram</h2><div id="accountInfo"></div>
  <button id="logout" class="secondary" style="margin-top:20px">Выйти</button></div>
@@ -59,8 +58,6 @@ nav span{display:block;font-size:22px;margin-bottom:4px}
 <button data-tab="inventory"><span>🎁</span>Инвентарь</button>
 <button data-tab="account"><span>👤</span>Аккаунт</button>
 </nav>
-<div id="modal"><div class="sheet"><div class="row"><h2 style="margin:0">Подтвердить покупку</h2><button id="dismiss" class="secondary">✕</button></div>
-<p id="purchaseText" style="line-height:1.7"></p><button id="pay" class="primary">Купить за RiseStars</button></div></div>
 <script>
 "use strict";
 const tg=window.Telegram?.WebApp; tg?.ready(); tg?.expand();
@@ -98,14 +95,6 @@ function selectTab(tab){
  if(tab==="inventory")loadInventory();
 }
 function art(title){return /ring|locket|signet/i.test(title)?"💍":/heart|love/i.test(title)?"💝":/cup|glass/i.test(title)?"🏆":/hat|cap/i.test(title)?"🎩":"🎁"}
-async function loadDrops(){
- try {
-  const j=await req("/api/local-gifts/drops");state.drops=j.items;
-  $("cards").innerHTML=state.drops.length?state.drops.map(d=>
-   '<article class="tile"><div class="art">'+art(d.title)+'</div><b>'+safe(d.title)+'</b><div class="small" style="margin-top:6px">Осталось '+fmt(d.supply-d.sold)+' из '+fmt(d.supply)+'</div><div class="row" style="margin-top:12px"><span class="price">'+fmt(d.price_stars)+' ⭐</span><button class="buy" data-buy="'+d.id+'">Купить</button></div></article>').join("") :
-   '<div class="empty" style="grid-column:1/-1">Сейчас активных дропов нет<br>Новые появятся после запуска администратором</div>';
- }catch(e){toast(e.message)}
-}
 async function loadInventory(){
  try{
   const j=await req("/api/local-gifts/inventory");
@@ -128,28 +117,11 @@ $("codeForm").addEventListener("submit",async e=>{
  try{const j=await req("/api/webapp/auth/verify",{method:"POST",
  body:JSON.stringify({init_data:state.initData,phone:$("phone").value,code:$("code").value})});
  state.token=j.token;sessionStorage.setItem("risegram_session",state.token);
- await syncUser();showApp();await loadDrops();}catch(err){toast(err.message)}
+ await syncUser();showApp();}catch(err){toast(err.message)}
 });
 $("changePhone").onclick=()=>{$("codeForm").classList.add("hidden");$("phoneForm").classList.remove("hidden")};
-$("reload").onclick=loadDrops;$("logout").onclick=logout;
+$("logout").onclick=logout;
 document.querySelectorAll("nav button").forEach(b=>b.onclick=()=>selectTab(b.dataset.tab));
-$("cards").onclick=e=>{
- const b=e.target.closest("[data-buy]");if(!b)return;
- state.selected=state.drops.find(d=>d.id===Number(b.dataset.buy));
- if(!state.selected)return;
- $("purchaseText").innerHTML="<b>"+safe(state.selected.title)+"</b><br>Цена: "+fmt(state.selected.price_stars)+" RiseStars<br>Доступно: "+fmt(state.selected.supply-state.selected.sold);
- $("modal").style.display="flex";
-};
-$("dismiss").onclick=()=>$("modal").style.display="none";
-$("pay").onclick=async()=>{
- if(!state.selected)return;
- $("pay").disabled=true;
- try{const j=await req("/api/local-gifts/buy",{method:"POST",body:JSON.stringify({
- drop_id:state.selected.id,request_id:"gift_"+(crypto.randomUUID?crypto.randomUUID():Date.now()+"_"+Math.random().toString(36).slice(2))})});
- $("modal").style.display="none";toast("🎉 Подарок добавлен в инвентарь!");
- await syncUser();await loadDrops();
- }catch(e){toast(e.message)}finally{$("pay").disabled=false}
-};
 $("owned").onclick=async e=>{
  const b=e.target.closest("[data-upgrade]");if(!b)return;
  b.disabled=true;
@@ -158,6 +130,6 @@ $("owned").onclick=async e=>{
  catch(err){toast(err.message);b.disabled=false}
 };
 (async()=>{if(!state.token){showAuth();return}
- try{await syncUser();showApp();await loadDrops()}
+ try{await syncUser();showApp()}
  catch(e){logout()}})();
 </script></body></html>

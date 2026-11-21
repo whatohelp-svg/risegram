@@ -18,7 +18,7 @@ async def command(session, path, key, fields, file=None):
     if file:
         form = FormData()
         form.add_field("metadata", json.dumps(body))
-        form.add_field("file", file.read_bytes(), filename=file.name, content_type="image/webp")
+        form.add_field("file", file.read_bytes(), filename=file.name, content_type="application/x-tgsticker" if file.suffix == ".tgs" else "image/webp")
         options = {"data": form}
     else:
         options = {"json": body}
@@ -52,6 +52,7 @@ async def install():
                 "title": f"{label} Verification", "short_name": f"rg_{slug}_verification",
                 "kind": "emoji", "emoji": "☑️",
             }, Path(__file__).parent / "data" / f"{slug}-issuer.webp")
+            pack_set_id = pack["set_id"]
             if "document_id" not in pack:
                 # Older servers returned only the set ID when creating a pack.
                 pack = await command(session, "/v1/stickers/add", prefix + "-material",
@@ -66,6 +67,25 @@ async def install():
                 "can_modify_custom_description": True,
                 "default_description": f"Аккаунт верифицирован организацией «{label}».",
             })
+            # Native profile badges use animated custom emoji documents.
+            asset = Path(__file__).parent / "data" / f"{slug}-issuer.tgs"
+            material = await command(session, "/v1/stickers/add", prefix + "-animated-material",
+                                     {"set_id": str(pack_set_id), "emoji": "☑️"}, asset)
+            animated_id = int(material["document_id"])
+            await command(session, "/v1/botverification/icons/upsert", prefix + "-animated-icon",
+                          {"document_id": animated_id, "name": label, "owner_bot_id": bot_id})
+            async with session.get(config.MTPROTO_ADMIN_API_URL + "/v1/botverification/verifiers",
+                                   params={"limit":"200"}) as response:
+                response.raise_for_status()
+                rows = (await response.json())["rows"]
+            current = next(v for v in rows if int(v["BotID"]) == bot_id)
+            if int(current["IconDocumentID"]) != animated_id:
+                await command(session, "/v1/botverification/verifiers/grant",
+                              prefix + "-animated-grant-" + str(current["Version"]), {
+                    "version": int(current["Version"]), "bot_id": bot_id, "icon_document_id": animated_id,
+                    "company_name": label, "can_modify_custom_description": True,
+                    "default_description": f"Аккаунт верифицирован организацией «{label}».",
+                })
             await db.set_meta("native_issuer:" + slug, str(bot_id))
             log.info("Native issuer ready: %s", label)
     _ready.set()
