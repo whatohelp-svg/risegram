@@ -141,6 +141,9 @@ async def execute(sql: str, params: Iterable[Any] = ()) -> int:
 # ─────────────────────────────── схема ──────────────────────────────────────
 
 SCHEMA = [
+    """CREATE TABLE IF NOT EXISTS verified_peer_links (
+        peer_id INTEGER PRIMARY KEY, account_id INTEGER NOT NULL UNIQUE, phone_digits TEXT NOT NULL
+    )""",
     """CREATE TABLE IF NOT EXISTS users (
         tg_id INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id TEXT UNIQUE,

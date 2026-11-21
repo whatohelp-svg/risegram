@@ -1057,6 +1057,10 @@ async def sync_mtproto_verification(user_id: int, force: bool = False) -> dict:
                     # The MTProto peer can appear after this bot update. Retry shortly.
                     _verification_sync_last[int(user_id)] = time.monotonic() - 270
                     return {"configured": True, "synced": False, "pending_account": True}
+                await db.execute(
+                    "INSERT OR REPLACE INTO verified_peer_links(peer_id,account_id,phone_digits) VALUES(?,?,?)",
+                    (int(resolved["user_id"]), user_id, digits),
+                )
                 payload = {
                     "command_id": f"risegram-verified-{int(user_id)}-{time.time_ns()}",
                     "actor": "risegram-bot",
@@ -1438,6 +1442,21 @@ async def h_mtproto_otp_delivery(request: web.Request):
     return web.json_response({"accepted": True, "message_id": delivery_id})
 
 
+async def h_profile_verification(request: web.Request):
+    peer = request.match_info["peer"]
+    if not peer.isascii() or not peer.isdigit() or len(peer) > 19 or int(peer) >= 2**63:
+        raise web.HTTPBadRequest()
+    row = await db.fetchone(
+        """SELECT u.verified_risegram, u.verified_major FROM verified_peer_links p
+           JOIN users u ON u.tg_id=p.account_id AND u.phone_digits=p.phone_digits
+           WHERE p.peer_id=? AND u.banned=0""", (int(peer),),
+    )
+    return web.json_response({
+        "verified_risegram": bool(row and row["verified_risegram"]),
+        "verified_major": bool(row and row["verified_major"]),
+    }, headers={"Cache-Control": "no-store"})
+
+
 async def h_health(request: web.Request):
     return web.json_response({"ok": True, "service": "risegram-api"})
 
@@ -1492,6 +1511,7 @@ async def start_api(bot) -> web.AppRunner | None:
         web.get("/api/games/stats", h_game_stats),
         web.get("/api/purchases", h_purchases),
         web.post("/internal/mtproto/otp", h_mtproto_otp_delivery),
+        web.get("/api/profiles/{peer}/verification", h_profile_verification),
         web.get("/health", h_health),
         web.get("/{username}", h_public_link),
     ])
