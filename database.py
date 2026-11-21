@@ -1110,18 +1110,16 @@ async def sync_gift_catalog_drops(catalog: list[dict]) -> dict[str, int]:
             existing = await cur.fetchone()
             if existing:
                 if not bool(existing["pay_for_upgrade"]):
-                    # Older drops were priced and delivered as regular gifts.
-                    # Add the published upgrade cost once, preserving any manual markup.
-                    added_upgrade = max(0, upgrade_stars - int(existing["upgrade_stars"] or 0))
-                    new_price = round(
-                        float(existing["price_risestars"]) + added_upgrade * config.RISESTARS_PER_STAR,
-                        2,
-                    )
+                    # Older drops were regular gifts. Move them to the unique
+                    # version and enforce the current Telegram gift + upgrade
+                    # cost floor while preserving any higher manual markup.
+                    minimum_price = (star_count + upgrade_stars) * config.RISESTARS_PER_STAR
+                    new_price = round(max(float(existing["price_risestars"]), minimum_price), 2)
                     await conn.execute(
                         """UPDATE gift_drops
-                           SET upgrade_stars=?,pay_for_upgrade=1,price_risestars=?
+                           SET telegram_stars=?,upgrade_stars=?,pay_for_upgrade=1,price_risestars=?
                            WHERE id=? AND pay_for_upgrade=0""",
-                        (upgrade_stars, new_price, existing["id"]),
+                        (star_count, upgrade_stars, new_price, existing["id"]),
                     )
                     upgraded += 1
                 else:
