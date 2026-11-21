@@ -19,9 +19,11 @@ import time
 from collections import defaultdict
 
 from aiohttp import ClientSession, ClientTimeout, web
+from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError, TelegramRetryAfter
 
 import config
 import database as db
+from admin import available_telegram_gifts
 from media_api import create_media_handlers, public_media
 from ui import esc, safe_send
 
@@ -754,6 +756,12 @@ async def h_gifts(request: web.Request):
     user = await _current_user(request)
     if not user:
         return web.json_response({"ok": False, "error": "unauthorized"}, status=401)
+    try:
+        catalog = await available_telegram_gifts(request.app["bot"])
+        await db.sync_gift_catalog_drops([gift for gift in catalog if gift.get("can_upgrade")])
+    except Exception:  # noqa: BLE001
+        # Published drops remain available if Telegram catalog refresh is down.
+        log.warning("NFT gift catalog refresh deferred in API", exc_info=True)
     return web.json_response({
         "ok": True,
         "drops": await db.list_gift_drops(active_only=True),
@@ -787,17 +795,31 @@ async def h_buy_gift(request: web.Request):
         delivered = await request.app["bot"].send_gift(
             user_id=int(telegram_user_id),
             gift_id=gift["telegram_gift_id"],
-            text="Подарок из RiseGram 🎁",
+            pay_for_upgrade=bool(gift.get("pay_for_upgrade")),
+            text="Подарок из RiseGram · NFT 🎁",
         )
         if delivered is not True:
-            raise RuntimeError("Telegram returned no delivery confirmation")
-    except Exception as exc:  # noqa: BLE001
-        log.warning("Telegram gift delivery failed account=%s gift=%s: %s",
+            await db.rollback_gift_purchase(gift["instance_id"])
+            return web.json_response({
+                "ok": False,
+                "error": "Telegram не подтвердил отправку. RiseStars и тираж возвращены."
+            }, status=503)
+    except (TelegramBadRequest, TelegramForbiddenError, TelegramRetryAfter) as exc:
+        log.warning("Telegram rejected gift delivery account=%s gift=%s: %s",
                     user["tg_id"], gift["telegram_gift_id"], exc)
         await db.rollback_gift_purchase(gift["instance_id"])
         return web.json_response({
             "ok": False,
-            "error": "Telegram не отправил подарок. RiseStars и один экземпляр тиража возвращены."
+            "error": "Telegram отклонил отправку. RiseStars и тираж возвращены."
+        }, status=503)
+    except Exception as exc:  # noqa: BLE001
+        # Transport timeouts can happen after Telegram accepted the gift.
+        # Keep the reservation pending so a client retry cannot send a duplicate.
+        log.warning("Ambiguous Telegram gift delivery account=%s gift=%s: %s",
+                    user["tg_id"], gift["telegram_gift_id"], exc)
+        return web.json_response({
+            "ok": False,
+            "error": "Результат отправки не подтверждён. Покупка оставлена в обработке; не повторяйте запрос."
         }, status=503)
 
     await db.confirm_gift_purchase(gift["instance_id"])
