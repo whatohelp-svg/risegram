@@ -30,7 +30,7 @@ import config
 import database as db
 import gift_drops
 from admin import admin_router
-from api import start_api, sync_collectible_usernames, sync_mtproto_verification
+from api import client_wallet_line, start_api, sync_collectible_usernames, sync_mtproto_verification
 from ui import back_row, btn, cancel_kb, esc, fmt_num, kb, safe_send, show
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
@@ -162,7 +162,8 @@ async def main_text(user: dict) -> str:
         f"💼 <b>{config.BRAND}</b>\n\n"
         f"📞 <b>Номер:</b> <code>{esc(user['phone'])}</code>\n"
         f"👤 <b>Аккаунт:</b> {esc(user.get('name') or 'User')} · ID <code>{user['rise_id']}</code>{await badges(user)}\n"
-        f"⭐ {config.CURRENCY_NAME}: <b>{fmt_num(user['risestars'])}</b> · 💎 Gram: <b>{fmt_num(user['gram_balance'], 2)}</b>\n\n"
+        f"{await client_wallet_line(user)}\n"
+        f"Баланс бота: ⭐ {config.CURRENCY_NAME}: <b>{fmt_num(user['risestars'])}</b> · 💎 Gram: <b>{fmt_num(user['gram_balance'], 2)}</b>\n\n"
         f"Выберите действие ниже или откройте приложение."
     )
 
@@ -350,7 +351,8 @@ async def cb_profile(call: CallbackQuery, user: dict):
         f"Telegram ID: <code>{user['tg_id']}</code>\n"
         f"{config.BRAND} ID: <code>{user['rise_id']}</code>\n"
         f"Номер: <code>{esc(user['phone'])}</code>\n\n"
-        f"⭐ {config.CURRENCY_NAME}: <b>{fmt_num(user['risestars'])}</b>\n"
+        f"{await client_wallet_line(user)}\n"
+        f"Баланс бота: ⭐ {config.CURRENCY_NAME}: <b>{fmt_num(user['risestars'])}</b>\n"
         f"💎 Gram: <b>{fmt_num(user['gram_balance'], 2)}</b>\n\n"
         f"🏷 NFT-юзернеймов: {nft_u} · 📞 номеров: {nft_n}\n"
         f"📅 В экосистеме с {esc((user.get('created_at') or '')[:10])}"

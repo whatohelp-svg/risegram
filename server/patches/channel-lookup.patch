@@ -1,11 +1,34 @@
 diff --git a/internal/admin/service.go b/internal/admin/service.go
-index 5d85701..9b5d1c5 100644
+index 5d85701..3e6f843 100644
 --- a/internal/admin/service.go
 +++ b/internal/admin/service.go
-@@ -3380,6 +3380,16 @@ func ErrorCode(err error) string {
+@@ -3380,6 +3380,39 @@ func ErrorCode(err error) string {
  	return ""
  }
  
++// ClientBalances reads the same personal ledgers as payments.getStarsStatus.
++func (s *Service) ClientBalances(ctx context.Context, phone string) (int64, int64, bool, error) {
++	user, found, err := s.ResolveUserByPhone(ctx, phone)
++	if err != nil || !found {
++		return 0, 0, false, err
++	}
++	stars, ok := s.stars.(interface {
++		GetBalance(context.Context, int64) (domain.StarsBalance, error)
++	})
++	grams, gramOK := s.gifts.(interface {
++		TonBalance(context.Context, int64) (int64, error)
++	})
++	if !ok || !gramOK {
++		return 0, 0, false, fmt.Errorf("wallet service unavailable")
++	}
++	balance, err := stars.GetBalance(ctx, user.ID)
++	if err != nil {
++		return 0, 0, false, err
++	}
++	nano, err := grams.TonBalance(ctx, user.ID)
++	return balance.Balance, nano, true, err
++}
++
 +func (s *Service) ResolvePublicChannelForAdmin(ctx context.Context, username string) (domain.Channel, bool, error) {
 +	lookup, ok := s.channels.(interface {
 +		ResolvePublicChannelForAdmin(context.Context, string) (domain.Channel, bool, error)
@@ -20,21 +43,43 @@ index 5d85701..9b5d1c5 100644
  	if req.ChannelID <= 0 {
  		return CommandResult{}, fmt.Errorf("channel_id is required")
 diff --git a/internal/adminapi/server.go b/internal/adminapi/server.go
-index fa238df..c032254 100644
+index fa238df..1a9b0cb 100644
 --- a/internal/adminapi/server.go
 +++ b/internal/adminapi/server.go
-@@ -264,6 +264,7 @@ func (s *Server) routes() http.Handler {
+@@ -264,6 +264,8 @@ func (s *Server) routes() http.Handler {
  	mux.HandleFunc("POST /v1/accounts/set-color", s.authenticated(s.handleSetUserColor))
  	mux.HandleFunc("POST /v1/accounts/set-emoji-status", s.authenticated(s.handleSetUserEmojiStatus))
  	mux.HandleFunc("POST /v1/accounts/revoke-sessions", s.authenticated(s.handleRevokeSessions))
++	mux.HandleFunc("POST /v1/accounts/client-balances", s.authenticated(s.handleClientBalances))
 +	mux.HandleFunc("GET /v1/channels/resolve-username", s.authenticated(s.handleResolveChannelUsername))
  	mux.HandleFunc("POST /v1/channels/set-verified", s.authenticated(s.handleSetChannelVerified))
  	mux.HandleFunc("POST /v1/channels/set-flags", s.authenticated(s.handleSetChannelFlags))
  	mux.HandleFunc("POST /v1/channels/set-settings", s.authenticated(s.handleSetChannelSettings))
-@@ -552,6 +553,22 @@ func (s *Server) handleSetVerified(w http.ResponseWriter, r *http.Request) {
+@@ -552,6 +554,43 @@ func (s *Server) handleSetVerified(w http.ResponseWriter, r *http.Request) {
  	writeCommandResult(w, result, err)
  }
  
++func (s *Server) handleClientBalances(w http.ResponseWriter, r *http.Request) {
++	var req admin.ResolveUserByPhoneRequest
++	if !decodeJSON(w, r, &req) {
++		return
++	}
++	wallet, ok := s.svc.(interface {
++		ClientBalances(context.Context, string) (int64, int64, bool, error)
++	})
++	if !ok {
++		writeError(w, http.StatusNotImplemented, "wallet unavailable")
++		return
++	}
++	stars, nano, found, err := wallet.ClientBalances(r.Context(), req.Phone)
++	if err != nil {
++		writeError(w, http.StatusServiceUnavailable, "wallet unavailable")
++		return
++	}
++	w.Header().Set("Cache-Control", "no-store")
++	writeJSON(w, http.StatusOK, map[string]any{"found": found, "stars": strconv.FormatInt(stars, 10), "gram_nano": strconv.FormatInt(nano, 10)})
++}
++
 +func (s *Server) handleResolveChannelUsername(w http.ResponseWriter, r *http.Request) {
 +	resolver, ok := s.svc.(interface {
 +		ResolvePublicChannelForAdmin(context.Context, string) (domain.Channel, bool, error)

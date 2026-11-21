@@ -20,7 +20,8 @@ from urllib.parse import parse_qsl
 import time
 from collections import defaultdict
 
-from aiohttp import ClientSession, ClientTimeout, web
+from decimal import Decimal
+from aiohttp import ClientError, ClientSession, ClientTimeout, web
 from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError, TelegramRetryAfter
 
 import config
@@ -1015,6 +1016,30 @@ async def h_purchases(request: web.Request):
 _verification_sync_last: dict[int, float] = {}
 _verification_sync_state: dict[int, tuple[str, bool]] = {}
 _verification_sync_locks: dict[int, asyncio.Lock] = {}
+
+
+async def client_wallet_line(user: dict) -> str:
+    """Render the linked native wallet in private bot views."""
+    base = config.MTPROTO_ADMIN_API_URL
+    token = config.MTPROTO_ADMIN_API_TOKEN
+    phone = user.get("phone")
+    if not base or not token or not phone:
+        return "Баланс приложения недоступен"
+    try:
+        async with ClientSession(timeout=ClientTimeout(total=5)) as session:
+            async with session.post(
+                base.rstrip("/") + "/v1/accounts/client-balances",
+                headers={"Authorization": f"Bearer {token}"}, json={"phone": phone},
+            ) as response:
+                response.raise_for_status()
+                data = await response.json()
+        if not data["found"]:
+            return "К номеру ещё не привязан кошелёк приложения"
+        stars = int(data["stars"])
+        grams = format(Decimal(int(data["gram_nano"])).scaleb(-9), "f").rstrip("0").rstrip(".") or "0"
+        return f"Баланс приложения: ⭐ {stars:,} · 💎 {grams} GRAM".replace(",", " ")
+    except (ClientError, TimeoutError, KeyError, ValueError, TypeError):
+        return "Баланс приложения временно недоступен"
 
 
 async def sync_mtproto_verification(user_id: int, force: bool = False) -> dict:

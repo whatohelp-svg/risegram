@@ -21,7 +21,7 @@ from aiogram.types import CallbackQuery, Message
 import config
 import database as db
 import gift_admin
-from api import sync_mtproto_verification
+from api import client_wallet_line, sync_mtproto_verification
 from ui import btn, esc, fmt_num, kb, safe_send, show
 
 log = logging.getLogger("risegram.admin")
@@ -339,7 +339,8 @@ async def screen_user(event, uid: int, note: str = ""):
         f"{config.BRAND} ID: <code>{u['rise_id']}</code>\n"
         f"Номер: <code>{esc(u['phone'])}</code>\n"
         f"Активный юзернейм: {esc(u.get('active_username') or '—')}\n\n"
-        f"⭐ {config.CURRENCY_NAME}: <b>{fmt_num(u['risestars'])}</b> · 💎 <b>{fmt_num(u['gram_balance'], 2)}</b>\n"
+        f"{await client_wallet_line(u)}\n"
+        f"Баланс бота: ⭐ {config.CURRENCY_NAME}: <b>{fmt_num(u['risestars'])}</b> · 💎 <b>{fmt_num(u['gram_balance'], 2)}</b>\n"
         f"🏷 NFT/номера: {nfts}\n"
         f"💳 Потратил: {fmt_num(spent)} ⭐ · 🎮 игр: {st['played']}\n"
         f"📅 Регистрация: {esc((u.get('created_at') or '')[:16])}\n"
