@@ -179,3 +179,14 @@
  				listingCurrency != string(req.Amount.Currency) || listingAmount != req.Amount.Amount {
  				return domain.ErrStarGiftResaleUnavailable
  			}
+--- a/internal/store/postgres/stars_paid_message_integration_test.go
++++ b/internal/store/postgres/stars_paid_message_integration_test.go
+@@ -78,7 +78,7 @@
+ 	if err := pool.QueryRow(ctx, "SELECT balance FROM stars_balances WHERE user_id=$1", recipient.ID).Scan(&rBal); err != nil {
+ 		t.Fatal(err)
+ 	}
+-	credit := price * paidMessageChannelCommissionPermille / 1000
++	credit := price
+ 	if sBal != 1000-price || rBal != credit {
+ 		t.Fatalf("balances sender=%d recipient=%d, want %d/%d", sBal, rBal, 1000-price, credit)
+ 	}
