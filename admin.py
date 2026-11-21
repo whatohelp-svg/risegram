@@ -156,11 +156,20 @@ async def screen_gifts(call: CallbackQuery, page: int = 0):
     pages = max(1, math.ceil(total / per_page))
     page = min(max(0, page), pages - 1)
     current = catalog[page * per_page:(page + 1) * per_page]
+    try:
+        bot_star_balance = await call.bot.get_my_star_balance()
+        bot_stars = int(getattr(bot_star_balance, "amount", 0))
+        bot_balance_line = f"Баланс Telegram Stars бота: <b>{fmt_num(bot_stars)}</b> ⭐\n"
+    except Exception:  # noqa: BLE001
+        bot_stars = None
+        bot_balance_line = "Баланс Telegram Stars бота: <b>не удалось проверить</b>\n"
+
     text = (
         "🎁 <b>NFT-дропы подарков</b>\n\n"
         "Каталог автоматически синхронизируется с Telegram Bot API. В дроп попадают все подарки, "
         "которые бот может отправить и которые поддерживают апгрейд до уникального NFT. "
-        "Бот оплачивает апгрейд при отправке.\n\n"
+        "Бот оплачивает подарок и апгрейд своими Telegram Stars.\n\n"
+        f"{bot_balance_line}"
         f"NFT-подарков доступно боту: <b>{total}</b> · страница {page + 1}/{pages}\n"
         f"Синхронизация: +{sync_result['created']} новых · {sync_result['upgraded']} обновлено · "
         f"{sync_result['already_live']} уже в продаже\n"
