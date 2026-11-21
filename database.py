@@ -533,6 +533,11 @@ async def init_db() -> None:
             for col, decl in cols.items():
                 if col not in have:
                     await db.execute(f"ALTER TABLE {table} ADD COLUMN {col} {decl}")
+        # Preserve legacy verified accounts as RiseGram-issued badges.
+        await db.execute("UPDATE users SET verified_risegram=1 WHERE verified=1 AND verified_risegram=0 AND verified_major=0")
+        await db.execute(
+            "UPDATE users SET verified=CASE WHEN verified_risegram=1 OR verified_major=1 THEN 1 ELSE 0 END"
+        )
         # Keep a previously selected NFT username active when upgrading.
         await db.execute(
             "UPDATE user_nft_inventory SET is_active=1 WHERE item_type='username' AND value IN "
