@@ -83,7 +83,7 @@ async def audit(text: str):
 
 
 def user_line(u: dict) -> str:
-    flags = ("🚫" if u.get("banned") else "") + ("✅" if u.get("verified") else "")
+    flags = ("🚫" if u.get("banned") else "") + ("☑️" if u.get("verified_risegram") else "") + ("💠" if u.get("verified_major") else "")
     return f"{esc(db.shown_username(u))} · <code>{u['tg_id']}</code> {flags}".strip()
 
 
@@ -267,10 +267,12 @@ async def screen_user(event, uid: int, note: str = ""):
     if note:
         text = f"{note}\n\n" + text
     ban_label = "✅ Разбанить" if u["banned"] else "🔨 Забанить"
-    ver_label = "❎ Снять верификацию RiseGram" if u["verified"] else "✅ Выдать верификацию RiseGram"
+    rise_label = "❎ Снять RiseGram" if u.get("verified_risegram") else "☑️ Выдать RiseGram"
+    major_label = "❎ Снять Major" if u.get("verified_major") else "💠 Выдать Major"
     markup = kb(
         [btn("⭐ RiseStars ±", f"adm:g:{uid}:stars", style="success"), btn("💎 Gram ±", f"adm:g:{uid}:gram", style="success")],
-        [btn(ban_label, f"adm:uban:{uid}", style="success" if u["banned"] else "danger"), btn(ver_label, f"adm:uver:{uid}")],
+        [btn(ban_label, f"adm:uban:{uid}", style="success" if u["banned"] else "danger")],
+        [btn(rise_label, f"adm:uverrise:{uid}"), btn(major_label, f"adm:uvermajor:{uid}")],
         [btn("📞 Сменить номер", f"adm:unum:{uid}"), btn("🏷 Выдать юзернейм", f"adm:uun:{uid}")],
         [btn("📞 Выдать +888", f"adm:uph:{uid}"), btn("🗂 NFT/номера", f"adm:nfts:{uid}")],
         [btn("🔑 Выдать код входа", f"adm:ucode:{uid}"), btn("✉️ Написать", f"adm:umsg:{uid}")],
@@ -970,7 +972,7 @@ async def adm_cb(call: CallbackQuery, state: FSMContext, user: dict):
         return await ask(call, state, "usearch", "🔎 Введите часть имени, @юзернейм или ID:", "adm:users:0")
     if route == "u":
         return await screen_user(call, num(parts, 2))
-    if route in ("uban", "uver", "udel", "udelok", "ucode", "unum", "uun", "uph", "umsg"):
+    if route in ("uban", "uver", "uverrise", "uvermajor", "udel", "udelok", "ucode", "unum", "uun", "uph", "umsg"):
         uid = num(parts, 2)
         u = await db.get_user(uid)
         if not u:
@@ -982,10 +984,14 @@ async def adm_cb(call: CallbackQuery, state: FSMContext, user: dict):
             await db.set_banned(uid, not u["banned"])
             await audit(f"{'Разбан' if u['banned'] else 'Бан'}: {db.shown_username(u)} ({uid})")
             return await screen_user(call, uid, "✅ Готово.")
-        if route == "uver":
-            await db.set_verified(uid, not u["verified"])
+        if route in ("uverrise", "uvermajor"):
+            kind = "risegram" if route == "uverrise" else "major"
+            field = "verified_risegram" if kind == "risegram" else "verified_major"
+            enabled = not bool(u.get(field))
+            await db.set_verification(uid, kind, enabled)
             await sync_mtproto_verification(uid, force=True)
-            await audit(f"Верификация RiseGram {'снята' if u['verified'] else 'выдана'}: {uid}")
+            label = "RiseGram" if kind == "risegram" else "Major"
+            await audit(f"Верификация {label} {'выдана' if enabled else 'снята'}: {uid}")
             return await screen_user(call, uid, "✅ Готово.")
         if route == "ucode":
             code = await db.issue_auth_code(uid)
