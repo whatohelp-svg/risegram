@@ -166,10 +166,10 @@ async def core_request_code(bot, phone: str) -> tuple[int, dict]:
 
 
 async def core_verify(phone: str, code: str) -> tuple[int, dict]:
-    user = await db.verify_auth_code(phone, code)
-    if not user:
+    result = await db.redeem_auth_code(phone, code)
+    if not result:
         return 401, {"ok": False, "error": "invalid_code"}
-    token = await db.create_session(user["tg_id"])
+    user, token = result
     return 200, {"ok": True, "token": token, "user": public_user(user)}
 
 
@@ -1401,17 +1401,20 @@ async def h_mtproto_otp_delivery(request: web.Request):
     if (not delivery_id or len(delivery_id) > 128 or channel != "sms" or purpose != "login_sms"
             or not recipient or len(recipient) > 40 or not code or len(code) > 16 or not code.isdigit()):
         return web.json_response({"accepted": False, "error_code": "unsupported_delivery", "retryable": False}, status=400)
-    existing = await db.fetchone("SELECT status FROM rg_otp_deliveries WHERE delivery_id=?", (delivery_id,))
-    if existing:
-        if existing["status"] == "sent":
+    now = db.now()
+    async with db.connect() as conn:
+        async with conn.execute(
+            """INSERT INTO rg_otp_deliveries(delivery_id,purpose,channel,status,created_at,updated_at)
+               VALUES(?,?,?,'processing',?,?) ON CONFLICT(delivery_id) DO NOTHING""",
+            (delivery_id, purpose, channel, now, now),
+        ) as cur:
+            claimed = cur.rowcount == 1
+        await conn.commit()
+    if not claimed:
+        existing = await db.fetchone("SELECT status FROM rg_otp_deliveries WHERE delivery_id=?", (delivery_id,))
+        if existing and existing["status"] == "sent":
             return web.json_response({"accepted": True, "message_id": delivery_id})
         return web.json_response({"accepted": False, "error_code": "delivery_already_processed", "retryable": False}, status=409)
-    now = db.now()
-    await db.execute(
-        """INSERT INTO rg_otp_deliveries(delivery_id,purpose,channel,status,created_at,updated_at)
-           VALUES(?,?,?,'processing',?,?)""",
-        (delivery_id, purpose, channel, now, now),
-    )
     digits = db.digits_of(recipient)
     user = await db.fetchone("SELECT * FROM users WHERE phone_digits=? AND banned=0", (digits,)) if len(digits) >= 7 else None
     if not user or not await db.is_feature_on("auth_numbers"):

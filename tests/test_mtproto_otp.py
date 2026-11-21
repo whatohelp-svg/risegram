@@ -1,3 +1,4 @@
+import asyncio
 import hashlib
 import hmac
 import json
@@ -103,6 +104,49 @@ class MtprotoOtpWebhookTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(send.await_args.args[1], self.user["tg_id"])
         self.assertEqual(await db.telegram_chat_id(send.await_args.args[1]), self.telegram_chat_id)
         self.assertIn("Код входа", send.await_args.args[2])
+
+    async def test_concurrent_http_redemption_persists_one_session(self):
+        code = await db.issue_auth_code(self.user["tg_id"])
+        responses = await asyncio.gather(
+            api.core_verify(self.user["phone"], code),
+            api.core_verify(self.user["phone"], code),
+        )
+        self.assertEqual(sorted(status for status, _ in responses), [200, 401])
+        token = next(body["token"] for status, body in responses if status == 200)
+        restored = await db.get_session_user(token)
+        self.assertEqual(restored["tg_id"], self.user["tg_id"])
+        self.assertEqual(await db.scalar("SELECT COUNT(*) FROM sessions"), 1)
+
+    async def test_failed_session_write_leaves_the_code_redeemable(self):
+        code = await db.issue_auth_code(self.user["tg_id"])
+        with patch("database._insert_session", side_effect=RuntimeError("session write failed")):
+            with self.assertRaisesRegex(RuntimeError, "session write failed"):
+                await api.core_verify(self.user["phone"], code)
+        status, _ = await api.core_verify(self.user["phone"], code)
+        self.assertEqual(status, 200)
+
+    async def test_concurrent_webhook_delivery_sends_once(self):
+        raw = json.dumps(self.payload("otp_parallel")).encode()
+        headers = self.signed_headers(raw)
+        started = asyncio.Event()
+        release = asyncio.Event()
+
+        async def deliver(*args):
+            started.set()
+            await release.wait()
+            return True
+
+        with patch("api.safe_send", side_effect=deliver) as send:
+            first = asyncio.create_task(self.client.post("/internal/mtproto/otp", data=raw, headers=headers))
+            await asyncio.wait_for(started.wait(), timeout=5)
+            try:
+                duplicate = await self.client.post("/internal/mtproto/otp", data=raw, headers=headers)
+                self.assertEqual(duplicate.status, 409)
+            finally:
+                release.set()
+                response = await first
+            self.assertEqual(response.status, 200)
+            send.assert_awaited_once()
 
     async def test_personal_number_is_not_an_otp_alias(self):
         payload = self.payload("otp_personal_phone")

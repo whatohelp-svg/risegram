@@ -907,32 +907,55 @@ async def get_active_code(tg_id: int) -> dict | None:
     )
 
 
-async def verify_auth_code(phone_digits: str, code: str) -> dict | None:
-    """Проверяет код входа для номера. Успех — возвращает пользователя и гасит код."""
-    user = await fetchone("SELECT * FROM users WHERE phone_digits=?", (digits_of(phone_digits),))
-    if not user or user["banned"]:
-        return None
-    row = await get_active_code(user["tg_id"])
-    if not row:
-        return None
-    if row["attempts"] >= 5:
-        await execute("UPDATE auth_codes SET used=1 WHERE id=?", (row["id"],))
-        return None
-    if not secrets.compare_digest(str(row["code"]), str(code).strip()):
-        await execute("UPDATE auth_codes SET attempts=attempts+1 WHERE id=?", (row["id"],))
-        return None
-    await execute("UPDATE auth_codes SET used=1 WHERE id=?", (row["id"],))
-    await execute("UPDATE users SET auth_code=NULL, auth_code_expires=NULL WHERE tg_id=?", (user["tg_id"],))
-    return user
+async def redeem_auth_code(phone_digits: str, code: str) -> tuple[dict, str] | None:
+    """Consume a login code and persist its session in one transaction."""
+    code = code.strip()
+    async with connect() as conn:
+        await conn.execute("BEGIN IMMEDIATE")
+        async with conn.execute(
+            "SELECT * FROM users WHERE phone_digits=? AND banned=0", (digits_of(phone_digits),),
+        ) as cur:
+            user = await cur.fetchone()
+        if not user:
+            return None
+        async with conn.execute(
+            """SELECT id, code, attempts FROM auth_codes
+               WHERE tg_id=? AND used=0 AND expires_at>? ORDER BY id DESC LIMIT 1""",
+            (user["tg_id"], now()),
+        ) as cur:
+            row = await cur.fetchone()
+        if not row or row["attempts"] >= 5:
+            return None
+        if not secrets.compare_digest(row["code"].encode(), code.encode()):
+            await conn.execute(
+                "UPDATE auth_codes SET attempts=attempts+1, used=(attempts+1>=5) WHERE id=?",
+                (row["id"],),
+            )
+            await conn.commit()
+            return None
+        await conn.execute("UPDATE auth_codes SET used=1 WHERE id=?", (row["id"],))
+        await conn.execute(
+            "UPDATE users SET auth_code=NULL, auth_code_expires=NULL WHERE tg_id=?", (user["tg_id"],),
+        )
+        token = await _insert_session(conn, user["tg_id"], 30)
+        await conn.commit()
+        return dict(user), token
 
 
-async def create_session(tg_id: int, days: int = 30) -> str:
+async def _insert_session(conn, tg_id: int, days: int) -> str:
     token = secrets.token_urlsafe(32)
-    await execute(
+    await conn.execute(
         "INSERT INTO sessions (token, tg_id, created_at, expires_at) VALUES (?,?,?,?)",
         (token, tg_id, now(), now_plus(days * 86400)),
     )
     return token
+
+
+async def create_session(tg_id: int, days: int = 30) -> str:
+    async with connect() as conn:
+        token = await _insert_session(conn, tg_id, days)
+        await conn.commit()
+        return token
 
 
 async def get_session_user(token: str) -> dict | None:
