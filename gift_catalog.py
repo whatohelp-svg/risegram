@@ -114,3 +114,49 @@ async def populate_client_catalog(bot):
     except Exception as exc:
         log.warning("Client gift catalog: %d imported; %s failed (%s, HTTP %s)", imported, stage, type(exc).__name__, getattr(exc, "status", None))
         return False
+
+
+async def populate_seasonal_catalog():
+    import asyncio
+    import json
+    import logging
+    from pathlib import Path
+    from aiohttp import ClientSession, ClientTimeout, FormData
+    import config
+    import database as db
+    from native_drops import asset
+
+    entries = json.loads((Path(__file__).parent / "data/seasonal_catalog.json").read_text())
+    log = logging.getLogger("risegram.seasonal")
+    timeout = ClientTimeout(total=30)
+    async with ClientSession(timeout=timeout) as assets, ClientSession(timeout=timeout, headers={
+        "Authorization": "Bearer " + config.MTPROTO_ADMIN_API_TOKEN
+    }) as service:
+        while True:
+            pending = 0
+            for index, item in enumerate(entries):
+                key = "risegram-seasonal-" + item["key"]
+                if await db.get_meta(key):
+                    continue
+                try:
+                    image = await asset(assets, item["path"])
+                    price = item["stars"]
+                    form = FormData()
+                    form.add_field("metadata", json.dumps({
+                        "command_id": key, "actor": "risegram-catalog", "reason": "Seasonal gift catalog",
+                        "title": item["title"], "stars": price, "convert_stars": (price * 85 + 50) // 100,
+                        "enabled": True, "sort_order": 1000 + index,
+                    }))
+                    form.add_field("file", image, filename=item["key"]+".tgs", content_type="application/x-tgsticker")
+                    async with service.post(config.MTPROTO_ADMIN_API_URL+"/v1/gifts/import", data=form) as response:
+                        result = await response.json()
+                        if response.status != 200 or result.get("status") != "completed":
+                            raise ValueError(str(result.get("error") or response.status)[:150])
+                        await db.set_meta(key, str(int(result["details"]["gift_id"])))
+                except Exception as exc:
+                    pending += 1
+                    log.warning("Seasonal gift %s pending: %s", item["key"], str(exc)[:180])
+            if not pending:
+                log.info("Seasonal catalog ready: %d gifts", len(entries))
+                return
+            await asyncio.sleep(90)

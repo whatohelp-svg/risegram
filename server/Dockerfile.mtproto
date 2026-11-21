@@ -29,6 +29,8 @@ COPY server/patches/personal-gift-upgrade.patch /tmp/personal-gift-upgrade.patch
 RUN git apply /tmp/personal-gift-upgrade.patch
 COPY server/patches/gift-prices.patch /tmp/gift-prices.patch
 RUN git apply /tmp/gift-prices.patch
+COPY server/patches/regular-gift-redemption.patch /tmp/regular-gift-redemption.patch
+RUN git apply /tmp/regular-gift-redemption.patch
 RUN go mod download
 ENV CGO_ENABLED=0
 

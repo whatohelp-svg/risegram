@@ -2215,16 +2215,19 @@ async def main():
     recovery = asyncio.create_task(recover_wallet_jobs(bot))
     drop_publisher = asyncio.create_task(worker())
     issuer_setup = asyncio.create_task(bootstrap())
+    from gift_catalog import populate_seasonal_catalog
+    seasonal = asyncio.create_task(populate_seasonal_catalog())
     gift_sync = asyncio.create_task(sync_client_gifts(bot))
     try:
         await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
     finally:
         delivery.cancel()
         recovery.cancel()
+        seasonal.cancel()
         gift_sync.cancel()
         issuer_setup.cancel()
         drop_publisher.cancel()
-        await asyncio.gather(recovery, gift_sync, issuer_setup, drop_publisher, return_exceptions=True)
+        await asyncio.gather(seasonal, recovery, gift_sync, issuer_setup, drop_publisher, return_exceptions=True)
         if runner:
             await runner.cleanup()
         for t in list(crash_tasks.values()) + list(hl_tasks.values()):
