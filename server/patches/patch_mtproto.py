@@ -420,6 +420,17 @@ patch_go_file(
 \tvar (
 """,
     """func (r *Router) onAuthSignIn(ctx context.Context, req *tg.AuthSignInRequest) (tg.AuthAuthorizationClass, error) {
+\tstartedAt := time.Now()
+\tctx, cancel := context.WithTimeout(ctx, 25*time.Second)
+\tdefer cancel()
+\tsessionID, _ := SessionIDFrom(ctx)
+\tauthID, _ := AuthKeyIDFrom(ctx)
+\tif r.log != nil {
+\t\tr.log.Info("auth.signIn received",
+\t\t\tzap.String("auth_key_id", fmt.Sprintf("%x", authID[:])),
+\t\t\tzap.Int64("session_id", sessionID),
+\t\t)
+\t}
 \tif userID, authorized, resolveErr := r.currentUserID(ctx); resolveErr == nil && authorized && userID != 0 {
 \t\tif current, userErr := r.deps.Users.Self(ctx, userID); userErr == nil && current.Phone == req.PhoneNumber {
 \t\t\treturn &tg.AuthAuthorization{User: r.tgSelfUserWithUsernames(ctx, current)}, nil
