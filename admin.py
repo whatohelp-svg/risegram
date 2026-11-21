@@ -1314,3 +1314,58 @@ async def adm_cb(call: CallbackQuery, state: FSMContext, user: dict):
         return await screen_logs(call, num(parts, 2))
 
     await call.answer("Неизвестное действие.")
+
+
+@admin_router.message(Command("reply"))
+async def cmd_support_reply(message: Message):
+    if int(message.from_user.id) != int(config.OWNER_TELEGRAM_ID):
+        return await message.answer("❌ Только владелец может отвечать на обращения")
+    parts = (message.text or "").split(maxsplit=2)
+    if len(parts) != 3 or not parts[1].isdigit() or not parts[2].strip():
+        return await message.answer("Формат: /reply ID текст ответа")
+    ticket = await db.get_support_ticket(int(parts[1]))
+    if not ticket:
+        return await message.answer("Обращение не найдено")
+    if ticket["status"] != "open":
+        return await message.answer("На это обращение уже ответили")
+    delivered = await safe_send(message.bot, int(ticket["tg_id"]),
+        f"🆘 <b>Ответ поддержки RiseGram · #{ticket['id']}</b>\n\n{esc(parts[2])}")
+    if not delivered:
+        return await message.answer("Не удалось доставить ответ — тикет остаётся открытым")
+    await db.close_support_ticket(ticket["id"])
+    await audit(f"Ответ на тикет #{ticket['id']}")
+    await message.answer(f"✅ Ответ на обращение #{ticket['id']} доставлен")
+
+
+@admin_router.message(Command("markfake", "markscam", "unmarkfake", "unmarkscam"))
+async def cmd_risk_mark(message: Message):
+    if int(message.from_user.id) != int(config.OWNER_TELEGRAM_ID):
+        return await message.answer("❌ Метки может выдавать только владелец")
+    parts = (message.text or "").split(maxsplit=2)
+    cmd = parts[0].split("@")[0].lstrip("/").lower()
+    label = "FAKE" if cmd.endswith("fake") else "SCAM"
+    if len(parts) < 2 or not re.fullmatch(r"@[A-Za-z][A-Za-z0-9_]{3,31}", parts[1]):
+        return await message.answer("Формат: /markfake @username причина или /unmarkfake @username (аналогично для scam)")
+    if cmd.startswith("unmark"):
+        count = await db.remove_risk_label(parts[1], label)
+        await audit(f"Метка {label} снята с {parts[1]}")
+        return await message.answer("✅ Метка снята" if count else "ℹ️ Метка не найдена")
+    if len(parts) < 3 or len(parts[2].strip()) < 8:
+        return await message.answer("Укажите конкретную причину длиной от 8 символов")
+    await db.set_risk_label(parts[1], label, int(config.OWNER_ID), parts[2])
+    await audit(f"Метка {label} установлена для {parts[1]}")
+    await message.answer(f"✅ Метка {label} назначена для {esc(parts[1])} внутри RiseGram")
+
+
+@admin_router.message(Command("tickets"))
+async def cmd_support_tickets(message: Message):
+    if int(message.from_user.id) != int(config.OWNER_TELEGRAM_ID):
+        return await message.answer("❌ Только владелец может просматривать обращения")
+    rows = await db.fetchall("SELECT id,tg_id,message,created_at FROM support_tickets WHERE status='open' ORDER BY id DESC LIMIT 15")
+    if not rows:
+        return await message.answer("🆘 Открытых обращений нет")
+    chunks = ["🆘 <b>Открытые обращения RiseGram</b>"]
+    for ticket in rows:
+        preview = ticket["message"][:180]
+        chunks.append(f"\n<b>#{ticket['id']}</b> · ID <code>{ticket['tg_id']}</code>\n{esc(preview)}\n<code>/reply {ticket['id']} ответ</code>")
+    await message.answer("\n".join(chunks))
