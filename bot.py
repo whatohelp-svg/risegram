@@ -27,7 +27,6 @@ from aiogram.types import CallbackQuery, LabeledPrice, Message, PreCheckoutQuery
 import config
 import database as db
 from admin import admin_router
-from gift_catalog import available_telegram_gifts
 from api import start_api, sync_collectible_usernames, sync_mtproto_verification
 from ui import back_row, btn, cancel_kb, esc, fmt_num, kb, safe_send, show
 
@@ -172,7 +171,7 @@ def webapp_button(style: str | None = "primary"):
 def main_kb():
     return kb(
         [btn("🔒 Код входа", "menu:code", style="primary"), btn("📞 Мой номер", "menu:number")],
-        [btn("🎁 Подарки", "gift:hub", style="success"), btn("💎 Донат", "donat:hub")],
+        [btn("💎 Донат", "donat:hub")],
         [webapp_button(None)],
         [btn("🕒 Мои покупки", "menu:purchases"), btn("ℹ️ Как это работает", "menu:help")],
         [btn("⚙️ Настройки", "menu:settings"), btn("✨ Ещё", "menu:more")],
@@ -198,179 +197,6 @@ async def cb_webapp(call: CallbackQuery):
 # ═══════════════════════════ NFT-подарки и дропы ════════════════════════════
 
 GIFT_PAGE_SIZE = 6
-
-
-async def gift_shop_screen(event, user: dict, page: int = 0):
-    if not await need_feature(event, "store"):
-        return
-    try:
-        catalog = await available_telegram_gifts(event.bot)
-        await db.sync_gift_catalog_drops([gift for gift in catalog if gift.get("can_upgrade")])
-    except Exception:
-        # Existing published drops remain usable if Telegram's catalog is
-        # temporarily unavailable.
-        log.warning("NFT gift catalog refresh deferred", exc_info=True)
-
-    drops = await db.list_gift_drops(active_only=True)
-    pages = max(1, math.ceil(len(drops) / GIFT_PAGE_SIZE))
-    page = min(max(0, page), pages - 1)
-    current = drops[page * GIFT_PAGE_SIZE:(page + 1) * GIFT_PAGE_SIZE]
-    fresh_user = await db.get_user(user["tg_id"]) or user
-
-    text = (
-        "🎁 <b>Подарки RiseGram</b>\n\n"
-        f"Баланс: <b>{fmt_num(fresh_user.get('risestars', 0))} RiseStars</b>\n"
-        "Выбирай ограниченный тираж. Подарок отправляется в твой Telegram, "
-        "а апгрейд до уникального NFT оплачивается ботом.\n\n"
-        f"Активных дропов: <b>{len(drops)}</b> · страница {page + 1}/{pages}\n"
-    )
-    rows = []
-    for drop in current:
-        text += (
-            f"\n{esc(drop['emoji'])} <b>{esc(drop['gift_name'])}</b>\n"
-            f"Цена: <b>{fmt_num(drop['price_risestars'])} RiseStars</b> · "
-            f"тираж: <b>{drop['stock_remaining']}/{drop['stock_total']}</b>\n"
-        )
-        nft_label = " · NFT" if drop.get("pay_for_upgrade") else ""
-        rows.append([btn(
-            f"{drop['emoji']} {drop['gift_name']} · {fmt_num(drop['price_risestars'])} RS{nft_label}"[:60],
-            f"gift:buy:{drop['id']}",
-            style="primary",
-        )])
-    if not drops:
-        text += (
-            "\nПока нет доступных NFT-подарков. Каталог синхронизируется автоматически "
-            "с подарками, которые Telegram разрешает отправлять этому боту."
-        )
-
-    nav = []
-    if page > 0:
-        nav.append(btn("◀️", f"gift:page:{page - 1}"))
-    if page + 1 < pages:
-        nav.append(btn("▶️", f"gift:page:{page + 1}"))
-    if nav:
-        rows.append(nav)
-    rows.append([btn("📦 Мои подарки", "gift:mine"), btn("🔄 Обновить", "gift:hub")])
-    rows.append([btn("🏠 Меню", "menu:main")])
-    await show(event, text, kb(*rows))
-
-
-@router.message(Command("gifts"))
-async def cmd_gifts(message: Message, user: dict):
-    await gift_shop_screen(message, user)
-
-
-@router.callback_query(F.data == "gift:hub")
-async def cb_gift_hub(call: CallbackQuery, user: dict):
-    await gift_shop_screen(call, user)
-
-
-@router.callback_query(F.data.startswith("gift:page:"))
-async def cb_gift_page(call: CallbackQuery, user: dict):
-    try:
-        page = int(call.data.split(":")[2])
-    except (IndexError, TypeError, ValueError):
-        page = 0
-    await gift_shop_screen(call, user, page)
-
-
-@router.callback_query(F.data == "gift:mine")
-async def cb_gift_inventory(call: CallbackQuery, user: dict):
-    items = await db.list_user_gifts(user["tg_id"], include_pending=True)
-    sent_count = sum(1 for item in items if item.get("status") == "sent")
-    pending_count = sum(1 for item in items if item.get("status") == "pending")
-    text = (
-        "📦 <b>Мои подарки</b>\n\n"
-        f"Получено: <b>{sent_count}</b> · в обработке: <b>{pending_count}</b>\n"
-    )
-    if not items:
-        text += "\nЗдесь появятся подарки, купленные в дропах RiseGram."
-    else:
-        for item in items[:30]:
-            pending = item.get("status") == "pending"
-            text += (
-                f"\n{'⏳' if pending else esc(item['emoji'])} <b>{esc(item['gift_name'])}</b> "
-                f"· №{item['serial_no']}\n"
-                f"Оплачено: {fmt_num(item['price_paid'])} RiseStars\n"
-            )
-            if pending:
-                text += "Доставка не подтверждена Telegram — не покупай повторно, дождись проверки\n"
-    await show(
-        call,
-        text,
-        kb([btn("🎁 К дропам", "gift:hub")], [btn("🏠 Меню", "menu:main")]),
-    )
-
-
-@router.callback_query(F.data.startswith("gift:buy:"))
-async def cb_gift_buy(call: CallbackQuery, user: dict):
-    if not await need_feature(call, "store"):
-        return
-    try:
-        drop_id = int(call.data.split(":")[2])
-    except (IndexError, TypeError, ValueError):
-        await call.answer("Некорректный номер дропа.", show_alert=True)
-        return
-
-    ok, message, gift = await db.reserve_gift_drop(user["tg_id"], drop_id)
-    if not ok:
-        await call.answer(message, show_alert=True)
-        await gift_shop_screen(call, user)
-        return
-
-    recipient_id = await db.telegram_chat_id(user["tg_id"])
-    if not recipient_id:
-        await db.rollback_gift_purchase(gift["instance_id"])
-        await call.answer("У аккаунта нет связанного Telegram-чата. Баланс и тираж возвращены.", show_alert=True)
-        await gift_shop_screen(call, user)
-        return
-
-    try:
-        delivered = await call.bot.send_gift(
-            user_id=int(recipient_id),
-            gift_id=gift["telegram_gift_id"],
-            pay_for_upgrade=bool(gift.get("pay_for_upgrade")),
-            text="Подарок из RiseGram · NFT 🎁",
-        )
-        if delivered is not True:
-            await db.rollback_gift_purchase(gift["instance_id"])
-            await call.answer("Telegram не подтвердил отправку. Баланс и тираж возвращены.", show_alert=True)
-            await gift_shop_screen(call, user)
-            return
-    except (TelegramBadRequest, TelegramForbiddenError, TelegramRetryAfter) as exc:
-        await db.rollback_gift_purchase(gift["instance_id"])
-        log.warning(
-            "NFT gift delivery rejected account=%s drop=%s: %s",
-            user["tg_id"], drop_id, exc,
-        )
-        await call.answer("Telegram отклонил отправку. Баланс и тираж возвращены.", show_alert=True)
-        await gift_shop_screen(call, user)
-        return
-    except Exception as exc:  # noqa: BLE001
-        # A network timeout can happen after Telegram has accepted the gift.
-        # Keep the reservation pending rather than risk charging and sending twice.
-        log.warning(
-            "NFT gift delivery result is ambiguous account=%s drop=%s: %s",
-            user["tg_id"], drop_id, exc,
-        )
-        await call.answer(
-            "Telegram не подтвердил результат запроса. Покупка оставлена в обработке, "
-            "не нажимай повторно — повторная отправка может создать дубликат",
-            show_alert=True,
-        )
-        return
-
-    if not await db.confirm_gift_purchase(gift["instance_id"]):
-        log.error("NFT gift was delivered but inventory confirmation failed: instance=%s", gift["instance_id"])
-    fresh_user = await db.get_user(user["tg_id"]) or user
-    await show(
-        call,
-        f"✅ <b>Подарок отправлен</b>\n\n"
-        f"{esc(gift['emoji'])} <b>{esc(gift['gift_name'])}</b> · №{gift['serial_no']}\n"
-        f"Оплачено: <b>{fmt_num(gift['price_paid'])} RiseStars</b>\n"
-        f"Остаток: <b>{fmt_num(fresh_user.get('risestars', 0))} RiseStars</b>",
-        kb([btn("🎁 Ещё подарки", "gift:hub"), btn("📦 Мои подарки", "gift:mine")], [btn("🏠 Меню", "menu:main")]),
-    )
 
 
 # ─── код входа и номер ──────────────────────────────────────────────────────
@@ -490,7 +316,7 @@ async def cb_more(call: CallbackQuery):
             [btn("👤 Профиль", "more:profile"), btn("🗂 Мои NFT и номера", "my:items")],
             [btn("🎮 Игры", "games:hub", style="success"), btn("🏆 Топ", "more:top")],
             [btn("🎯 Задания", "more:tasks"), btn("🛒 Маркет", "market:hub", style="success")],
-            [btn("🎁 Подарки", "gift:hub"), btn("💸 Перевод", "more:send")],
+            [btn("💸 Перевод", "more:send")],
             [btn("🎁 Бонус", "more:bonus")],
             back_row(),
         ),
