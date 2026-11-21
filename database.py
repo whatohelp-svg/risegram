@@ -825,7 +825,9 @@ async def set_balance(tg_id: int, col: str, value: float) -> None:
 
 
 async def transfer_risestars(from_id: int, to_id: int, amount: float, fee_percent: float) -> tuple[bool, str]:
-    fee = round(amount * fee_percent / 100, 2)
+    if not float(amount).is_integer() or amount <= 0:
+        return False, "Переводите целое положительное число звёзд."
+    fee = round(amount * fee_percent / 100)
     async with connect() as db:
         cur = await db.execute(
             "UPDATE users SET risestars=ROUND(risestars-?,2) WHERE tg_id=? AND risestars>=?",
@@ -1306,6 +1308,8 @@ async def exchange_gram_balance(tg_id: int, direction: str, amount: float) -> tu
         return False, "Введите положительную сумму.", {}
     if abs(raw_amount - amount) > 1e-8:
         return False, "Точность суммы — не более 2 знаков после запятой.", {}
+    if direction == "stars_to_gram" and not amount.is_integer():
+        return False, "Введите целое количество звёзд.", {}
     rate = float(config.GRAM_TO_RISESTARS)
     async with connect() as conn:
         await conn.execute("BEGIN IMMEDIATE")
@@ -1825,7 +1829,9 @@ async def listed_item_ids(seller_id: int) -> set[int]:
 
 async def create_listing(seller_id: int, item_id: int, price: float) -> tuple[bool, str, int]:
     """Выставляет предмет. Возвращает (успех, сообщение, id лота)."""
-    price = round(float(price), 2)
+    if not float(price).is_integer():
+        return False, "Цена в звёздах должна быть целой.", 0
+    price = int(price)
     if not (config.MARKET_MIN_PRICE <= price <= config.MARKET_MAX_PRICE):
         return False, f"Цена должна быть от {config.MARKET_MIN_PRICE:g} до {config.MARKET_MAX_PRICE:g} RiseStars.", 0
     it = await get_nft(item_id)
@@ -1897,7 +1903,7 @@ async def buy_listing(buyer_id: int, lid: int) -> tuple[bool, str, dict]:
             await db.rollback()
             return False, "Нельзя купить свой лот.", {}
         price = float(L["price"])
-        fee = round(price * config.MARKET_FEE_PERCENT / 100, 2)
+        fee = round(price * config.MARKET_FEE_PERCENT / 100)
         payout = round(price - fee, 2)
         cur = await db.execute(
             "UPDATE users SET risestars=ROUND(risestars-?,2) WHERE tg_id=? AND risestars>=?", (price, buyer_id, price)

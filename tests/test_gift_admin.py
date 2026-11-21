@@ -48,9 +48,11 @@ class MiniAppSignedIdentityTest(unittest.TestCase):
     def tearDown(self):
         config.BOT_TOKEN=self.old_token
 
-    def signed(self,user_id=123,age=0):
+    def signed(self,user_id=123,age=0,signature=None):
         fields={"auth_date":str(int(time.time())-age),
                 "user":json.dumps({"id":user_id},separators=(",",":"))}
+        if signature is not None:
+            fields["signature"] = signature
         check="\n".join(f"{key}={value}" for key,value in sorted(fields.items()))
         key=hmac.new(b"WebAppData",config.BOT_TOKEN.encode(),hashlib.sha256).digest()
         fields["hash"]=hmac.new(key,check.encode(),hashlib.sha256).hexdigest()
@@ -58,6 +60,11 @@ class MiniAppSignedIdentityTest(unittest.TestCase):
 
     def test_verified_identity(self):
         self.assertEqual(api._miniapp_telegram_id(self.signed()),123)
+    def test_telegram_signature_field_is_authenticated(self):
+        raw = self.signed(signature="sample-ed25519")
+        self.assertEqual(api._miniapp_telegram_id(raw), 123)
+        self.assertIsNone(api._miniapp_telegram_id(raw.replace("sample-ed25519", "changed")))
+
     def test_tamper_rejected(self):
         self.assertIsNone(api._miniapp_telegram_id(self.signed().replace("123","124")))
     def test_expired_rejected(self):

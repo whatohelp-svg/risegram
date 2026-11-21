@@ -58,3 +58,53 @@ async def available_telegram_gifts(bot) -> list[dict]:
             "personal_remaining_count": gift_field(gift, "personal_remaining_count"),
         })
     return out
+
+
+async def populate_client_catalog(bot):
+    """Import missing standard gifts with their Bot API price and animation."""
+    import json
+    import logging
+
+    import aiohttp
+    import config
+
+    log = logging.getLogger("risegram.gifts")
+    base = config.MTPROTO_ADMIN_API_URL
+    if not base or not config.MTPROTO_ADMIN_API_TOKEN:
+        return
+    imported = 0
+    existing = 0
+    try:
+        catalog = await bot.get_available_gifts()
+        async with aiohttp.ClientSession(
+            headers={"Authorization": f"Bearer {config.MTPROTO_ADMIN_API_TOKEN}"},
+            timeout=aiohttp.ClientTimeout(total=15),
+        ) as session:
+            for gift in catalog.gifts:
+                key = str(gift.id)
+                if key not in GIFT_LABELS or gift.total_count or not gift.sticker.is_animated:
+                    continue
+                async with session.get(f"{base}/v1/gifts/{key}/animation") as response:
+                    if response.status == 200:
+                        existing += 1
+                        continue
+                    if response.status != 404:
+                        response.raise_for_status()
+                animation = await bot.download(gift.sticker)
+                form = aiohttp.FormData()
+                form.add_field("metadata", json.dumps({
+                    "command_id": f"risegram-standard-gift-{key}",
+                    "actor": "risegram-catalog", "reason": "Publish standard gift in RiseGram",
+                    "gift_id": int(key), "title": GIFT_LABELS[key], "stars": gift.star_count,
+                    "convert_stars": 0, "enabled": True, "sort_order": list(GIFT_LABELS).index(key),
+                }))
+                form.add_field("file", animation.read(), filename=f"{key}.tgs",
+                               content_type="application/x-tgsticker")
+                async with session.post(f"{base}/v1/gifts/import", data=form) as response:
+                    response.raise_for_status()
+                    if (await response.json()).get("status") != "completed":
+                        raise ValueError("import incomplete")
+                imported += 1
+        log.info("Client gift catalog: %d imported, %d already present", imported, existing)
+    except Exception as exc:
+        log.warning("Client gift catalog: %d imported, sync interrupted (%s)", imported, type(exc).__name__)

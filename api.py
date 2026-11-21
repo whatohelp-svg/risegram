@@ -1135,7 +1135,7 @@ def _miniapp_telegram_id(raw: str) -> int | None:
         if not 0<=time.time()-stamp<=3600:
             return None
         check="\n".join(f"{key}={value}" for key,value in sorted(fields.items())
-                         if key not in ("hash","signature"))
+                         if key != "hash")
         secret=hmac.new(b"WebAppData",config.BOT_TOKEN.encode(),hashlib.sha256).digest()
         expected=hmac.new(secret,check.encode(),hashlib.sha256).hexdigest()
         if not hmac.compare_digest(expected,fields["hash"]):

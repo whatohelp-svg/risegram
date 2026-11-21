@@ -73,6 +73,7 @@ async function req(path,options={}){
  const headers={"Content-Type":"application/json",...(state.token?{"Authorization":"Bearer "+state.token}:{})};
  const r=await fetch(path,{...options,headers:{...headers,...(options.headers||{})}});
  let j={};try{j=await r.json()}catch{}
+ if(j.error==="invalid_telegram_signature")throw Error("Не удалось подтвердить вход. Закройте мини-приложение и откройте его снова кнопкой в боте RiseGram.");
  if(!r.ok||j.ok===false)throw Error(j.error||"Ошибка сервера");
  return j;
 }

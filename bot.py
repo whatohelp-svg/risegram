@@ -1571,7 +1571,11 @@ async def msg_game_bet(message: Message, state: FSMContext, user: dict):
         await message.answer("Сессия устарела. Откройте /games заново.")
         return
     try:
-        bet = round(float(message.text.replace(" ", "").replace(",", ".")), 2)
+        bet = float(message.text.replace(" ", "").replace(",", "."))
+        if cur == "stars" and not bet.is_integer():
+            await message.answer("Ставка в звёздах должна быть целой.")
+            return
+        bet = round(bet, 2)
     except ValueError:
         await message.answer("Введите число.")
         return
@@ -1632,7 +1636,7 @@ async def finish_crash(uid: int, won: bool, mult: float):
         return
     g["done"] = True
     cur = g["cur"]
-    payout = round(g["bet"] * mult, 2) if won else 0.0
+    payout = round(g["bet"] * mult, 0 if cur == "stars" else 2) if won else 0.0
     ok = await db.settle_game(g["gid"], won, payout)
     crash_live.pop(uid, None)
     if not ok:
@@ -1665,7 +1669,7 @@ async def run_crash(bot: Bot, uid: int):
             try:
                 await g["msg"].edit_text(
                     f"🚀 Ракета летит… <b>×{m:.2f}</b>\nСтавка: {money(g['cur'], g['bet'])}",
-                    reply_markup=crash_kb(g["gid"], g["bet"] * m, g["cur"]),
+                    reply_markup=crash_kb(g["gid"], round(g["bet"] * m, 0 if g["cur"] == "stars" else 2), g["cur"]),
                 )
             except TelegramRetryAfter as e:
                 await asyncio.sleep(e.retry_after)
@@ -1722,7 +1726,7 @@ def hl_next_mult(mult: float, p: float) -> float:
 
 
 def hl_cash_value(g: dict) -> float:
-    return round(g["bet"] * g["mult"], 2)
+    return round(g["bet"] * g["mult"], 0 if g["cur"] == "stars" else 2)
 
 
 def hl_text(g: dict) -> str:
@@ -2127,12 +2131,14 @@ async def msg_fallback(message: Message, user: dict):
 
 
 async def on_startup(bot: Bot):
+    from gift_catalog import populate_client_catalog
     await db.init_db()
     await db.ensure_owner()
     await bot.delete_webhook(drop_pending_updates=True)
     me = await bot.get_me()
     log.info("%s запущен как @%s", config.BRAND, me.username)
     await db.log_admin_action(0, f"Бот запущен (@{me.username})")
+    await populate_client_catalog(bot)
 
 
 async def main():
