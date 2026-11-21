@@ -191,7 +191,7 @@ def main_kb():
         [btn("🔒 Код входа", "menu:code", style="primary"), btn("📞 Мой номер", "menu:number")],
         [btn("💎 Донат", "donat:hub")],
         [webapp_button(None)],
-        ([btn("🎁 NFT Mini App", web_app=local_miniapp_url(), style="primary")] if local_miniapp_url() else []),
+        ([btn("📱 Открыть приложение", web_app=local_miniapp_url(), style="primary")] if local_miniapp_url() else []),
         [btn("🕒 Мои покупки", "menu:purchases"), btn("ℹ️ Как это работает", "menu:help")],
         [btn("⚙️ Настройки", "menu:settings"), btn("✨ Ещё", "menu:more")],
     )
