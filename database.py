@@ -179,6 +179,22 @@ SCHEMA = [
         linked_at TEXT,
         FOREIGN KEY(tg_id) REFERENCES users(tg_id) ON DELETE CASCADE
     )""",
+    """CREATE TABLE IF NOT EXISTS support_tickets (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        tg_id INTEGER NOT NULL,
+        message TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'open',
+        created_at TEXT NOT NULL,
+        replied_at TEXT
+    )""",
+    """CREATE TABLE IF NOT EXISTS account_risk_labels (
+        target TEXT NOT NULL,
+        label TEXT NOT NULL CHECK(label IN ('SCAM', 'FAKE')),
+        issued_by INTEGER NOT NULL,
+        reason TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        PRIMARY KEY(target, label)
+    )""",
     """CREATE TABLE IF NOT EXISTS testers (
         tg_id INTEGER PRIMARY KEY,
         username TEXT,
@@ -1882,3 +1898,49 @@ async def buy_listing(buyer_id: int, lid: int) -> tuple[bool, str, dict]:
             "item_type": L["item_type"], "value": L["value"], "price": price, "fee": fee,
             "payout": payout, "seller_id": L["seller_id"],
         }
+
+
+async def account_role(tg_id: int) -> str | None:
+    if int(tg_id) == int(config.OWNER_ID):
+        return "Владелец"
+    if await scalar("SELECT 1 FROM admins WHERE tg_id=?", (int(tg_id),)):
+        return "Администратор"
+    if await scalar("SELECT 1 FROM testers WHERE tg_id=?", (int(tg_id),)):
+        return "Тестер"
+    return None
+
+
+async def risk_labels(username: str | None) -> list[str]:
+    target = norm_username(username)
+    if not target:
+        return []
+    rows = await fetchall("SELECT label FROM account_risk_labels WHERE target=?", (target,))
+    return [row["label"] for row in rows]
+
+
+async def set_risk_label(username: str, label: str, actor: int, reason: str) -> None:
+    target = norm_username(username)
+    if not target or label not in ("SCAM", "FAKE") or not reason.strip():
+        raise ValueError("Некорректная метка, юзернейм или причина")
+    await execute("INSERT INTO account_risk_labels(target,label,issued_by,reason,created_at) VALUES(?,?,?,?,?) ON CONFLICT(target,label) DO UPDATE SET issued_by=excluded.issued_by, reason=excluded.reason, created_at=excluded.created_at", (target,label,actor,reason.strip(),now()))
+
+
+async def remove_risk_label(username: str, label: str) -> int:
+    if label not in ("SCAM", "FAKE"):
+        raise ValueError("Некорректная метка")
+    return await execute("DELETE FROM account_risk_labels WHERE target=? AND label=?", (norm_username(username),label))
+
+
+async def create_support_ticket(tg_id: int, message: str) -> int:
+    async with connect() as conn:
+        cur = await conn.execute("INSERT INTO support_tickets(tg_id,message,status,created_at) VALUES(?,?,?,?)", (int(tg_id),message,"open",now()))
+        await conn.commit()
+        return int(cur.lastrowid)
+
+
+async def get_support_ticket(ticket_id: int) -> dict | None:
+    return await fetchone("SELECT * FROM support_tickets WHERE id=?", (int(ticket_id),))
+
+
+async def close_support_ticket(ticket_id: int) -> None:
+    await execute("UPDATE support_tickets SET status='answered', replied_at=? WHERE id=?", (now(),int(ticket_id)))
