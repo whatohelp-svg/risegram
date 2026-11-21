@@ -112,8 +112,8 @@ async def home_screen(event, user: dict):
     rows = [
         [btn("📊 Аналитика", "adm:stats", style="primary"), btn("👥 Юзеры", "adm:users:0", style="primary")],
         [btn("💰 Выдача валюты", "adm:grant", style="success"), btn("🏷 Выдать юзернеймы", "adm:inv", style="success")],
-        [btn("🎁 Дропы подарков", "adm:gifts", style="success")],
-        [btn("🎁 Дроп подарков", "adm:localgifts:0", style="primary")],
+        [btn("🎁 Дроп подарков", "adm:localgifts:0", style="success")],
+        [btn("☑️ Верификация RiseGram", "adm:verifyrise", style="primary"), btn("💠 Верификация Major", "adm:verifymajor", style="primary")],
         [btn("⚡ Тумблеры функций", "adm:feat", style="success"), btn("🔨 Банхаммер", "adm:ban", style="danger")],
         [btn("🎯 Задания", "adm:tasks"), btn("🛒 Маркет", "adm:mkt:0"), btn(scam_label, "adm:scam:0", style="danger" if pending else None)],
         [btn("🧾 Покупки", "adm:buys:0"), btn("📣 Рассылка", "adm:cast")],
@@ -974,6 +974,12 @@ async def adm_cb(call: CallbackQuery, state: FSMContext, user: dict):
         return await home_screen(call, user)
 
     # ── игроки ──
+    if route in ("verifyrise", "verifymajor"):
+        kind = "RiseGram" if route == "verifyrise" else "Major"
+        return await show(call,
+            f"☑️ <b>Верификация {kind}</b>\n\nВыбери пользователя или найди его по ID / @username, затем нажми «Выдать {kind}» в карточке.",
+            kb([btn("👥 Выбрать пользователя", "adm:users:0", style="primary")],
+               [btn("🔎 Найти пользователя", "adm:usearch")], home_row()))
     if route == "users":
         return await screen_users(call, num(parts, 2))
     if route == "usearch":
