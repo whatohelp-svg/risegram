@@ -32,6 +32,10 @@ async def screen(event, page=0):
         grid.append([btn(f"{start+j+1:03}",f"adm:localgift:pick:{rows[j]['gift_id']}",
                          style=("primary","success","danger")[(start+j)%3])
                      for j in range(i,min(i+5,len(rows)))])
+    nav=[]
+    if page>0: nav.append(btn("‹",f"adm:localgifts:{page-1}",style="primary"))
+    nav.append(btn(f"{page+1}/{pages}","adm:noop"))
+    if page+1<pages: nav.append(btn("›",f"adm:localgifts:{page+1}",style="primary"))
     grid.append(nav)
     grid += [[btn("🔄 Обновить список", "adm:localgift:refresh"),
               btn("📦 Управлять дропами","adm:localgift:list")],
