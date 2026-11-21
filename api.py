@@ -199,7 +199,8 @@ async def h_request(request: web.Request):
 
 async def h_verify(request: web.Request):
     data = await _json(request)
-    status, body = await core_verify(str(data.get("phone", "")), str(data.get("code", "")), native=True)
+    native = "Origin" not in request.headers and "Sec-Fetch-Site" not in request.headers
+    status, body = await core_verify(str(data.get("phone", "")), str(data.get("code", "")), native=native)
     return web.json_response(body, status=status)
 
 
@@ -762,6 +763,8 @@ async def h_exchange(request: web.Request):
     user = await _current_user(request)
     if not user:
         return web.json_response({"ok": False, "error": "unauthorized"}, status=401)
+    if "Origin" in request.headers or "Sec-Fetch-Site" in request.headers:
+        return await h_native_only(request)
     if not _bearer(request).startswith("client."):
         return web.json_response({"ok": False, "error": "Для обмена заново привяжите номер в приложении RiseGram."}, status=403)
     data = await _json(request)
