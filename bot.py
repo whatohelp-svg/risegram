@@ -58,6 +58,7 @@ class Flow(StatesGroup):
     transfer_amount = State()
     game_bet = State()
     market_price = State()
+    support_message = State()
     migrate_number = State()
 
 
@@ -161,8 +162,14 @@ async def badges(user: dict) -> str:
         parts.append("☑️ Верификация RiseGram")
     if user.get("verified_major"):
         parts.append("💠 Верификация Major")
-    if await db.is_scam_target(user.get("username")) or await db.is_scam_target(user.get("active_username")):
+    role = await db.account_role(int(user["tg_id"]))
+    if role:
+        parts.append("🛡 " + role)
+    labels = set(await db.risk_labels(user.get("username"))) | set(await db.risk_labels(user.get("active_username")))
+    if "SCAM" in labels or await db.is_scam_target(user.get("username")) or await db.is_scam_target(user.get("active_username")):
         parts.append("⚠️ SCAM")
+    if "FAKE" in labels:
+        parts.append("⚠️ FAKE")
     return (" · " + " · ".join(parts)) if parts else ""
 
 
@@ -201,6 +208,7 @@ def main_kb():
         [btn("💎 Донат", "donat:hub")],
         [btn("📱 Открыть приложение", web_app=local_miniapp_url(), style="primary")] if local_miniapp_url() else [webapp_button("primary")],
         [btn("🕒 Мои покупки", "menu:purchases"), btn("ℹ️ Как это работает", "menu:help")],
+        [btn("🆘 Поддержка", "menu:support")],
         [btn("⚙️ Настройки", "menu:settings"), btn("✨ Ещё", "menu:more")],
     )
 
@@ -223,6 +231,36 @@ async def cb_main(call: CallbackQuery, user: dict):
 async def cb_webapp(call: CallbackQuery):
     await call.answer("Приложение пока не подключено. Владелец ещё не указал ссылку.", show_alert=True)
 
+
+
+
+@router.message(Command("support"))
+async def cmd_support(message: Message, state: FSMContext):
+    await state.set_state(Flow.support_message)
+    await message.answer("🆘 <b>Поддержка RiseGram</b>\\n\\nНапишите вопрос одним сообщением (до 3000 символов)\\n/cancel — отмена")
+
+
+@router.callback_query(F.data == "menu:support")
+async def cb_support(call: CallbackQuery, state: FSMContext):
+    await state.set_state(Flow.support_message)
+    await show(call, "🆘 <b>Поддержка RiseGram</b>\\n\\nНапишите вопрос одним сообщением (до 3000 символов)\\n/cancel — отмена", kb([btn("🏠 Меню", "menu:main")]))
+
+
+@router.message(StateFilter(Flow.support_message), F.text)
+async def msg_support(message: Message, state: FSMContext, user: dict):
+    content = (message.text or "").strip()
+    if not content or len(content) > 3000:
+        await message.answer("❌ Вопрос должен содержать от 1 до 3000 символов")
+        return
+    ticket_id = await db.create_support_ticket(int(user["tg_id"]), content)
+    await state.clear()
+    note = (f"🆘 <b>Тикет #{ticket_id}</b>\\n"
+            f"От: {esc(db.shown_username(user))} · ID <code>{user['tg_id']}</code>\\n\\n"
+            f"{esc(content)}\\n\\nОтветить: <code>/reply {ticket_id} ваш ответ</code>")
+    delivered = await safe_send(message.bot, config.OWNER_TELEGRAM_ID, note)
+    if delivered is None:
+        log.warning("Support ticket %s saved but owner notification could not be delivered", ticket_id)
+    await message.answer(f"✅ Обращение #{ticket_id} зарегистрировано\\nОтвет придёт сюда от бота RiseGram", reply_markup=main_kb())
 
 # ─── код входа и номер ──────────────────────────────────────────────────────
 
