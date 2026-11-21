@@ -416,6 +416,10 @@ COLUMNS: dict[str, dict[str, str]] = {
         "active": "INTEGER DEFAULT 1", "created_at": "TEXT",
     },
     "feature_flags": {"is_enabled": "INTEGER DEFAULT 1"},
+    "gift_drops": {
+        "upgrade_stars": "INTEGER DEFAULT 0",
+        "pay_for_upgrade": "INTEGER DEFAULT 0",
+    },
     "games": {"currency": "TEXT DEFAULT 'gram'"},
 }
 
@@ -1051,21 +1055,114 @@ async def get_nft(item_id: int) -> dict | None:
 
 async def create_gift_drop(
     telegram_gift_id: str, gift_name: str, emoji: str, telegram_stars: int,
-    price_risestars: float, quantity: int,
+    price_risestars: float, quantity: int, upgrade_stars: int = 0,
+    pay_for_upgrade: bool = False,
 ) -> int:
-    """Create a shared, limited RiseGram drop backed by a Telegram-sendable gift."""
+    """Create a limited drop backed by a real Telegram gift and optional NFT upgrade."""
     async with connect() as conn:
         cur = await conn.execute(
             """INSERT INTO gift_drops
-               (telegram_gift_id,gift_name,emoji,telegram_stars,price_risestars,
-                stock_total,stock_remaining,active,created_at)
-               VALUES (?,?,?,?,?,?,?,1,?)""",
+               (telegram_gift_id,gift_name,emoji,telegram_stars,upgrade_stars,pay_for_upgrade,
+                price_risestars,stock_total,stock_remaining,active,created_at)
+               VALUES (?,?,?,?,?,?,?,?,?,1,?)""",
             (str(telegram_gift_id), gift_name[:80], (emoji or "🎁")[:16],
-             int(telegram_stars), round(float(price_risestars), 2),
-             int(quantity), int(quantity), now()),
+             max(0, int(telegram_stars)), max(0, int(upgrade_stars)), int(bool(pay_for_upgrade)),
+             round(float(price_risestars), 2), int(quantity), int(quantity), now()),
         )
         await conn.commit()
         return int(cur.lastrowid)
+
+
+async def sync_gift_catalog_drops(catalog: list[dict]) -> dict[str, int]:
+    """Publish every currently sendable NFT-capable Telegram gift without duplicating live drops.
+
+    RiseGram uses the configured one-Star-to-RiseStars rate for the base gift
+    and its prepaid unique-gift upgrade. Existing live drops keep their chosen
+    price and stock; legacy rows are upgraded once so their next delivery is
+    also an actual collectible gift.
+    """
+    created = upgraded = already_live = skipped = 0
+    max_unlimited_stock = 1_000_000
+    async with connect() as conn:
+        await conn.execute("BEGIN IMMEDIATE")
+        for gift in catalog:
+            gift_id = str(gift.get("id") or "").strip()
+            if not gift_id or not bool(gift.get("can_upgrade")):
+                skipped += 1
+                continue
+            try:
+                star_count = max(0, int(gift.get("stars") or 0))
+                upgrade_stars = max(0, int(gift.get("upgrade_stars") or 0))
+            except (TypeError, ValueError):
+                skipped += 1
+                continue
+            if star_count <= 0:
+                skipped += 1
+                continue
+
+            cur = await conn.execute(
+                """SELECT id,telegram_stars,upgrade_stars,pay_for_upgrade,price_risestars
+                   FROM gift_drops
+                   WHERE telegram_gift_id=? AND active=1 AND stock_remaining>0
+                   ORDER BY id DESC LIMIT 1""",
+                (gift_id,),
+            )
+            existing = await cur.fetchone()
+            if existing:
+                if not bool(existing["pay_for_upgrade"]):
+                    # Older drops were priced and delivered as regular gifts.
+                    # Add the published upgrade cost once, preserving any manual markup.
+                    added_upgrade = max(0, upgrade_stars - int(existing["upgrade_stars"] or 0))
+                    new_price = round(
+                        float(existing["price_risestars"]) + added_upgrade * config.RISESTARS_PER_STAR,
+                        2,
+                    )
+                    await conn.execute(
+                        """UPDATE gift_drops
+                           SET upgrade_stars=?,pay_for_upgrade=1,price_risestars=?
+                           WHERE id=? AND pay_for_upgrade=0""",
+                        (upgrade_stars, new_price, existing["id"]),
+                    )
+                    upgraded += 1
+                else:
+                    already_live += 1
+                continue
+
+            personal_remaining = gift.get("personal_remaining_count")
+            global_remaining = gift.get("remaining_count")
+            personal_total = gift.get("personal_total_count")
+            global_total = gift.get("total_count")
+            stock_value = next(
+                (v for v in (personal_remaining, global_remaining, personal_total, global_total) if v is not None),
+                max_unlimited_stock,
+            )
+            try:
+                stock = max(0, int(stock_value))
+            except (TypeError, ValueError):
+                skipped += 1
+                continue
+            if stock <= 0:
+                skipped += 1
+                continue
+
+            price = round((star_count + upgrade_stars) * config.RISESTARS_PER_STAR, 2)
+            await conn.execute(
+                """INSERT INTO gift_drops
+                   (telegram_gift_id,gift_name,emoji,telegram_stars,upgrade_stars,pay_for_upgrade,
+                    price_risestars,stock_total,stock_remaining,active,created_at)
+                   VALUES (?,?,?,?,?,1,?,?,?,?,?)""",
+                (gift_id, str(gift.get("name") or f"Telegram Gift {gift_id[-4:]}")[:80],
+                 str(gift.get("emoji") or "🎁")[:16], star_count, upgrade_stars,
+                 price, stock, stock, 1, now()),
+            )
+            created += 1
+        await conn.commit()
+    return {
+        "created": created,
+        "upgraded": upgraded,
+        "already_live": already_live,
+        "skipped": skipped,
+    }
 
 
 async def list_gift_drops(active_only: bool = True) -> list[dict]:
@@ -1137,6 +1234,9 @@ async def reserve_gift_drop(tg_id: int, drop_id: int) -> tuple[bool, str, dict]:
             "emoji": drop["emoji"],
             "serial_no": serial_no,
             "price_paid": price,
+            "telegram_stars": int(drop["telegram_stars"] or 0),
+            "upgrade_stars": int(drop["upgrade_stars"] or 0),
+            "pay_for_upgrade": bool(drop["pay_for_upgrade"]),
         }
 
 
