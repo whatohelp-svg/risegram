@@ -1329,8 +1329,8 @@ async def cmd_support_reply(message: Message):
     if ticket["status"] != "open":
         return await message.answer("На это обращение уже ответили")
     delivered = await safe_send(message.bot, int(ticket["tg_id"]),
-        f"🆘 <b>Ответ поддержки RiseGram · #{ticket['id']}</b>\\n\\n{esc(parts[2])}")
-    if delivered is None:
+        f"🆘 <b>Ответ поддержки RiseGram · #{ticket['id']}</b>\n\n{esc(parts[2])}")
+    if not delivered:
         return await message.answer("Не удалось доставить ответ — тикет остаётся открытым")
     await db.close_support_ticket(ticket["id"])
     await audit(f"Ответ на тикет #{ticket['id']}")
