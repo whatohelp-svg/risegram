@@ -94,6 +94,7 @@ def public_user(u: dict) -> dict:
         "username": db.shown_username(u).lstrip("@") if u.get("username") or u.get("active_username") else None,
         "phone": u.get("phone"),
         "verified": bool(u.get("verified")),
+        "major": bool(u.get("verified")),
         "risestars": float(u.get("risestars") or 0),
         "gram_balance": float(u.get("gram_balance") or 0),
         "active_username": u.get("active_username"),
