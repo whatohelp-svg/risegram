@@ -103,10 +103,14 @@ class GiftCatalogDropTests(unittest.IsolatedAsyncioTestCase):
 
         ok, message, reserved = await db.reserve_gift_drop(42, drops[0]["id"])
         self.assertTrue(ok, message)
+        pending_inventory = await db.list_user_gifts(42, include_pending=True)
+        self.assertEqual(len(pending_inventory), 1)
+        self.assertEqual(pending_inventory[0]["status"], "pending")
         self.assertTrue(await db.confirm_gift_purchase(reserved["instance_id"]))
         inventory = await db.list_user_gifts(42)
         self.assertEqual(len(inventory), 1)
         self.assertEqual(inventory[0]["serial_no"], 2)
+        self.assertEqual(inventory[0]["status"], "sent")
 
     async def test_legacy_drop_is_upgraded_and_price_floor_is_enforced(self):
         drop_id = await db.create_gift_drop(
