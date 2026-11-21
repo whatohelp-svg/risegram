@@ -150,6 +150,14 @@ SCHEMA = [
     """CREATE TABLE IF NOT EXISTS verified_peer_links (
         peer_id INTEGER PRIMARY KEY, account_id INTEGER NOT NULL UNIQUE, phone_digits TEXT NOT NULL
     )""",
+    """CREATE TABLE IF NOT EXISTS rg_profile_music (
+        tg_id INTEGER PRIMARY KEY,
+        media_id TEXT NOT NULL,
+        title TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY(tg_id) REFERENCES users(tg_id) ON DELETE CASCADE,
+        FOREIGN KEY(media_id) REFERENCES rg_media(id)
+    )""",
     """CREATE TABLE IF NOT EXISTS users (
         tg_id INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id TEXT UNIQUE,
