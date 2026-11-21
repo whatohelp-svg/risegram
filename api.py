@@ -1056,7 +1056,9 @@ async def sync_mtproto_verification(user_id: int, force: bool = False) -> dict:
     if len(digits) < 7:
         return {"configured": True, "synced": False}
     verified = bool(user.get("verified"))
-    fingerprint = (digits, verified)
+    issuer = "major" if user.get("verified_major") else "risegram" if user.get("verified_risegram") else ""
+    bot_id = await db.get_meta("native_issuer:" + issuer) if issuer else None
+    fingerprint = (digits, verified, issuer, bot_id, bool(user.get("verified_risegram")))
     now_mono = time.monotonic()
     if not force and _verification_sync_state.get(int(user_id)) == fingerprint and now_mono - _verification_sync_last.get(int(user_id), 0.0) < 300:
         return {"configured": True, "synced": True, "cached": True}
@@ -1100,6 +1102,18 @@ async def sync_mtproto_verification(user_id: int, force: bool = False) -> dict:
                         log.warning("MTProto verification update returned HTTP %s", response.status)
                         _verification_sync_last[int(user_id)] = time.monotonic() - 270
                         return {"configured": True, "synced": False, "http_status": response.status}
+                native_peer = int(resolved["user_id"])
+                mark_key = f"native_profile_mark:{native_peer}"
+                old = await db.get_meta(mark_key)
+                if bot_id or old:
+                    from issuer_marks import command
+                    operation = "grant" if bot_id else "revoke"
+                    mark = {"verifier_bot_id": int(bot_id or old), "peer_type": "user", "peer_id": native_peer}
+                    if bot_id and user.get("verified_major") and user.get("verified_risegram"):
+                        mark["description"] = "Аккаунт верифицирован организациями «RiseGram» и «Major»."
+                    await command(session, f"/v1/botverification/marks/{operation}",
+                                  f"rg-user-mark-{native_peer}-{time.time_ns()}", mark)
+                    await db.set_meta(mark_key, bot_id or "")
             _verification_sync_state[int(user_id)] = fingerprint
             _verification_sync_last[int(user_id)] = time.monotonic()
             return {"configured": True, "synced": True}
@@ -1476,10 +1490,14 @@ async def h_profile_verification(request: web.Request):
            JOIN users u ON u.tg_id=p.account_id AND u.phone_digits=p.phone_digits
            WHERE p.peer_id=? AND u.banned=0""", (int(peer),),
     )
+    # Android builds with bundled issuer drawables prefer them to a native mark.
+    # Let the installed app render the confirmed MTProto emoji and description.
+    if row and "Dalvik/" in request.headers.get("User-Agent", "") and await db.get_meta(f"native_profile_mark:{int(peer)}"):
+        return web.Response(status=204, headers={"Cache-Control": "no-store", "Vary": "User-Agent"})
     return web.json_response({
         "verified_risegram": bool(row and row["verified_risegram"]),
         "verified_major": bool(row and row["verified_major"]),
-    }, headers={"Cache-Control": "no-store"})
+    }, headers={"Cache-Control": "no-store", "Vary": "User-Agent"})
 
 
 async def h_health(request: web.Request):

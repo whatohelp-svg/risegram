@@ -2160,12 +2160,15 @@ async def main():
     await db.init_db()
     await asyncio.to_thread(gift_drops.setup)
     runner = await start_api(bot)
+    from issuer_marks import bootstrap
+    issuer_setup = asyncio.create_task(bootstrap())
     gift_sync = asyncio.create_task(sync_client_gifts(bot))
     try:
         await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
     finally:
         gift_sync.cancel()
-        await asyncio.gather(gift_sync, return_exceptions=True)
+        issuer_setup.cancel()
+        await asyncio.gather(gift_sync, issuer_setup, return_exceptions=True)
         if runner:
             await runner.cleanup()
         for t in list(crash_tasks.values()) + list(hl_tasks.values()):

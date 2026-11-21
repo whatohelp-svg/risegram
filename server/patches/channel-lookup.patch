@@ -1,5 +1,5 @@
 diff --git a/internal/admin/service.go b/internal/admin/service.go
-index 5d85701..3e6f843 100644
+index 5d85701..d906c05 100644
 --- a/internal/admin/service.go
 +++ b/internal/admin/service.go
 @@ -3380,6 +3380,39 @@ func ErrorCode(err error) string {
@@ -42,6 +42,14 @@ index 5d85701..3e6f843 100644
  func (s *Service) SetChannelVerified(ctx context.Context, req SetChannelVerifiedRequest) (CommandResult, error) {
  	if req.ChannelID <= 0 {
  		return CommandResult{}, fmt.Errorf("channel_id is required")
+@@ -4555,6 +4588,7 @@ func (s *Service) CreateStickerSet(ctx context.Context, req CreateStickerSetRequ
+ 		}
+ 		details["set_id"] = strconv.FormatInt(set.ID, 10)
+ 		details["short_name"] = set.ShortName
++		details["document_id"] = strconv.FormatInt(doc.ID, 10)
+ 		return CommandResult{Message: "sticker pack created", Details: details}, nil
+ 	})
+ }
 diff --git a/internal/adminapi/server.go b/internal/adminapi/server.go
 index fa238df..1a9b0cb 100644
 --- a/internal/adminapi/server.go
