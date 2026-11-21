@@ -79,6 +79,9 @@ initialize_server_key() {
 
 case "$command_name" in
   telesrv)
+    if [ -n "${RAILWAY_ENVIRONMENT_ID:-}" ] && [ "${TELESRV_ADMIN_API_ADDR:-}" = "0.0.0.0:2599" ]; then
+      export TELESRV_ADMIN_API_ADDR="[::]:2599"
+    fi
     require_value TELESRV_ADVERTISE_IP
     require_value TELESRV_PUBLIC_BASE_URL
     require_value TELESRV_PUBLIC_WEB_BASE_URL

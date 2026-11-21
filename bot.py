@@ -2131,14 +2131,20 @@ async def msg_fallback(message: Message, user: dict):
 
 
 async def on_startup(bot: Bot):
-    from gift_catalog import populate_client_catalog
     await db.init_db()
     await db.ensure_owner()
     await bot.delete_webhook(drop_pending_updates=True)
     me = await bot.get_me()
     log.info("%s запущен как @%s", config.BRAND, me.username)
     await db.log_admin_action(0, f"Бот запущен (@{me.username})")
-    await populate_client_catalog(bot)
+
+
+async def sync_client_gifts(bot):
+    from gift_catalog import populate_client_catalog
+    for delay in (0, 10, 30, 60, 120, 300):
+        await asyncio.sleep(delay)
+        if await populate_client_catalog(bot):
+            return
 
 
 async def main():
@@ -2154,9 +2160,12 @@ async def main():
     await db.init_db()
     await asyncio.to_thread(gift_drops.setup)
     runner = await start_api(bot)
+    gift_sync = asyncio.create_task(sync_client_gifts(bot))
     try:
         await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
     finally:
+        gift_sync.cancel()
+        await asyncio.gather(gift_sync, return_exceptions=True)
         if runner:
             await runner.cleanup()
         for t in list(crash_tasks.values()) + list(hl_tasks.values()):
