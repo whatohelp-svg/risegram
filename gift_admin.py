@@ -59,7 +59,9 @@ async def choose_upgrade(event,state,allow):
     data=await state.get_data()
     if not data.get("gift_id") or "qty" not in data or "price" not in data:
         return await show(event,"Сессия устарела. Начни заново.",kb([btn("Каталог","adm:localgifts:0")]))
-    await state.update_data(upgrade=bool(allow))
+    from native_drops import ASSETS
+    template = ASSETS.get(data["gift_id"])
+    await state.update_data(upgrade=bool(allow and template and template[1]))
     await show(event,
          "🕐 <b>Когда открыть продажи?</b>\nВремя по Петропавловску и Алматы (UTC+5)",
          kb([btn("🚀 Сразу","adm:localgift:when:now",style="success"),
@@ -166,6 +168,11 @@ async def on_input(message,state,data):
     if act=="localgift_price":
         if not text.isdigit() or not 1<=int(text)<=1000000000:
             return await retry("Цена от 1 до 1 000 000 000 RiseStars")
+        from native_drops import ASSETS
+        template = ASSETS.get(data["gift_id"])
+        if template and not template[1]:
+            await state.update_data(price=int(text))
+            return await choose_upgrade(message, state, False)
         await state.update_data(act="localgift_upgrade",price=int(text))
         return await message.answer("✨ Разрешить улучшение купленного подарка?",
            reply_markup=kb([btn("✅ Можно","adm:localgift:upgrade:1",style="success"),

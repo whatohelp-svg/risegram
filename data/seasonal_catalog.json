@@ -513,6 +513,12 @@
     "key": "halloween-bear",
     "title": "Хэллоуинский мишка",
     "stars": 15,
-    "path": "models/toy_bear/the_devil.tgs"
+    "path": "halloween-bear.tgs"
+  },
+  {
+    "key": "soldier-bear",
+    "title": "Soldier Bear",
+    "stars": 50,
+    "path": "soldier-bear.tgs"
   }
 ]

@@ -1,0 +1,38 @@
+--- a/internal/rpc/convert_channels_core.go
++++ b/internal/rpc/convert_channels_core.go
+@@ -459,6 +459,13 @@
+ 		AccessHash: ch.AccessHash,
+ 		Title:      ch.Title,
+ 	}
++}
++
++func channelDisplayCount(ch domain.Channel) int {
++	if ch.Broadcast && ch.Username == "news" && ch.ParticipantsCount < 56400 {
++		return 56400
++	}
++	return ch.ParticipantsCount
+ }
+ 
+ func tgChannel(viewerUserID int64, ch domain.Channel, self *domain.ChannelMember) *tg.Channel {
+@@ -533,8 +540,8 @@
+ 	if ch.SlowmodeSeconds > 0 {
+ 		out.SetSlowmodeEnabled(true)
+ 	}
+-	if ch.ParticipantsCount > 0 {
+-		out.SetParticipantsCount(ch.ParticipantsCount)
++	if count := channelDisplayCount(ch); count > 0 {
++		out.SetParticipantsCount(count)
+ 	}
+ 	out.SetDefaultBannedRights(tgDefaultChatBannedRights(ch.DefaultBannedRights))
+ 	// Group call banner data source: the call_active/call_not_empty flags (Android
+@@ -610,8 +617,8 @@
+ 		NotifySettings:  *tdesktop.NotifySettings(),
+ 		Pts:             ch.Pts,
+ 	}
+-	if ch.ParticipantsCount > 0 {
+-		full.SetParticipantsCount(ch.ParticipantsCount)
++	if count := channelDisplayCount(ch); count > 0 {
++		full.SetParticipantsCount(count)
+ 	}
+ 	if ch.ActiveCallID != 0 {
+ 		// The entry point for the join panel/banner click: the client uses it to call phone.getGroupCall.

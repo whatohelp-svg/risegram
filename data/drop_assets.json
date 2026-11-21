@@ -474,5 +474,65 @@
   "lolpop": [
     "tgs/by_name/lol_pop.tgs",
     "models/lol_pop/andromeda.tgs"
+  ],
+  "trojanhorse": [
+    "tgs/by_id/5956308547863052791.tgs",
+    null
+  ],
+  "1may": [
+    "tgs/by_id/5807641025165919973.tgs",
+    null
+  ],
+  "coffin": [
+    "tgs/by_id/5776227780391864916.tgs",
+    null
+  ],
+  "eastercake": [
+    "tgs/by_id/5773791997064119815.tgs",
+    null
+  ],
+  "eightroses": [
+    "tgs/by_id/5933770397739647689.tgs",
+    null
+  ],
+  "gravestone": [
+    "tgs/by_id/5775955135867913556.tgs",
+    null
+  ],
+  "redstar": [
+    "tgs/by_id/5830323722413671504.tgs",
+    null
+  ],
+  "standard-5170250947678437525": [
+    "tgs/by_id/5170250947678437525.tgs",
+    null
+  ],
+  "standard-5168103777563050263": [
+    "tgs/by_id/5168103777563050263.tgs",
+    null
+  ],
+  "standard-5170314324215857265": [
+    "tgs/by_id/5170314324215857265.tgs",
+    null
+  ],
+  "standard-5170564780938756245": [
+    "tgs/by_id/5170564780938756245.tgs",
+    null
+  ],
+  "standard-6028601630662853006": [
+    "tgs/by_id/6028601630662853006.tgs",
+    null
+  ],
+  "standard-5168043875654172773": [
+    "tgs/by_id/5168043875654172773.tgs",
+    null
+  ],
+  "standard-5170690322832818290": [
+    "tgs/by_id/5170690322832818290.tgs",
+    null
+  ],
+  "standard-5170521118301225164": [
+    "tgs/by_id/5170521118301225164.tgs",
+    null
   ]
 }

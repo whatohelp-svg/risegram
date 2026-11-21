@@ -58,7 +58,7 @@ async def publish(session, assets, row):
         }, {"file": art})
         state = {"id": int(result["gift_id"]), "enabled": False, "version": 0}
         await db.set_meta(key, json.dumps(state))
-    if enabled and row["can_upgrade"] and not state.get("upgrade"):
+    if enabled and row["can_upgrade"] and ASSETS[row["gift_id"]][1] and not state.get("upgrade"):
         path = ASSETS[row["gift_id"]][1]
         model = await asset(assets, path)
         pattern = (Path(__file__).parent / "data/drop-star.tgs").read_bytes()

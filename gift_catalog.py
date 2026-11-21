@@ -18,6 +18,10 @@ GIFT_LABELS = {
 }
 
 
+PUBLIC_STANDARD = {"5170145012310081615", "5170233102089322756", "5170144170496491616"}
+PUBLIC_SEASONAL = {"halloween-bear", "soldier-bear"}
+
+
 def gift_field(gift, key: str, default=None):
     if isinstance(gift, dict):
         return gift.get(key, default)
@@ -84,7 +88,7 @@ async def populate_client_catalog(bot):
         ) as session:
             for gift in catalog.gifts:
                 key = str(gift.id)
-                if key not in GIFT_LABELS or gift.total_count or not gift.sticker.is_animated:
+                if key not in PUBLIC_STANDARD or gift.total_count or not gift.sticker.is_animated:
                     continue
                 mapping = f"native_gift_id:{key}"
                 if await db.get_meta(mapping):
@@ -124,26 +128,48 @@ async def populate_seasonal_catalog():
     from aiohttp import ClientSession, ClientTimeout, FormData
     import config
     import database as db
-    from native_drops import asset
 
     entries = json.loads((Path(__file__).parent / "data/seasonal_catalog.json").read_text())
     log = logging.getLogger("risegram.seasonal")
     timeout = ClientTimeout(total=30)
-    async with ClientSession(timeout=timeout) as assets, ClientSession(timeout=timeout, headers={
+    async with ClientSession(timeout=timeout, headers={
         "Authorization": "Bearer " + config.MTPROTO_ADMIN_API_TOKEN
     }) as service:
         while True:
             pending = 0
-            for index, item in enumerate(entries):
-                key = "risegram-seasonal-" + item["key"]
-                if await db.get_meta(key):
+            hidden = [(f"native_gift_id:{key}", key) for key in GIFT_LABELS if key not in PUBLIC_STANDARD]
+            hidden.extend(("risegram-seasonal-" + item["key"], item["key"])
+                          for item in entries if item["key"] not in PUBLIC_SEASONAL)
+            for mapping, source in hidden:
+                gid = await db.get_meta(mapping)
+                if not gid or await db.get_meta("drop-only:" + mapping) == str(gid):
                     continue
                 try:
-                    image = await asset(assets, item["path"])
+                    async with service.post(config.MTPROTO_ADMIN_API_URL + "/v1/gifts/set-enabled", json={
+                        "command_id": "drop-only-" + str(gid), "actor": "risegram-catalog",
+                        "reason": "Available through administrator drops", "gift_id": int(gid), "enabled": False,
+                    }) as response:
+                        result = await response.json()
+                        if response.status != 200 or result.get("status") != "completed":
+                            raise ValueError(str(result.get("error") or response.status)[:150])
+                    await db.set_meta("drop-only:" + mapping, str(gid))
+                except Exception as exc:
+                    pending += 1
+                    log.warning("Moving %s to drop catalog: %s", source, str(exc)[:150])
+            for index, item in enumerate(entries):
+                if item["key"] not in PUBLIC_SEASONAL:
+                    continue
+                key = "risegram-seasonal-" + item["key"]
+                gid = await db.get_meta(key)
+                revision = key + "-art-v2"
+                if gid and await db.get_meta(revision) == str(gid):
+                    continue
+                try:
+                    image = (Path(__file__).parent / "data" / item["path"]).read_bytes()
                     price = item["stars"]
                     form = FormData()
                     form.add_field("metadata", json.dumps({
-                        "command_id": key, "actor": "risegram-catalog", "reason": "Seasonal gift catalog",
+                        "command_id": revision, "gift_id": int(gid or 0), "actor": "risegram-catalog", "reason": "Seasonal gift catalog",
                         "title": item["title"], "stars": price, "convert_stars": (price * 85 + 50) // 100,
                         "enabled": True, "sort_order": 1000 + index,
                     }))
@@ -152,11 +178,13 @@ async def populate_seasonal_catalog():
                         result = await response.json()
                         if response.status != 200 or result.get("status") != "completed":
                             raise ValueError(str(result.get("error") or response.status)[:150])
-                        await db.set_meta(key, str(int(result["details"]["gift_id"])))
+                        gid = str(int(result["details"]["gift_id"]))
+                        await db.set_meta(key, gid)
+                        await db.set_meta(revision, gid)
                 except Exception as exc:
                     pending += 1
                     log.warning("Seasonal gift %s pending: %s", item["key"], str(exc)[:180])
             if not pending:
-                log.info("Seasonal catalog ready: %d gifts", len(entries))
+                log.info("Gift visibility updated: %d public seasonal templates, %d drop-only mappings", len(PUBLIC_SEASONAL), len(hidden))
                 return
             await asyncio.sleep(90)
