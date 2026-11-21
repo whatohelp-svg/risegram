@@ -941,6 +941,7 @@ async def self_profile(user):
         wallet = None
     result.update(risestars=wallet["risestars"] if wallet else None,
                   gram_balance=float(wallet["gram_balance"]) if wallet else None)
+    result["profile_music"] = _music_public(await _profile_music_row(int(user["rise_id"])))
     return result
 
 
@@ -1379,6 +1380,113 @@ async def h_health(request: web.Request):
     return web.json_response({"ok": True, "service": "risegram-api"})
 
 
+
+async def _profile_music_row(rise_id: int) -> dict | None:
+    try:
+        return await db.fetchone(
+            """SELECT m.title,m.media_id,m.updated_at, u.rise_id, f.storage_name,
+                      f.mime_type,f.byte_size
+               FROM rg_profile_music m JOIN users u ON u.tg_id=m.tg_id
+               JOIN rg_media f ON f.id=m.media_id
+               WHERE u.rise_id=? AND u.banned=0 LIMIT 1""",
+            (int(rise_id),),
+        )
+    except sqlite3.OperationalError as exc:
+        # Older/isolated test databases may not have run this optional migration yet.
+        if "no such table: rg_profile_music" in str(exc):
+            return None
+        raise
+
+
+def _music_public(row: dict | None) -> dict | None:
+    if not row:
+        return None
+    return {
+        "rise_id": row["rise_id"],
+        "title": row["title"],
+        "mime_type": row["mime_type"],
+        "updated_at": row["updated_at"],
+        "audio_url": f"/api/profiles/{row['rise_id']}/music/audio",
+    }
+
+
+async def h_profile_music_get(request: web.Request):
+    viewer = await _current_user(request)
+    if not viewer:
+        return web.json_response({"ok": False, "error": "unauthorized"}, status=401)
+    try:
+        rise_id = int(request.match_info["rise_id"])
+    except (ValueError, KeyError):
+        return web.json_response({"ok": False, "error": "invalid_profile"}, status=400)
+    return web.json_response({"ok": True, "music": _music_public(await _profile_music_row(rise_id))})
+
+
+async def h_profile_music_save(request: web.Request):
+    user = await _current_user(request)
+    if not user:
+        return web.json_response({"ok": False, "error": "unauthorized"}, status=401)
+    data = await _json(request)
+    media_id = str(data.get("media_id", "")).strip()
+    title = str(data.get("title", "")).strip()
+    if not 1 <= len(title) <= 100 or not 1 <= len(media_id) <= 64:
+        return web.json_response({"ok": False, "error": "bad_music_details"}, status=400)
+    media = await db.fetchone("SELECT * FROM rg_media WHERE id=? AND uploader_id=?",
+                              (media_id, int(user["tg_id"])))
+    if not media or media["mime_type"] not in ("audio/mpeg", "audio/ogg", "audio/opus", "audio/wav", "audio/mp4"):
+        return web.json_response({"ok": False, "error": "music_upload_required"}, status=400)
+    path = Path(config.MEDIA_PATH) / media["storage_name"]
+    if not path.is_file():
+        return web.json_response({"ok": False, "error": "media_missing"}, status=404)
+    await db.execute("""INSERT INTO rg_profile_music(tg_id,media_id,title,updated_at)
+        VALUES(?,?,?,?)
+        ON CONFLICT(tg_id) DO UPDATE SET
+            media_id=excluded.media_id,title=excluded.title,updated_at=excluded.updated_at""",
+        (int(user["tg_id"]), media_id, title, db.now()))
+    await _publish_event(int(user["tg_id"]), {"type": "profile_music_changed"})
+    return web.json_response({"ok": True, "music": _music_public(await _profile_music_row(int(user["rise_id"])))})
+
+
+async def h_profile_music_delete(request: web.Request):
+    user = await _current_user(request)
+    if not user:
+        return web.json_response({"ok": False, "error": "unauthorized"}, status=401)
+    await db.execute("DELETE FROM rg_profile_music WHERE tg_id=?", (int(user["tg_id"]),))
+    await _publish_event(int(user["tg_id"]), {"type": "profile_music_changed"})
+    return web.json_response({"ok": True})
+
+
+async def h_profile_music_audio(request: web.Request):
+    viewer = await _current_user(request)
+    if not viewer:
+        return web.json_response({"ok": False, "error": "unauthorized"}, status=401)
+    try:
+        rise_id = int(request.match_info["rise_id"])
+    except (ValueError, KeyError):
+        return web.json_response({"ok": False, "error": "invalid_profile"}, status=400)
+    row = await _profile_music_row(rise_id)
+    if not row:
+        return web.json_response({"ok": False, "error": "music_not_found"}, status=404)
+    path = Path(config.MEDIA_PATH) / row["storage_name"]
+    if not path.is_file():
+        return web.json_response({"ok": False, "error": "media_missing"}, status=404)
+    return web.FileResponse(path, headers={
+        "Content-Type": row["mime_type"],
+        "Content-Disposition": 'inline',
+        "Cache-Control": "private, no-store",
+        "X-Content-Type-Options": "nosniff",
+    })
+
+
+async def h_desktop(request: web.Request):
+    path = Path(__file__).parent / "desktop.html"
+    return web.FileResponse(path, headers={
+        "Content-Type": "text/html; charset=utf-8",
+        "Cache-Control": "no-store",
+        "X-Content-Type-Options": "nosniff",
+        "Content-Security-Policy": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self'; media-src 'self' blob:; img-src 'self' data: blob:; object-src 'none'; frame-ancestors 'none'; base-uri 'none'",
+    })
+
+
 async def start_api(bot) -> web.AppRunner | None:
     # Public auth endpoints are protected by per-phone cooldown and one-time codes.
     # API_SECRET is intentionally not required by a public APK.
@@ -1387,6 +1495,11 @@ async def start_api(bot) -> web.AppRunner | None:
     app.add_routes([
         web.get("/", h_index),
         web.get("/miniapp", h_local_miniapp),
+        web.get("/desktop", h_desktop),
+        web.get("/api/profiles/{rise_id}/music", h_profile_music_get),
+        web.get("/api/profiles/{rise_id}/music/audio", h_profile_music_audio),
+        web.post("/api/profile/music", h_profile_music_save),
+        web.delete("/api/profile/music", h_profile_music_delete),
         web.post("/api/webapp/auth/request", h_local_webapp_auth_request),
         web.post("/api/webapp/auth/verify", h_local_webapp_auth_verify),
         web.get("/api/local-gifts/catalog", h_local_catalog),

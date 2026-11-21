@@ -1,0 +1,38 @@
+name: Build RiseGram Windows desktop
+on:
+  workflow_dispatch:
+  push:
+    branches: [feature/market-economy-sync]
+    paths:
+      - 'desktop/**'
+      - 'desktop.html'
+      - '.github/workflows/build-desktop.yml'
+permissions:
+  contents: read
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install and validate shell
+        working-directory: desktop
+        run: |
+          npm install --no-audit --no-fund
+          npm run check
+      - name: Package Windows app
+        working-directory: desktop
+        shell: pwsh
+        run: |
+          npx electron-packager . RiseGram --platform=win32 --arch=x64 --out=release --overwrite --asar
+          if (!(Test-Path "release/RiseGram-win32-x64/RiseGram.exe")) { throw "Missing Windows executable" }
+          Compress-Archive -Path "release/RiseGram-win32-x64/*" -DestinationPath "RiseGram-Windows-x64.zip" -Force
+      - name: Upload Windows executable bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: RiseGram-Windows-x64
+          path: desktop/RiseGram-Windows-x64.zip
+          retention-days: 14
