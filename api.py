@@ -1478,7 +1478,7 @@ async def h_profile_verification(request: web.Request):
     # Android builds with bundled issuer drawables prefer them to a native mark.
     # Let the installed app render the confirmed MTProto emoji and description.
     if row and "Dalvik/" in request.headers.get("User-Agent", "") and await db.get_meta(f"native_profile_mark:{int(peer)}"):
-        return web.Response(status=204, headers={"Cache-Control": "no-store", "Vary": "User-Agent"})
+        row = None
     return web.json_response({
         "verified_risegram": bool(row and row["verified_risegram"]),
         "verified_major": bool(row and row["verified_major"]),

@@ -21,6 +21,8 @@ COPY server/patches/channel-lookup.patch /tmp/channel-lookup.patch
 RUN git apply /tmp/channel-lookup.patch
 COPY server/patches/profile-wallet.patch /tmp/profile-wallet.patch
 RUN git apply /tmp/profile-wallet.patch
+COPY server/patches/signup-channels.patch /tmp/signup-channels.patch
+RUN git apply /tmp/signup-channels.patch
 RUN go mod download
 ENV CGO_ENABLED=0
 

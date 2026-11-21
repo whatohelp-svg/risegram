@@ -43,11 +43,15 @@ async def install():
             return
         for slug, label in ISSUERS.items():
             prefix = f"rg-issuer-v1-{slug}"
-            bot = await command(session, "/v1/bots/create", prefix + "-bot", {
-                "owner_user_id": int(peer["user_id"]), "name": f"{label} · Верификация RiseGram",
-                "username": f"rg_{slug}_verification_bot",
-            })
-            bot_id = int(bot["bot_user_id"])
+            saved_bot = await db.get_meta("native_issuer:" + slug)
+            if saved_bot:
+                bot_id = int(saved_bot)
+            else:
+                bot = await command(session, "/v1/bots/create", prefix + "-bot", {
+                    "owner_user_id": int(peer["user_id"]), "name": f"{label} · Верификация RiseGram",
+                    "username": f"rg_{slug}_verification_bot",
+                })
+                bot_id = int(bot["bot_user_id"])
             pack = await command(session, "/v1/stickers/create", prefix + "-emoji", {
                 "title": f"{label} Verification", "short_name": f"rg_{slug}_verification",
                 "kind": "emoji", "emoji": "☑️",
