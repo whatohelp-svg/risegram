@@ -318,7 +318,7 @@ async def screen_user(event, uid: int, note: str = ""):
     markup = kb(
         [btn("⭐ RiseStars ±", f"adm:g:{uid}:stars", style="success"), btn("💎 Gram ±", f"adm:g:{uid}:gram", style="success")],
         [btn(ban_label, f"adm:uban:{uid}", style="success" if u["banned"] else "danger")],
-        [btn(rise_label, f"adm:uverrise:{uid}"), btn(major_label, f"adm:uvermajor:{uid}")],
+        [btn(rise_label, f"adm:uverrise:{uid}:{0 if u.get('verified_risegram') else 1}"), btn(major_label, f"adm:uvermajor:{uid}:{0 if u.get('verified_major') else 1}")],
         [btn("📞 Сменить номер", f"adm:unum:{uid}"), btn("🏷 Выдать юзернейм", f"adm:uun:{uid}")],
         [btn("📞 Выдать +888", f"adm:uph:{uid}"), btn("🗂 NFT/номера", f"adm:nfts:{uid}")],
         [btn("🔑 Выдать код входа", f"adm:ucode:{uid}"), btn("✉️ Написать", f"adm:umsg:{uid}")],
@@ -1044,13 +1044,17 @@ async def adm_cb(call: CallbackQuery, state: FSMContext, user: dict):
             return await screen_user(call, uid, "✅ Готово.")
         if route in ("uverrise", "uvermajor"):
             kind = "risegram" if route == "uverrise" else "major"
-            field = "verified_risegram" if kind == "risegram" else "verified_major"
-            enabled = not bool(u.get(field))
+            if len(parts) != 4 or parts[3] not in ("0", "1"):
+                return await screen_user(call, uid, "Карточка обновлена. Выберите действие.")
+            enabled = parts[3] == "1"
             await db.set_verification(uid, kind, enabled)
-            await sync_mtproto_verification(uid, force=True)
+            sync = await sync_mtproto_verification(uid, force=True)
             label = "RiseGram" if kind == "risegram" else "Major"
             await audit(f"Верификация {label} {'выдана' if enabled else 'снята'}: {uid}")
-            return await screen_user(call, uid, "✅ Готово.")
+            note = f"{label}: {'выдана' if enabled else 'снята'}."
+            if not sync.get("synced"):
+                note += " Сервер клиента пока не подтвердил синхронизацию."
+            return await screen_user(call, uid, note)
         if route == "ucode":
             code = await db.issue_auth_code(uid)
             await audit(f"Выдан код входа игроку {uid}")
