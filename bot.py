@@ -26,6 +26,7 @@ from aiogram.types import CallbackQuery, LabeledPrice, Message, PreCheckoutQuery
 
 import config
 import database as db
+import gift_drops
 from admin import admin_router
 from api import start_api
 from ui import back_row, btn, cancel_kb, esc, fmt_num, kb, safe_send, show
@@ -2072,6 +2073,7 @@ async def main():
     dp.include_router(router)
     dp.startup.register(on_startup)
     await db.init_db()
+    await asyncio.to_thread(gift_drops.setup)
     runner = await start_api(bot)
     try:
         await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
