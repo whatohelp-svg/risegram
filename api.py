@@ -1382,14 +1382,20 @@ async def h_health(request: web.Request):
 
 
 async def _profile_music_row(rise_id: int) -> dict | None:
-    return await db.fetchone(
-        """SELECT m.title,m.media_id,m.updated_at, u.rise_id, f.storage_name,
-                  f.mime_type,f.byte_size
-           FROM rg_profile_music m JOIN users u ON u.tg_id=m.tg_id
-           JOIN rg_media f ON f.id=m.media_id
-           WHERE u.rise_id=? AND u.banned=0 LIMIT 1""",
-        (int(rise_id),),
-    )
+    try:
+        return await db.fetchone(
+            """SELECT m.title,m.media_id,m.updated_at, u.rise_id, f.storage_name,
+                      f.mime_type,f.byte_size
+               FROM rg_profile_music m JOIN users u ON u.tg_id=m.tg_id
+               JOIN rg_media f ON f.id=m.media_id
+               WHERE u.rise_id=? AND u.banned=0 LIMIT 1""",
+            (int(rise_id),),
+        )
+    except sqlite3.OperationalError as exc:
+        # Older/isolated test databases may not have run this optional migration yet.
+        if "no such table: rg_profile_music" in str(exc):
+            return None
+        raise
 
 
 def _music_public(row: dict | None) -> dict | None:
