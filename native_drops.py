@@ -63,7 +63,7 @@ async def publish(session, assets, row):
         model = await asset(assets, path)
         pattern = (Path(__file__).parent / "data/drop-star.tgs").read_bytes()
         await apply(f"/v1/gifts/{state['id']}/collectibles/publish", "upgrade-v2", {
-            "upgrade_stars": 1, "supply_total": stock, "slug_prefix": f"rise{row['id']}",
+            "upgrade_stars": 25, "supply_total": stock, "slug_prefix": f"rise{row['id']}",
             "models": [{"name": Path(path).stem.replace("_"," ").title(), "file_key":"model","rarity_permille":1000}],
             "patterns": [{"name":"Rise Star","file_key":"pattern","rarity_permille":1000}],
             "backdrops": [{"name":"Midnight","backdrop_id":1,"center_color":3556758,"edge_color":1186089,

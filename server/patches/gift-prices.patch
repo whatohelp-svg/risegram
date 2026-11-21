@@ -1,0 +1,170 @@
+--- a/internal/domain/star_gift.go
++++ b/internal/domain/star_gift.go
+@@ -364,6 +364,10 @@
+ 	Nanos    int
+ }
+ 
++func (a StarGiftAmount) WithinResaleRange() bool {
++	return a.Currency != StarGiftCurrencyStars || a.Amount >= MinStarGiftResaleStars && a.Amount <= MaxStarGiftResaleStars
++}
++
+ func (a StarGiftAmount) Valid() bool {
+ 	if a.Amount <= 0 {
+ 		return false
+@@ -1257,6 +1261,7 @@
+ 	// advertised under that key in help.getAppConfig. It is deliberately flat: a
+ 	// floor derived from the cheapest listing only ever ratchets up.
+ 	MinStarGiftResaleStars int64 = 125
++	MaxStarGiftResaleStars int64 = 1_000_000
+ )
+ 
+ // Star gift sentinel errors (the rpc layer maps them to tgerr via errors.Is).
+--- a/internal/store/postgres/star_gift_lifecycle.go
++++ b/internal/store/postgres/star_gift_lifecycle.go
+@@ -395,7 +395,7 @@
+ 			// floor only ratchets upward and locks sellers out of pricing below
+ 			// whatever the first lister chose. resell_min_stars stays a display
+ 			// of the lowest price (see updateStarGiftResaleProjection).
+-			if req.Amount.Currency == domain.StarGiftCurrencyStars && req.Amount.Amount < domain.MinStarGiftResaleStars {
++			if !req.Amount.WithinResaleRange() {
+ 				return domain.ErrStarGiftResaleUnavailable
+ 			}
+ 			_, err = tx.Exec(ctx, `INSERT INTO star_gift_listings(unique_gift_id,seller_peer_type,seller_peer_id,currency,amount,listed_at,updated_at)
+@@ -857,6 +857,9 @@
+ 				return err
+ 			}
+ 			if ownerFrozen {
++				return domain.ErrStarGiftOfferInvalid
++			}
++			if !req.Price.WithinResaleRange() {
+ 				return domain.ErrStarGiftOfferInvalid
+ 			}
+ 			if req.Price.Currency == domain.StarGiftCurrencyStars && gift.OfferMinStars > 0 && req.Price.Amount < int64(gift.OfferMinStars) {
+--- a/internal/config/config.go
++++ b/internal/config/config.go
+@@ -1300,7 +1300,7 @@
+ 		StarGiftTransferStars:            int64(envIntOr("TELESRV_STARGIFT_TRANSFER_STARS", 25)),
+ 		StarGiftDropOriginalDetailsStars: int64(envIntOr("TELESRV_STARGIFT_DROP_DETAILS_STARS", 25)),
+ 		StarGiftOfferMinStars:            envIntOr("TELESRV_STARGIFT_OFFER_MIN_STARS", 1),
+-		StarGiftStarsProceedsPermille:    envIntOr("TELESRV_STARGIFT_STARS_PROCEEDS_PERMILLE", 1000),
++		StarGiftStarsProceedsPermille:    envIntOr("TELESRV_STARGIFT_STARS_PROCEEDS_PERMILLE", 750),
+ 		StarGiftTONProceedsPermille:      envIntOr("TELESRV_STARGIFT_TON_PROCEEDS_PERMILLE", 1000),
+ 		StarGiftExportDelay:              envDurationOr("TELESRV_STARGIFT_EXPORT_DELAY", 0),
+ 		StarGiftTransferDelay:            envDurationOr("TELESRV_STARGIFT_TRANSFER_DELAY", 0),
+--- a/internal/app/help/service.go
++++ b/internal/app/help/service.go
+@@ -87,10 +87,12 @@
+ // The Stars resale floor the server enforces on payments.updateStarGiftPrice.
+ // Clients otherwise fall back to their own built-in default for the key.
+ func starGiftResaleAppConfigFragment() string {
+-	return `,"stars_stargift_resale_amount_min":` + strconv.FormatInt(domain.MinStarGiftResaleStars, 10)
+-}
+-
+-const defaultAppConfigHash = 37 // must be incremented when the default app config content changes, otherwise caching clients only receive notModified.
++	return `,"stars_stargift_resale_amount_min":` + strconv.FormatInt(domain.MinStarGiftResaleStars, 10) +
++		`,"stars_stargift_resale_amount_max":` + strconv.FormatInt(domain.MaxStarGiftResaleStars, 10) +
++		`,"stars_stargift_resale_commission_permille":750,"stars_paid_message_commission_permille":1000`
++}
++
++const defaultAppConfigHash = 38 // must be incremented when the default app config content changes, otherwise caching clients only receive notModified.
+ 
+ // Service provides the client startup config and the country dialing-code catalog.
+ //
+--- a/internal/compat/tdesktop/defaults.go
++++ b/internal/compat/tdesktop/defaults.go
+@@ -46,6 +46,9 @@
+ 		{Key: "stargifts_blocked", Value: &tg.JSONBool{Value: false}},
+ 		// The Stars resale floor enforced on payments.updateStarGiftPrice.
+ 		{Key: "stars_stargift_resale_amount_min", Value: &tg.JSONNumber{Value: float64(domain.MinStarGiftResaleStars)}},
++		{Key: "stars_stargift_resale_amount_max", Value: &tg.JSONNumber{Value: float64(domain.MaxStarGiftResaleStars)}},
++		{Key: "stars_stargift_resale_commission_permille", Value: &tg.JSONNumber{Value: 750}},
++		{Key: "stars_paid_message_commission_permille", Value: &tg.JSONNumber{Value: 1000}},
+ 		{Key: "giveaway_gifts_purchase_available", Value: &tg.JSONBool{Value: true}},
+ 		{Key: "giveaway_boosts_per_premium", Value: &tg.JSONNumber{Value: 4}},
+ 		{Key: "giveaway_countries_max", Value: &tg.JSONNumber{Value: 10}},
+--- /dev/null
++++ b/deploy/migrations/20261121010000_risegram_gift_prices.up.sql
+@@ -0,0 +1,15 @@
++-- Keep the identity, attributes, supply and issued serials of existing gifts.
++ALTER TABLE star_gift_collectible_revisions DISABLE TRIGGER star_gift_collectible_revision_guard;
++WITH changed AS (
++    UPDATE star_gift_collectible_revisions r SET upgrade_stars=25
++    FROM star_gift_catalog c
++    WHERE r.id=c.collectible_revision_id AND r.upgrade_stars<>25
++    RETURNING r.id
++)
++UPDATE star_gift_catalog SET updated_at=now() WHERE collectible_revision_id IN (SELECT id FROM changed);
++ALTER TABLE star_gift_collectible_revisions ENABLE TRIGGER star_gift_collectible_revision_guard;
++UPDATE peer_star_gifts SET can_resell_at=0 WHERE can_resell_at>extract(epoch from now());
++UPDATE message_boxes SET media=jsonb_set(media, '{service_action,star_gift,upgrade_price_stars}', '25')
++WHERE (media #>> '{service_action,star_gift,upgrade_price_stars}')::bigint > 0 AND (media #>> '{service_action,star_gift,upgrade_price_stars}')::bigint <> 25;
++UPDATE channel_messages SET action=jsonb_set(action, '{StarGift,upgrade_price_stars}', '25')
++WHERE (action #>> '{StarGift,upgrade_price_stars}')::bigint > 0 AND (action #>> '{StarGift,upgrade_price_stars}')::bigint <> 25;
+--- a/internal/store/postgres/stars.go
++++ b/internal/store/postgres/stars.go
+@@ -211,7 +211,7 @@
+ 	if err := insertStarsTxn(ctx, tx, senderUserID, -amount, domain.StarsReasonPaidMessage, domain.Peer{Type: domain.PeerTypeUser, ID: recipientUserID}, date, "Paid message", ""); err != nil {
+ 		return domain.PaidStarsCharge{}, err
+ 	}
+-	credited := amount * paidMessageChannelCommissionPermille / 1000
++	credited := amount
+ 	var recipientBalance int64
+ 	if err := tx.QueryRow(ctx, `
+ INSERT INTO stars_balances (user_id, balance, updated_at) VALUES ($1, $2, now())
+--- a/internal/store/memory/channel_monoforum.go
++++ b/internal/store/memory/channel_monoforum.go
+@@ -146,7 +146,7 @@
+ 	s.messages[req.MonoforumID] = append(s.messages[req.MonoforumID], msg)
+ 	if paidMessageStars > 0 {
+ 		s.starsBalances[req.SenderUserID] = balanceAfter
+-		s.channelStarsBalances[parent.ID] += paidMessageStars * paidMessageChannelCommissionPermille / 1000
++		s.channelStarsBalances[parent.ID] += paidMessageStars
+ 	}
+ 	if req.RandomID != 0 {
+ 		replayKey := channelMessageReplayKey{channelID: req.MonoforumID, messageID: msg.ID}
+--- a/internal/store/postgres/channel_monoforum.go
++++ b/internal/store/postgres/channel_monoforum.go
+@@ -132,7 +132,7 @@
+ 			domain.Peer{Type: domain.PeerTypeChannel, ID: parent.ID}, req.Date, "Paid message", ""); err != nil {
+ 			return domain.SendChannelMessageResult{}, err
+ 		}
+-		channelCredit := paidMessageStars * paidMessageChannelCommissionPermille / 1000
++		channelCredit := paidMessageStars
+ 		if channelCredit > 0 {
+ 			if _, err := tx.Exec(ctx, `
+ INSERT INTO channel_stars_balances(channel_id, balance)
+--- a/internal/admin/service.go
++++ b/internal/admin/service.go
+@@ -4231,7 +4231,7 @@
+ 				RarityKind: rarityKind, RarityPermille: permille, SortOrder: index})
+ 			rarityCounts[string(rarityKind)]++
+ 		}
+-		collectible = &domain.StarGiftCollectibleWrite{GiftID: req.GiftID, UpgradeStars: req.UpgradeStars,
++		collectible = &domain.StarGiftCollectibleWrite{GiftID: req.GiftID, UpgradeStars: 25,
+ 			SupplyTotal: req.SupplyTotal, SlugPrefix: req.SlugPrefix, Models: models, Patterns: patterns, Backdrops: backdrops,
+ 			Actor: req.Actor, CommandID: req.CommandID, OfficialGiftID: sourceID,
+ 			SourceManifestSHA256: append([]byte(nil), bundle.ManifestSHA256...)}
+@@ -4406,7 +4406,7 @@
+ 		}
+ 	}
+ 	write := domain.StarGiftCollectibleWrite{
+-		GiftID: req.GiftID, UpgradeStars: req.UpgradeStars, SupplyTotal: req.SupplyTotal,
++		GiftID: req.GiftID, UpgradeStars: 25, SupplyTotal: req.SupplyTotal,
+ 		SlugPrefix: strings.ToLower(strings.TrimSpace(req.SlugPrefix)), Models: models, Patterns: patterns, Backdrops: backdrops,
+ 		Actor: req.Actor, CommandID: req.CommandID,
+ 	}
+--- /dev/null
++++ b/internal/domain/risegram_gift_price_test.go
+@@ -0,0 +1,12 @@
++package domain
++
++import "testing"
++
++func TestRiseGramResaleBoundaries(t *testing.T) {
++	for amount, want := range map[int64]bool{124: false, 125: true, 1000000: true, 1000001: false} {
++		price := StarGiftAmount{Currency: StarGiftCurrencyStars, Amount: amount}
++		if got := price.WithinResaleRange(); got != want {
++			t.Fatalf("price %d accepted=%v, want %v", amount, got, want)
++		}
++	}
++}
