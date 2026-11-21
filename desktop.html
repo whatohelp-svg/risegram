@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#0d1725"><title>RiseGram — Desktop</title>
+<style>
+:root{font:15px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif;color:#ecf5ff;background:#0c1521;color-scheme:dark;--line:#27394b;--sub:#a3b7cc;--blue:#32a6ef}
+*{box-sizing:border-box}body{margin:0}button,input{font:inherit}button{cursor:pointer}button:disabled{opacity:.45;cursor:wait}
+#login{min-height:100vh;display:grid;place-items:center;padding:24px;background:radial-gradient(ellipse at 20% 25%,#1b5580 0,transparent 40%),#0d1523}
+.panel{background:#172638;border:1px solid var(--line);border-radius:20px;padding:23px;box-shadow:0 10px 40px #0003}
+.login-panel{width:min(440px,100%)}h1{font-size:28px;margin:0 0 8px}h2{font-size:18px;margin:0 0 12px}.muted{color:var(--sub);font-size:13px}
+label{display:block;color:#bacee3;margin:14px 0 5px}input{color:#fff;border-radius:11px;border:1px solid #456078;background:#101c2b;padding:12px;width:100%;outline:0}
+input:focus{border-color:#55bcff}button{background:#273e58;color:#ecf6ff;border:1px solid #42617c;border-radius:11px;padding:11px 14px}
+button:hover{background:#345575}.primary{background:#178ee0;border-color:#178ee0}.primary:hover{background:#1c9ffc}.success{background:#168f78;border:0}
+.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.row>*{min-width:0}.notice{min-height:20px;margin-top:10px;color:#a8dbff}
+#app{height:100vh;display:grid;grid-template-columns:82px 310px minmax(380px,1fr)}
+.rail{background:#111d2d;border-right:1px solid #27384a;display:flex;flex-direction:column;align-items:center;gap:12px;padding:20px 8px}
+.logo{width:48px;height:48px;display:grid;place-items:center;background:#2299dc;border-radius:16px;font-size:28px;font-weight:900}
+.rail button{border:0;background:none;width:64px;font-size:22px;padding:12px 4px}.rail button span{display:block;font-size:11px;color:#bdd2e5;margin-top:3px}.rail button.active{background:#223c54}
+.sidebar{border-right:1px solid #27384a;padding:22px 15px;overflow:auto;background:#142233}
+.sidebar .search{margin-bottom:14px}.chat{padding:12px;border-radius:12px;display:flex;gap:11px;align-items:center;width:100%;border:0;background:none;text-align:left;margin-bottom:4px}
+.chat:hover,.chat.active{background:#25415b}.avatar{height:40px;width:40px;border-radius:50%;display:grid;place-items:center;background:linear-gradient(135deg,#3377c6,#59c2ee);font-weight:800;flex:0 0 40px}.chattext{overflow:hidden}.chattext small{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#9fb7cc}
+.main{overflow:auto;padding:32px;max-width:1200px;width:100%;margin:auto}
+.view{display:none}.view.active{display:block}
+.wallet{border-radius:24px;min-height:210px;background:linear-gradient(130deg,#2eadef,#086bca 58%,#0d448e);box-shadow:0 12px 35px #125b9e30;padding:24px;position:relative;overflow:hidden}
+.wallet:before,.wallet:after{content:"";position:absolute;border:1px solid #ffffff21;border-radius:50%;width:310px;height:310px;right:-100px;top:-140px;transform:rotate(20deg)}
+.wallet:after{width:160px;height:160px;right:80px;top:75px}.wallet .balance{font-size:38px;font-weight:800;margin:17px 0 5px}.wallet small{color:#d5eeff}
+.cards{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin-top:18px}
+.hero{height:280px;border-radius:26px;overflow:hidden;position:relative;background:linear-gradient(110deg,#ab6324,#ce8439 55%,#b56c2d);display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center}
+.orb{position:absolute;border-radius:50%;filter:blur(9px);opacity:.65;animation:float 9s ease-in-out infinite alternate;pointer-events:none}
+.orb:nth-child(1){width:48px;height:48px;background:#39d3f9;left:20%;top:9%}.orb:nth-child(2){width:60px;height:60px;background:#5ee1a0;right:21%;top:20%;animation-delay:-4s}
+.orb:nth-child(3){width:45px;height:45px;background:#e0a7fa;left:10%;bottom:30%;animation-delay:-2s}
+.orb:nth-child(4){width:43px;height:43px;background:#fbd671;right:13%;bottom:23%;animation-delay:-6s}
+@keyframes float{from{transform:translate(0,7px) scale(.8);opacity:.38}to{transform:translate(18px,-20px) scale(1.35);opacity:.74}}
+.hero .avatar{height:84px;width:84px;font-size:33px;flex:0 0 auto;box-shadow:0 5px 28px #0003;z-index:1}
+.hero strong{font-size:24px;margin-top:12px;z-index:1}.hero .sub{z-index:1;color:#ffedd7}
+.music-pill{z-index:1;border:1px solid #ffffff55;color:white;background:#4a371a83;padding:7px 13px;margin-top:9px;font-size:13px;border-radius:99px}
+.tabs{display:flex;gap:8px;margin:20px 0}.tabs button.on{background:#197bc0}
+.messages{background:#132337;border:1px solid #32485e;border-radius:17px;padding:15px;height:min(60vh,600px);overflow:auto}
+.bubble{padding:10px 14px;max-width:80%;margin:8px 0;border-radius:15px;background:#2c4660;width:fit-content;white-space:pre-wrap;overflow-wrap:anywhere}
+.bubble.mine{background:#15679c;margin-left:auto}
+#composer{display:flex;gap:8px;margin-top:12px}#composer input{flex:1}
+audio{width:100%;margin:10px 0}ul{padding-left:20px}.status{background:#224061;padding:7px 11px;border-radius:10px;font-size:12px}
+input[type=file]{font-size:13px}.fine{font-size:12px;color:#9eb6ca}
+@media(max-width:900px){#app{grid-template-columns:70px 240px minmax(300px,1fr)}.main{padding:20px}.cards{grid-template-columns:1fr}}
+@media(max-width:650px){#app{grid-template-columns:58px 1fr}.sidebar{display:none}.rail button{width:52px}.main{padding:16px}.wallet{min-height:180px}.hero{height:235px}}
+@media(prefers-reduced-motion:reduce){.orb{animation:none}}
+[hidden]{display:none!important}
+</style>
+</head>
+<body>
+<section id="login"><form class="panel login-panel" id="loginForm">
+<div class="row"><span class="logo">R</span><div><h1>RiseGram Desktop</h1><div class="muted">Вход по виртуальному номеру из @risegrambot</div></div></div>
+<label for="phone">Номер RiseGram</label><input id="phone" type="tel" placeholder="+7 986 ... ..." autocomplete="tel" required>
+<button type="button" id="sendCode" class="primary">Получить код</button>
+<div id="codeZone" hidden><label for="code">Код из бота</label><input id="code" inputmode="numeric" autocomplete="one-time-code" placeholder="Код входа">
+<button type="submit" class="primary">Войти</button></div>
+<p id="loginNotice" class="notice" role="status"></p>
+</form></section>
+<div id="app" hidden>
+<aside class="rail"><span class="logo">R</span>
+<button class="active" data-view="chats" title="Чаты">💬<span>Чаты</span></button>
+<button data-view="wallet" title="Gram">💎<span>Gram</span></button>
+<button data-view="profile" title="Профиль">👤<span>Профиль</span></button>
+<button data-view="music" title="Музыка">🎵<span>Музыка</span></button>
+<div style="flex:1"></div><button id="logout" title="Выход">🚪<span>Выход</span></button>
+</aside>
+<aside class="sidebar">
+<h2>RiseGram</h2><div class="muted" id="who">—</div>
+<input id="search" class="search" placeholder="Найти по @username или ID">
+<div id="searchResults"></div><h2>Сообщения</h2><div id="chatlist"></div>
+</aside>
+<main class="main">
+<section id="chats" class="view active"><h1 id="chatTitle">Чаты RiseGram</h1><p class="muted" id="chatSub">Выберите диалог слева или найдите человека</p><div id="messages" class="messages"><div class="muted">Ваши сообщения появятся здесь</div></div>
+<form id="composer" hidden><input id="msg" maxlength="4000" placeholder="Написать сообщение" autocomplete="off" required><button class="primary">Отправить</button></form></section>
+<section id="wallet" class="view"><h1>Кошелёк RiseGram</h1>
+<div class="wallet"><div>💎 RISEGRAM GRAM</div><div class="balance" id="gram">— Gram</div><small>1 Gram = 100 RiseStars · Внутренняя валюта RiseGram</small></div>
+<div class="row" style="margin:16px 0"><button id="refreshWallet">↻ Обновить</button><button id="toProfile">Профиль</button></div>
+<div class="cards"><div class="panel"><h2>⭐ RiseStars</h2><div id="stars" style="font-size:30px;font-weight:800">—</div></div><div class="panel"><h2>🕒 Покупки</h2><div id="purchases" class="muted">Загрузка</div></div></div>
+<p class="fine">Секретные фразы сторонних криптокошельков здесь не запрашиваются</p></section>
+<section id="profile" class="view"><h1>Мой профиль</h1>
+<div class="hero"><span class="orb"></span><span class="orb"></span><span class="orb"></span><span class="orb"></span>
+<span class="avatar" id="bigavatar">R</span><strong id="myName">RiseGram</strong><span class="sub" id="myTag">—</span><button class="music-pill" id="profileMusicPill">🎵 Добавить музыку</button></div>
+<div class="cards"><div class="panel"><h2>Аккаунт</h2><div id="myDetails"></div></div><div class="panel"><h2>Статусы</h2><div id="myBadges">—</div></div></div>
+<div class="tabs"><button class="on" data-ptab="publications">Публикации</button><button data-ptab="gifts">Подарки</button><button data-ptab="groups">Группы</button></div><div class="panel" id="profileTabContent">Публикаций пока нет</div>
+</section>
+<section id="music" class="view"><h1>🎵 Музыка профиля</h1><p class="muted">Загрузи свой трек — он будет доступен другим пользователям RiseGram в профиле</p>
+<div class="panel"><h2>Сейчас в профиле</h2><div id="currentMusic" class="muted">Трек не выбран</div><audio id="player" controls hidden></audio><div class="row"><button id="playMusic">▶ Прослушать</button><button id="removeMusic">Удалить музыку</button></div></div>
+<form id="musicForm" class="panel"><h2>Добавить музыку</h2><label for="songtitle">Название</label><input id="songtitle" maxlength="100" placeholder="Название трека" required>
+<label for="songfile">Аудиофайл (MP3, OGG, OPUS, WAV, M4A · до 25 МБ)</label><input id="songfile" type="file" accept="audio/mpeg,audio/ogg,audio/opus,audio/wav,audio/mp4,.mp3,.ogg,.opus,.wav,.m4a" required>
+<button class="primary" type="submit">Сохранить в профиль</button><p class="fine">Загружай только музыку, которую имеешь право публиковать</p></form></section>
+<p id="notice" class="notice" role="status"></p>
+</main>
+</div>
+<script>
+(function(){
+"use strict";
+const $=id=>document.getElementById(id);
+let token=localStorage.getItem("risegram-desktop-token")||"",me=null,peer=null,music=null,audioObjectUrl=null,lastList="";
+function notice(s){$("notice").textContent=s;setTimeout(()=>{if($("notice").textContent===s)$("notice").textContent=""},7000)}
+async function api(path,opt={}){
+const headers={Authorization:"Bearer "+token,...(opt.headers||{})};
+if(opt.body&&typeof opt.body==="string")headers["Content-Type"]="application/json";
+const res=await fetch(path,{...opt,headers,cache:"no-store"});
+let data={};try{data=await res.json()}catch(_){throw Error("Сервер не вернул JSON")}
+if(!res.ok||data.ok===false)throw Error(data.error||("Ошибка HTTP "+res.status));
+return data;
+}
+function error(e){notice("Ошибка: "+(e&&e.message||e))}
+function showLogin(){document.getElementById("login").hidden=false;$("app").hidden=true}
+function view(name){document.querySelectorAll(".view").forEach(v=>v.classList.toggle("active",v.id===name));document.querySelectorAll("[data-view]").forEach(v=>v.classList.toggle("active",v.dataset.view===name));location.hash=name;if(name==="wallet")wallet();if(name==="music")loadMusic();if(name==="chats")chats()}
+async function start(){if(!token)return showLogin();try{const r=await api("/api/me");me=r.user;$("login").hidden=true;$("app").hidden=false;fillProfile();await chats();view(["wallet","profile","music","chats"].includes(location.hash.slice(1))?location.hash.slice(1):"chats")}catch(e){token="";localStorage.removeItem("risegram-desktop-token");showLogin();$("loginNotice").textContent="Сессия истекла — войдите снова"}}
+$("sendCode").addEventListener("click",async()=>{const p=$("phone").value.trim();if(!p)return $("loginNotice").textContent="Укажите номер";$("sendCode").disabled=true;try{const r=await fetch("/api/auth/request",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({phone:p})});const j=await r.json();if(!r.ok)throw Error(j.error||"Не удалось отправить код");$("codeZone").hidden=false;$("loginNotice").textContent="Код отправлен в @risegrambot";$("code").focus()}catch(e){$("loginNotice").textContent=e.message}finally{$("sendCode").disabled=false}});
+$("loginForm").addEventListener("submit",async e=>{e.preventDefault();try{const r=await fetch("/api/auth/verify",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({phone:$("phone").value.trim(),code:$("code").value.trim()})});const j=await r.json();if(!r.ok)throw Error(j.error||"Неправильный код");token=j.token;localStorage.setItem("risegram-desktop-token",token);await start()}catch(err){$("loginNotice").textContent=err.message}});
+$("logout").onclick=()=>{token="";localStorage.removeItem("risegram-desktop-token");showLogin()};
+document.querySelectorAll("[data-view]").forEach(b=>b.onclick=()=>view(b.dataset.view));
+$("toProfile").onclick=()=>view("profile");$("refreshWallet").onclick=wallet;$("profileMusicPill").onclick=()=>view("music");
+function initial(s){return (s||"R").trim().charAt(0).toUpperCase()}
+function fillProfile(){if(!me)return;$("who").textContent=(me.name||"Аккаунт")+" · "+me.rise_id;$("myName").textContent=me.name||"RiseGram";$("bigavatar").textContent=initial(me.name);$("myTag").textContent=(me.username?"@"+me.username:"ID "+me.rise_id);
+$("myDetails").textContent="ID "+me.rise_id+" · "+(me.phone||"Номер скрыт");
+$("myBadges").textContent=[me.verified_risegram?"☑️ RiseGram":null,me.verified_major?"💠 Major":null].filter(Boolean).join(" · ")||"Без верификации";
+$("gram").textContent=me.gram_balance===null?"— Gram":Number(me.gram_balance).toLocaleString("ru-RU")+" Gram";
+$("stars").textContent=me.risestars===null?"—":Number(me.risestars).toLocaleString("ru-RU")+" ⭐";music=me.profile_music||null;musicDisplay()}
+async function wallet(){try{me=(await api("/api/me")).user;fillProfile();let r=await api("/api/purchases");$("purchases").textContent=JSON.stringify(r.purchases||r.items||[]).slice(0,330)||"Покупок пока нет"}catch(e){error(e)}}
+function renderChats(rows,el){el.replaceChildren();if(!rows.length){el.textContent="Пока нет диалогов";return}for(const row of rows){const u=row.user||row;const b=document.createElement("button");b.className="chat";const av=document.createElement("span");av.className="avatar";av.textContent=initial(u.name);const txt=document.createElement("span");txt.className="chattext";const strong=document.createElement("strong");strong.textContent=u.name||"Пользователь";const small=document.createElement("small");small.textContent=row.last_message||("@"+(u.username||u.rise_id));txt.append(strong,small);b.append(av,txt);b.onclick=()=>openChat(u);el.append(b)}}
+async function chats(){try{const r=await api("/api/chats");const v=JSON.stringify(r.chats);if(v!==lastList){lastList=v;renderChats(r.chats,$("chatlist"))}}catch(e){error(e)}}
+let searchDelay;$("search").oninput=()=>{clearTimeout(searchDelay);let q=$("search").value.trim();if(q.length<2){$("searchResults").replaceChildren();return}searchDelay=setTimeout(async()=>{try{let r=await api("/api/users/search?q="+encodeURIComponent(q));renderChats(r.users,$("searchResults"))}catch(e){error(e)}},400)};
+async function openChat(u){peer=u;view("chats");$("chatTitle").textContent=u.name||"Пользователь";$("chatSub").textContent="ID "+u.rise_id+ (u.username?" · @"+u.username:"");$("composer").hidden=false;await messages()}
+async function messages(){if(!peer)return;try{const r=await api("/api/chats/"+peer.rise_id+"/messages");$("messages").replaceChildren();r.messages.forEach(m=>{const div=document.createElement("div");div.className="bubble"+(m.from_me?" mine":"");div.textContent=m.text||"[Медиа]";$("messages").append(div)});$("messages").scrollTop=$("messages").scrollHeight}catch(e){error(e)}}
+$("composer").onsubmit=async e=>{e.preventDefault();const message=$("msg").value.trim();if(!message||!peer)return;try{await api("/api/chats/"+peer.rise_id+"/messages",{method:"POST",body:JSON.stringify({text:message})});$("msg").value="";await messages();await chats()}catch(e){error(e)}};
+async function loadMusic(){if(!me)return;try{music=(await api("/api/profiles/"+me.rise_id+"/music")).music;musicDisplay()}catch(e){error(e)}}
+function musicDisplay(){const title=music?music.title:null;$("currentMusic").textContent=title||"Музыка пока не добавлена";$("profileMusicPill").textContent=title?"🎵 "+title:"🎵 Добавить музыку"}
+function clearPlayer(){if(audioObjectUrl){URL.revokeObjectURL(audioObjectUrl);audioObjectUrl=null}$("player").pause();$("player").hidden=true}
+$("playMusic").onclick=async()=>{if(!music)return notice("Сначала добавь музыку");try{clearPlayer();const r=await fetch(music.audio_url,{headers:{Authorization:"Bearer "+token}});if(!r.ok)throw Error("Не удалось загрузить музыку");const blob=await r.blob();audioObjectUrl=URL.createObjectURL(blob);$("player").src=audioObjectUrl;$("player").hidden=false;await $("player").play()}catch(e){error(e)}};
+$("musicForm").onsubmit=async e=>{e.preventDefault();const file=$("songfile").files[0],title=$("songtitle").value.trim();if(!file||!title)return;if(file.size>25*1024*1024)return notice("Максимум 25 МБ");const btn=$("musicForm").querySelector("button[type=submit]");btn.disabled=true;try{const form=new FormData();form.append("file",file,file.name);const uploaded=await api("/api/media",{method:"POST",body:form});const result=await api("/api/profile/music",{method:"POST",body:JSON.stringify({media_id:uploaded.media.id,title})});music=result.music;musicDisplay();$("songfile").value="";clearPlayer();notice("Музыка добавлена в профиль")}catch(e){error(e)}finally{btn.disabled=false}};
+$("removeMusic").onclick=async()=>{if(!music)return;try{await api("/api/profile/music",{method:"DELETE"});clearPlayer();music=null;musicDisplay();notice("Музыка удалена")}catch(e){error(e)}};
+document.querySelectorAll("[data-ptab]").forEach(b=>b.onclick=async()=>{document.querySelectorAll("[data-ptab]").forEach(x=>x.classList.toggle("on",x===b));const kind=b.dataset.ptab;if(kind==="gifts"){try{const r=await api("/api/inventory");$("profileTabContent").textContent=JSON.stringify(r.items||r.inventory||[]).slice(0,800)||"Подарков пока нет"}catch(e){$("profileTabContent").textContent="Инвентарь недоступен"}}else $("profileTabContent").textContent=kind==="groups"?"Группы доступны в приложении RiseGram":"Публикаций пока нет"});
+setInterval(()=>{if(!document.hidden&&token&&peer&&$("chats").classList.contains("active"))messages();if(!document.hidden&&token)chats()},14000);
+start();
+})();
+</script>
+</body></html>
