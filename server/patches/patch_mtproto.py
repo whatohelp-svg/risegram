@@ -208,6 +208,16 @@ def patch_go_file(path: str, old: str, new: str, label: str) -> None:
     file.write_text(content.replace(old, new, 1))
 
 
+# Older Android builds install the advertised route directly. Mark the
+# RiseGram port static so tgnet keeps using it instead of rotating to 443.
+patch_go_file(
+    "internal/compat/tdesktop/config.go",
+    "\t\t\tPort:      port,\n",
+    "\t\t\tPort:      port,\n\t\t\tStatic:    true,\n",
+    "static RiseGram DC in help.getConfig",
+)
+
+
 patch_go_file(
     "internal/rpc/layer_dispatch.go",
     """\tif r.deps.Auth != nil {

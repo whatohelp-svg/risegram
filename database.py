@@ -926,7 +926,7 @@ async def redeem_auth_code(phone_digits: str, code: str) -> tuple[dict, str] | N
             row = await cur.fetchone()
         if not row or row["attempts"] >= 5:
             return None
-        if not secrets.compare_digest(row["code"].encode(), code.encode()):
+        if not code.isascii() or not secrets.compare_digest(row["code"], code):
             await conn.execute(
                 "UPDATE auth_codes SET attempts=attempts+1, used=(attempts+1>=5) WHERE id=?",
                 (row["id"],),
