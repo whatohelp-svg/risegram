@@ -2171,7 +2171,12 @@ async def recover_wallet_jobs(bot):
     while True:
         try:
             for result in await db.fetchall("SELECT game_id FROM native_game_results"):
-                await economy.deliver_result(result["game_id"])
+                gid = result["game_id"]
+                await economy.deliver_result(gid)
+                for games in (crash_live, hl_live):
+                    for uid, game in list(games.items()):
+                        if game["gid"] == gid and game["done"]:
+                            games.pop(uid, None)
             live = [g["gid"] for g in (*crash_live.values(), *hl_live.values()) if not g.get("done")]
             await economy.maintain_games(live)
             for job in await db.fetchall("SELECT key FROM native_wallet_jobs WHERE status='pending' ORDER BY rowid"):
@@ -2180,7 +2185,10 @@ async def recover_wallet_jobs(bot):
                 except Exception:
                     log.exception("Wallet operation deferred")
             for order in await db.fetchall("SELECT * FROM purchases WHERE status='processing' AND payload LIKE 'rs:%'"):
-                await complete_risestars_order(bot, order)
+                try:
+                    await complete_risestars_order(bot, order)
+                except Exception:
+                    log.exception("RiseStars credit deferred for order %s", order["id"])
         except Exception:
             log.exception("Native wallet recovery deferred")
         await asyncio.sleep(20)

@@ -1588,18 +1588,25 @@ async def claim_dox_bonus(tg_id: int, digits: str) -> bool:
     """/doxnumber: выдаёт синтетический номер +1 и бонус RiseStars — один раз на аккаунт."""
     peer = await economy.account(await get_user(tg_id))
     key = f"number-bonus:{tg_id}"
+    digits = digits_of(digits)
     async with connect() as db:
-        cur = await db.execute("UPDATE users SET dox_claimed=1 WHERE tg_id=? AND dox_claimed=0", (tg_id,))
-        if cur.rowcount == 0:
-            await db.rollback()
+        await db.execute("BEGIN IMMEDIATE")
+        old = await (await db.execute("SELECT phone_digits FROM users WHERE tg_id=? AND dox_claimed=0",
+                                      (tg_id,))).fetchone()
+        if not old:
             return False
+        try:
+            await db.execute("INSERT INTO user_nft_inventory(tg_id,item_type,value,created_at) VALUES(?,'number',?,?)",
+                             (tg_id,digits,now()))
+            await db.execute("UPDATE users SET dox_claimed=1,phone=?,phone_digits=? WHERE tg_id=?",
+                             (fmt_number(digits),digits,tg_id))
+        except sqlite3.IntegrityError:
+            return False
+        if old["phone_digits"] and old["phone_digits"] != digits:
+            await db.execute("INSERT OR IGNORE INTO user_nft_inventory(tg_id,item_type,value,created_at) VALUES(?,'number',?,?)",
+                             (tg_id,old["phone_digits"],now()))
+        await economy.queue(db, key, [(peer,"stars",economy.units("stars",config.DOXNUMBER_BONUS))], "Бонус за номер")
         await db.commit()
-    if not await grant_number_to_user(tg_id, digits, 0, True):
-        await execute("UPDATE users SET dox_claimed=0 WHERE tg_id=?", (tg_id,))
-        return False
-    async with connect() as conn:
-        await economy.queue(conn, key, [(peer,"stars",economy.units("stars",config.DOXNUMBER_BONUS))], "Бонус за номер")
-        await conn.commit()
     await economy.deliver(key)
     return True
 
@@ -1857,6 +1864,8 @@ async def buy_listing(buyer_id: int, lid: int) -> tuple[bool, str, dict]:
             await db.rollback()
             return False, "Нельзя купить свой лот.", {}
         price = float(L["price"])
+        if not price.is_integer():
+            return False, "Продавцу нужно перевыставить лот с ценой в целых RiseStars.", {}
         fee = round(price * config.MARKET_FEE_PERCENT / 100)
         payout = round(price - fee, 2)
         cur = await db.execute("UPDATE user_nft_inventory SET tg_id=? WHERE id=? AND tg_id=?", (-lid,L["item_id"],L["seller_id"]))

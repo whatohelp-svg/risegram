@@ -866,14 +866,10 @@ async def h_market_buy(request: web.Request):
         return web.json_response({"ok": False, "error": "purchase_failed", "message": message}, status=409)
     # The DB transaction already transferred ownership and debited/credited balances.
     # Bot and client therefore see the same result immediately.
-    seller_chat_id = await db.telegram_chat_id(result["seller_id"])
-    buyer_chat_id = await db.telegram_chat_id(user["tg_id"])
-    if seller_chat_id:
-        await safe_send(request.app["bot"], seller_chat_id,
-            f"🛒 Ваш лот «{esc(result['value'])}» куплен за {result['price']:g} RiseStars.")
-    if buyer_chat_id:
-        await safe_send(request.app["bot"], buyer_chat_id,
-            f"✅ Покупка завершена: «{esc(result['value'])}» теперь в вашем инвентаре.")
+    await safe_send(request.app["bot"], result["seller_id"],
+                    f"🛒 Ваш лот «{esc(result['value'])}» куплен за {result['price']:g} RiseStars.")
+    await safe_send(request.app["bot"], user["tg_id"],
+                    f"✅ Покупка завершена: «{esc(result['value'])}» теперь в вашем инвентаре.")
     fresh = await db.get_user(user["tg_id"])
     return web.json_response({"ok": True, "purchase": {
         "type": result["item_type"], "value": result["value"],
