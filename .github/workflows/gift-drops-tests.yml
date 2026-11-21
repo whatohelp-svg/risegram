@@ -1,0 +1,40 @@
+name: RiseGram local Telegram gift drops tests
+on:
+  pull_request:
+    paths:
+      - 'gift_drops.py'
+      - 'gift_admin.py'
+      - 'admin.py'
+      - 'api.py'
+      - 'bot.py'
+      - 'miniapp.html'
+      - 'data/telegram_gift_collections.json'
+      - 'tests/test_gift_drops.py'
+      - 'tests/test_gift_admin.py'
+      - '.github/workflows/gift-drops-tests.yml'
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install application dependencies
+        run: python -m pip install -r requirements.txt
+      - name: Check Mini App JavaScript syntax
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+          html=Path("miniapp.html").read_text()
+          source=re.search(r"<script>(.*?)</script>",html,re.S)
+          assert source, "Mini App JavaScript missing"
+          Path("/tmp/risegram-miniapp.js").write_text(source.group(1))
+          PY
+          node --check /tmp/risegram-miniapp.js
+      - name: Check Python syntax
+        run: python -m py_compile gift_drops.py gift_admin.py admin.py api.py bot.py
+      - name: Gift purchase and stock tests
+        run: python -m unittest discover -s tests -p 'test_gift_drops.py' -v

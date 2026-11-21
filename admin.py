@@ -19,6 +19,7 @@ from aiogram.types import CallbackQuery, Message
 
 import config
 import database as db
+import gift_admin
 from api import sync_mtproto_verification
 from ui import btn, esc, fmt_num, kb, safe_send, show
 
@@ -112,6 +113,7 @@ async def home_screen(event, user: dict):
         [btn("📊 Аналитика", "adm:stats", style="primary"), btn("👥 Юзеры", "adm:users:0", style="primary")],
         [btn("💰 Выдача валюты", "adm:grant", style="success"), btn("🏷 Выдать юзернеймы", "adm:inv", style="success")],
         [btn("🎁 Дропы подарков", "adm:gifts", style="success")],
+        [btn("🧩 NFT RiseGram · 50/стр", "adm:localgifts:0", style="primary")],
         [btn("⚡ Тумблеры функций", "adm:feat", style="success"), btn("🔨 Банхаммер", "adm:ban", style="danger")],
         [btn("🎯 Задания", "adm:tasks"), btn("🛒 Маркет", "adm:mkt:0"), btn(scam_label, "adm:scam:0", style="danger" if pending else None)],
         [btn("🧾 Покупки", "adm:buys:0"), btn("📣 Рассылка", "adm:cast")],
@@ -731,6 +733,9 @@ async def on_input(message: Message, state: FSMContext, user: dict):
         ok = await safe_send(bot, data["uid"], f"✉️ <b>Сообщение от администрации</b>\n\n{esc(text)}")
         await audit(f"Сообщение игроку {data['uid']}")
         return await done("✅ Отправлено." if ok else "❌ Не доставлено (игрок заблокировал бота).", kb([btn("👤 Карточка", f"adm:u:{data['uid']}")], home_row()))
+    if act in ("localgift_qty", "localgift_price", "localgift_time"):
+        return await gift_admin.on_input(message, state, data)
+
     # ── выпуск лимитированных Telegram-подарков ──
     if act == "gift_stock":
         if not text.isdigit() or not 1 <= int(text) <= 1_000_000:
@@ -925,6 +930,9 @@ async def adm_cb(call: CallbackQuery, state: FSMContext, user: dict):
         task.add_done_callback(_bg.discard)
         await show(call, "📣 Рассылка запущена. Отчёт придёт сюда, когда закончится.", kb(home_row()))
         return
+
+    if route in ("localgifts", "localgift"):
+        return await gift_admin.on_callback(call, state, parts)
 
     await state.clear()
 

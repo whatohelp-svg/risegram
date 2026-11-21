@@ -26,6 +26,7 @@ from aiogram.types import CallbackQuery, LabeledPrice, Message, PreCheckoutQuery
 
 import config
 import database as db
+import gift_drops
 from admin import admin_router
 from api import start_api, sync_collectible_usernames, sync_mtproto_verification
 from ui import back_row, btn, cancel_kb, esc, fmt_num, kb, safe_send, show
@@ -175,6 +176,7 @@ def main_kb():
         [btn("🔒 Код входа", "menu:code", style="primary"), btn("📞 Мой номер", "menu:number")],
         [btn("💎 Донат", "donat:hub")],
         [webapp_button(None)],
+        ([btn("🎁 NFT Mini App", web_app=config.WEBAPP_URL.split("/")[0] + "//" + config.WEBAPP_URL.split("/")[2] + "/miniapp", style="primary")] if config.WEBAPP_URL.startswith("https://") else []),
         [btn("🕒 Мои покупки", "menu:purchases"), btn("ℹ️ Как это работает", "menu:help")],
         [btn("⚙️ Настройки", "menu:settings"), btn("✨ Ещё", "menu:more")],
     )
@@ -2128,6 +2130,7 @@ async def main():
     dp.include_router(router)
     dp.startup.register(on_startup)
     await db.init_db()
+    await asyncio.to_thread(gift_drops.setup)
     runner = await start_api(bot)
     try:
         await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())

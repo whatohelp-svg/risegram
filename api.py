@@ -15,6 +15,8 @@ import json
 import logging
 import math
 import secrets
+import sqlite3
+from urllib.parse import parse_qsl
 import time
 from collections import defaultdict
 
@@ -23,6 +25,7 @@ from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError, Teleg
 
 import config
 import database as db
+import gift_drops as local_gifts
 from gift_catalog import available_telegram_gifts
 from media_api import create_media_handlers, public_media
 from ui import esc, safe_send
@@ -748,7 +751,7 @@ async def h_inventory(request: web.Request):
         {"id": x["id"], "type": x["item_type"], "value": x["value"],
          "created_at": x.get("created_at"), "price_stars": x.get("price_stars", 0)}
         for x in items
-    ], "gifts": gifts})
+    ], "gifts": gifts, "local_gifts": await asyncio.to_thread(local_gifts.inventory,user["tg_id"])})
 
 
 async def _telegram_bot_star_balance(bot) -> int:
@@ -1088,6 +1091,107 @@ async def h_public_link(request: web.Request):
     return web.Response(text=page, content_type="text/html", charset="utf-8")
 
 
+
+# A signed Telegram Mini App identity is separate from the RiseGram account
+# number and the bot-delivered one-time code. Never trust initDataUnsafe alone.
+def _miniapp_telegram_id(raw: str) -> int | None:
+    if not isinstance(raw,str) or not raw or len(raw)>8192 or not config.BOT_TOKEN:
+        return None
+    try:
+        pairs=parse_qsl(raw,keep_blank_values=True,strict_parsing=True,max_num_fields=64)
+        fields=dict(pairs)
+        if len(fields)!=len(pairs) or "hash" not in fields:
+            return None
+        stamp=int(fields["auth_date"])
+        if not 0<=time.time()-stamp<=3600:
+            return None
+        check="\n".join(f"{key}={value}" for key,value in sorted(fields.items())
+                         if key not in ("hash","signature"))
+        secret=hmac.new(b"WebAppData",config.BOT_TOKEN.encode(),hashlib.sha256).digest()
+        expected=hmac.new(secret,check.encode(),hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(expected,fields["hash"]):
+            return None
+        user_id=int(json.loads(fields["user"])["id"])
+        return user_id if user_id>0 else None
+    except (KeyError,ValueError,TypeError,OverflowError):
+        return None
+
+async def h_local_miniapp(request: web.Request):
+    file=Path(__file__).with_name("miniapp.html")
+    return web.FileResponse(file) if file.is_file() else web.Response(status=404)
+
+async def h_local_webapp_auth_request(request: web.Request):
+    data=await _json(request)
+    tg_id=_miniapp_telegram_id(data.get("init_data",""))
+    if tg_id is None:
+        return web.json_response({"ok":False,"error":"invalid_telegram_signature"},status=401)
+    phone=db.digits_of(str(data.get("phone","")))
+    account=await db.get_by_telegram(tg_id)
+    by_phone=await db.fetchone("SELECT tg_id FROM users WHERE phone_digits=? AND banned=0",(phone,))
+    if not account or not by_phone or account["tg_id"]!=by_phone["tg_id"]:
+        return web.json_response({"ok":True})
+    status,body=await core_request_code(request.app["bot"],phone)
+    return web.json_response(body,status=status)
+
+async def h_local_webapp_auth_verify(request: web.Request):
+    data=await _json(request)
+    tg_id=_miniapp_telegram_id(data.get("init_data",""))
+    if tg_id is None:
+        return web.json_response({"ok":False,"error":"invalid_telegram_signature"},status=401)
+    phone=db.digits_of(str(data.get("phone","")))
+    account=await db.get_by_telegram(tg_id)
+    by_phone=await db.fetchone("SELECT tg_id FROM users WHERE phone_digits=? AND banned=0",(phone,))
+    if not account or not by_phone or account["tg_id"]!=by_phone["tg_id"]:
+        return web.json_response({"ok":False,"error":"invalid_code"},status=401)
+    status,body=await core_verify(phone,str(data.get("code","")))
+    return web.json_response(body,status=status)
+
+async def h_local_catalog(request: web.Request):
+    try:page=max(0,min(10000,int(request.query.get("page","0"))))
+    except ValueError:page=0
+    rows,total=await asyncio.to_thread(local_gifts.catalog,page,50)
+    return web.json_response({"ok":True,"items":rows,"total":total,"page":page})
+
+async def h_local_drops(request: web.Request):
+    rows=await asyncio.to_thread(local_gifts.list_live_drops)
+    return web.json_response({"ok":True,"items":rows})
+
+async def h_local_inventory(request: web.Request):
+    user=await _current_user(request)
+    if not user:
+        return web.json_response({"ok":False,"error":"unauthorized"},status=401)
+    items=await asyncio.to_thread(local_gifts.inventory,user["tg_id"])
+    return web.json_response({"ok":True,"items":items})
+
+async def h_local_buy(request: web.Request):
+    user=await _current_user(request)
+    if not user:
+        return web.json_response({"ok":False,"error":"unauthorized"},status=401)
+    data=await _json(request)
+    try:
+        drop_id=int(data.get("drop_id"))
+        request_id=str(data.get("request_id",""))
+        instance=await asyncio.to_thread(local_gifts.purchase,user["tg_id"],drop_id,request_id)
+    except (ValueError,TypeError) as err:
+        return web.json_response({"ok":False,"error":str(err)},status=409)
+    except sqlite3.OperationalError:
+        return web.json_response({"ok":False,"error":"database_busy"},status=503)
+    fresh=await db.get_user(user["tg_id"])
+    return web.json_response({"ok":True,"instance_id":instance,
+                              "risestars":float(fresh["risestars"])})
+
+async def h_local_upgrade(request: web.Request):
+    user=await _current_user(request)
+    if not user:
+        return web.json_response({"ok":False,"error":"unauthorized"},status=401)
+    data=await _json(request)
+    try:instance_id=int(data.get("instance_id"))
+    except (TypeError,ValueError):
+        return web.json_response({"ok":False,"error":"invalid_instance"},status=400)
+    ok=await asyncio.to_thread(local_gifts.upgrade,user["tg_id"],instance_id)
+    return web.json_response({"ok":ok,"error":None if ok else "upgrade_not_allowed"},status=200 if ok else 409)
+
+
 async def h_index(request: web.Request):
     index_path = Path(__file__).with_name("index.html")
     if not index_path.is_file():
@@ -1345,6 +1449,14 @@ async def start_api(bot) -> web.AppRunner | None:
     app["bot"] = bot
     app.add_routes([
         web.get("/", h_index),
+        web.get("/miniapp", h_local_miniapp),
+        web.post("/api/webapp/auth/request", h_local_webapp_auth_request),
+        web.post("/api/webapp/auth/verify", h_local_webapp_auth_verify),
+        web.get("/api/local-gifts/catalog", h_local_catalog),
+        web.get("/api/local-gifts/drops", h_local_drops),
+        web.get("/api/local-gifts/inventory", h_local_inventory),
+        web.post("/api/local-gifts/buy", h_local_buy),
+        web.post("/api/local-gifts/upgrade", h_local_upgrade),
         web.post("/api/auth/request", h_request),
         web.post("/api/auth/verify", h_verify),
         web.get("/api/me", h_me),
