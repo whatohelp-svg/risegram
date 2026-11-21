@@ -46,6 +46,14 @@ GIFT_LABELS = {
 def gift_field(gift, key: str, default=None):
     if isinstance(gift, dict):
         return gift.get(key, default)
+    # aiogram versions that predate the latest Bot API fields keep unknown
+    # JSON properties in Pydantic's extra-data mapping.
+    extra = getattr(gift, "model_extra", None)
+    if isinstance(extra, dict) and key in extra:
+        return extra[key]
+    raw = getattr(gift, "__dict__", None)
+    if isinstance(raw, dict) and key in raw:
+        return raw[key]
     return getattr(gift, key, default)
 
 
@@ -58,13 +66,22 @@ async def available_telegram_gifts(bot) -> list[dict]:
             continue
         sticker = gift_field(gift, "sticker")
         emoji = gift_field(sticker, "emoji", "🎁") or "🎁"
+        upgrade_raw = gift_field(gift, "upgrade_star_count")
+        variants = int(gift_field(gift, "unique_gift_variant_count", 0) or 0)
+        upgrade_stars = max(0, int(upgrade_raw or 0))
+        can_upgrade = upgrade_raw is not None or variants > 0
         out.append({
             "id": gift_id,
             "name": GIFT_LABELS.get(gift_id, f"Telegram Gift {gift_id[-4:]}"),
             "emoji": emoji,
             "stars": int(gift_field(gift, "star_count", 0) or 0),
+            "upgrade_stars": upgrade_stars,
+            "can_upgrade": can_upgrade,
+            "unique_gift_variant_count": variants,
             "total_count": gift_field(gift, "total_count"),
             "remaining_count": gift_field(gift, "remaining_count"),
+            "personal_total_count": gift_field(gift, "personal_total_count"),
+            "personal_remaining_count": gift_field(gift, "personal_remaining_count"),
         })
     return out
 
@@ -183,15 +200,13 @@ async def cmd_owner(message: Message, state: FSMContext, user: dict):
 
 async def screen_gifts(call: CallbackQuery, page: int = 0):
     try:
-        catalog = await available_telegram_gifts(call.bot)
-    except Exception as exc:  # noqa: BLE001
-        log.exception("Telegram getAvailableGifts failed")
-        await show(
-            call,
-            "🎁 <b>Дропы подарков</b>\n\nНе удалось получить каталог Telegram. Проверьте подключение бота и повторите попытку.",
-            kb([btn("🔄 Повторить", "adm:gifts")], home_row()),
-        )
-        return
+        all_gifts = await available_telegram_gifts(call.bot)
+        catalog = [gift for gift in all_gifts if gift["can_upgrade"]]
+        sync_result = await db.sync_gift_catalog_drops(catalog)
+    except Exception:  # noqa: BLE001
+        log.exception("Telegram NFT gift catalog synchronization failed")
+        catalog = []
+        sync_result = {"created": 0, "upgraded": 0, "already_live": 0, "skipped": 0}
 
     per_page = 8
     total = len(catalog)
@@ -199,15 +214,18 @@ async def screen_gifts(call: CallbackQuery, page: int = 0):
     page = min(max(0, page), pages - 1)
     current = catalog[page * per_page:(page + 1) * per_page]
     text = (
-        "🎁 <b>Дропы подарков</b>\n\n"
-        "Каталог загружен напрямую из Telegram Bot API. Выберите подарок, затем задайте тираж "
-        "и цену в RiseStars. При покупке бот отправит реальный Telegram-подарок.\n\n"
-        f"Доступно боту: <b>{total}</b> · страница {page + 1}/{pages}\n"
+        "🎁 <b>NFT-дропы подарков</b>\n\n"
+        "Каталог автоматически синхронизируется с Telegram Bot API. В дроп попадают все подарки, "
+        "которые бот может отправить и которые поддерживают апгрейд до уникального NFT. "
+        "Бот оплачивает апгрейд при отправке.\n\n"
+        f"NFT-подарков доступно боту: <b>{total}</b> · страница {page + 1}/{pages}\n"
+        f"Синхронизация: +{sync_result['created']} новых · {sync_result['upgraded']} обновлено · "
+        f"{sync_result['already_live']} уже в продаже\n"
     )
     rows = []
     pair = []
     for gift in current:
-        label = f"{gift['emoji']} {gift['name']} · {gift['stars']}⭐"
+        label = f"💎 {gift['emoji']} {gift['name']} · {gift['stars']}+{gift['upgrade_stars']}⭐"
         pair.append(btn(label[:60], f"adm:gifts:pick:{gift['id']}"))
         if len(pair) == 2:
             rows.append(pair)
@@ -774,9 +792,19 @@ async def on_input(message: Message, state: FSMContext, user: dict):
         if price is None or price <= 0:
             return await again("❌ Цена должна быть положительным числом RiseStars:")
         try:
+            telegram_cost = (
+                int(data.get("telegram_stars") or 0) + int(data.get("upgrade_stars") or 0)
+            ) * config.RISESTARS_PER_STAR
+            if price < telegram_cost:
+                return await again(
+                    f"❌ Цена не может быть ниже стоимости NFT-подарка и апгрейда: "
+                    f"{fmt_num(telegram_cost)} RiseStars. Введите цену не ниже этого значения:"
+                )
             drop_id = await db.create_gift_drop(
                 str(data["gift_id"]), str(data["gift_name"]), str(data["gift_emoji"]),
                 int(data.get("telegram_stars") or 0), price, int(data["quantity"]),
+                upgrade_stars=int(data.get("upgrade_stars") or 0),
+                pay_for_upgrade=bool(data.get("pay_for_upgrade")),
             )
         except Exception as exc:  # noqa: BLE001
             log.exception("failed to create gift drop")
@@ -960,17 +988,19 @@ async def adm_cb(call: CallbackQuery, state: FSMContext, user: dict):
             except Exception:
                 log.exception("Telegram getAvailableGifts failed while selecting a gift")
                 return await call.answer("Не удалось получить каталог Telegram.", show_alert=True)
-            gift = next((item for item in catalog if item["id"] == gift_id), None)
+            gift = next((item for item in catalog if item["id"] == gift_id and item["can_upgrade"]), None)
             if not gift:
-                return await call.answer("Этот подарок больше недоступен для отправки ботом.", show_alert=True)
+                return await call.answer("NFT-подарок больше недоступен для отправки ботом.", show_alert=True)
             return await ask(
                 call, state, "gift_stock",
-                f"🎁 <b>{esc(gift['emoji'])} {esc(gift['name'])}</b>\n"
-                f"Цена отправки Telegram: {gift['stars']} ⭐ с баланса бота\n\n"
+                f"💎 <b>{esc(gift['emoji'])} {esc(gift['name'])}</b>\n"
+                f"Подарок: {gift['stars']} ⭐ + апгрейд NFT: {gift['upgrade_stars']} ⭐ "
+                "с баланса бота\n\n"
                 "Введите количество экземпляров в тираже (1–1 000 000):",
                 "adm:gifts",
                 gift_id=gift["id"], gift_name=gift["name"], gift_emoji=gift["emoji"],
-                telegram_stars=gift["stars"],
+                telegram_stars=gift["stars"], upgrade_stars=gift["upgrade_stars"],
+                pay_for_upgrade=True,
             )
         if len(parts) > 2 and parts[2] == "page":
             return await screen_gifts(call, num(parts, 3))
