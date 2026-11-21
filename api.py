@@ -91,18 +91,17 @@ async def h_events(request: web.Request):
 def public_user(u: dict) -> dict:
     shown_username = db.shown_username(u).lstrip("@")
     public_username = shown_username if u.get("username") or u.get("active_username") else None
-    verified = bool(u.get("verified"))
-    # Major is a specific verified RiseGram account, not a synonym for every
-    # account verified by RiseGram. Keep the reserved @major identity distinct.
-    major = verified and shown_username.casefold() == "major"
+    verified_risegram = bool(u.get("verified_risegram"))
+    verified_major = bool(u.get("verified_major"))
     return {
         "user_id": u.get("user_id"),
         "rise_id": u["rise_id"],
         "name": u.get("name"),
         "username": public_username,
         "phone": u.get("phone"),
-        "verified": verified,
-        "major": major,
+        "verified": verified_risegram or verified_major,
+        "verified_risegram": verified_risegram,
+        "verified_major": verified_major,
         "risestars": float(u.get("risestars") or 0),
         "gram_balance": float(u.get("gram_balance") or 0),
         "active_username": u.get("active_username"),
