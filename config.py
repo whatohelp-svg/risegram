@@ -71,7 +71,7 @@ RESERVE_MINUTES = 10                     # на сколько резервир�
 RESERVED_USERNAMES = {
     "admin", "administrator", "owner", "rise", "risegram", "risestars", "support",
     "help", "bot", "telegram", "official", "moderator", "mod", "system", "root",
-    "koyzzov",
+    "major", "koyzzov",
 }
 
 # ── Настройки «ценность подарков» (экран «Настройки») ───────────────────────
