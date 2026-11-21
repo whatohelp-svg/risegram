@@ -26,7 +26,8 @@ from aiogram.types import CallbackQuery, LabeledPrice, Message, PreCheckoutQuery
 
 import config
 import database as db
-from admin import admin_router, available_telegram_gifts
+from admin import admin_router
+from gift_catalog import available_telegram_gifts
 from api import start_api, sync_collectible_usernames, sync_mtproto_verification
 from ui import back_row, btn, cancel_kb, esc, fmt_num, kb, safe_send, show
 
