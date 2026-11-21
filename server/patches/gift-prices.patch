@@ -168,3 +168,14 @@
 +		}
 +	}
 +}
+--- a/internal/store/postgres/star_gift_lifecycle.go
++++ b/internal/store/postgres/star_gift_lifecycle.go
+@@ -626,7 +626,7 @@
+ 				}
+ 				return err
+ 			}
+-			if sellerFrozen || sellerType != string(seller.Type) || sellerID != seller.ID ||
++			if !req.Amount.WithinResaleRange() || sellerFrozen || sellerType != string(seller.Type) || sellerID != seller.ID ||
+ 				listingCurrency != string(req.Amount.Currency) || listingAmount != req.Amount.Amount {
+ 				return domain.ErrStarGiftResaleUnavailable
+ 			}
