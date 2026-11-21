@@ -911,8 +911,22 @@ async def create_session(tg_id: int, days: int = 30) -> str:
 
 
 async def get_session_user(token: str) -> dict | None:
-    row = await fetchone("SELECT tg_id FROM sessions WHERE token=? AND expires_at>?", (token, now()))
-    return await get_user(row["tg_id"]) if row else None
+    # Rolling 30-day inactivity window: active Gram sessions stay linked
+    # without requiring another one-time code every calendar month.
+    async with connect() as conn:
+        cur = await conn.execute(
+            "SELECT tg_id FROM sessions WHERE token=? AND expires_at>?",
+            (token, now()),
+        )
+        row = await cur.fetchone()
+        if not row:
+            return None
+        await conn.execute(
+            "UPDATE sessions SET expires_at=? WHERE token=?",
+            (now_plus(30 * 86400), token),
+        )
+        await conn.commit()
+    return await get_user(row["tg_id"])
 
 
 # ─────────────────────────────── покупки ────────────────────────────────────
@@ -1157,15 +1171,18 @@ async def rollback_gift_purchase(instance_id: int) -> bool:
 
 
 async def exchange_gram_balance(tg_id: int, direction: str, amount: float) -> tuple[bool, str, dict]:
-    """Exchange Gram Earrings and RiseStars at the fixed 1 Gram = 100 RiseStars rate."""
+    """Exchange Gram and RiseStars at the fixed 1 Gram = 100 RiseStars rate."""
     if direction not in ("gram_to_stars", "stars_to_gram"):
         return False, "Неизвестное направление обмена.", {}
     try:
-        amount = round(float(amount), 2)
+        raw_amount = float(amount)
+        amount = round(raw_amount, 2)
     except (TypeError, ValueError):
         return False, "Некорректная сумма.", {}
     if not math.isfinite(amount) or amount <= 0 or amount > 1e12:
         return False, "Введите положительную сумму.", {}
+    if abs(raw_amount - amount) > 1e-8:
+        return False, "Точность суммы — не более 2 знаков после запятой.", {}
     rate = float(config.GRAM_TO_RISESTARS)
     async with connect() as conn:
         await conn.execute("BEGIN IMMEDIATE")
@@ -1179,7 +1196,7 @@ async def exchange_gram_balance(tg_id: int, direction: str, amount: float) -> tu
         if direction == "gram_to_stars":
             if float(user["gram_balance"]) < amount:
                 await conn.rollback()
-                return False, "Недостаточно Gram Earrings.", {}
+                return False, "Недостаточно Gram.", {}
             await conn.execute(
                 "UPDATE users SET gram_balance=ROUND(gram_balance-?,2),risestars=ROUND(risestars+?,2) WHERE tg_id=?",
                 (amount, amount * rate, tg_id),
