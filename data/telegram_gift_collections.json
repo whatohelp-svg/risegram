@@ -613,5 +613,65 @@
     "gift_id": "lolpop",
     "title": "Lol Pops",
     "fragment_url": "https://fragment.com/gifts/lolpop"
+  },
+  {
+    "gift_id": "trojanhorse",
+    "title": "Trojan Horse"
+  },
+  {
+    "gift_id": "1may",
+    "title": "1 May"
+  },
+  {
+    "gift_id": "coffin",
+    "title": "Coffin"
+  },
+  {
+    "gift_id": "eastercake",
+    "title": "Easter Cake"
+  },
+  {
+    "gift_id": "eightroses",
+    "title": "Eight Roses"
+  },
+  {
+    "gift_id": "gravestone",
+    "title": "Gravestone"
+  },
+  {
+    "gift_id": "redstar",
+    "title": "Red Star"
+  },
+  {
+    "gift_id": "standard-5170250947678437525",
+    "title": "Gift Box (обычный)"
+  },
+  {
+    "gift_id": "standard-5168103777563050263",
+    "title": "Red Rose (обычный)"
+  },
+  {
+    "gift_id": "standard-5170314324215857265",
+    "title": "Bouquet of Flowers (обычный)"
+  },
+  {
+    "gift_id": "standard-5170564780938756245",
+    "title": "Rocket (обычный)"
+  },
+  {
+    "gift_id": "standard-6028601630662853006",
+    "title": "Champagne Bottle (обычный)"
+  },
+  {
+    "gift_id": "standard-5168043875654172773",
+    "title": "Trophy (обычный)"
+  },
+  {
+    "gift_id": "standard-5170690322832818290",
+    "title": "Diamond Ring (обычный)"
+  },
+  {
+    "gift_id": "standard-5170521118301225164",
+    "title": "Gem (обычный)"
   }
 ]

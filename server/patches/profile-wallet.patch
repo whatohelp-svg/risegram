@@ -1,0 +1,28 @@
+diff --git a/internal/rpc/users.go b/internal/rpc/users.go
+index b39ce43..4198d55 100644
+--- a/internal/rpc/users.go
++++ b/internal/rpc/users.go
+@@ -188,6 +188,11 @@ func (r *Router) onUsersGetFullUser(ctx context.Context, id tg.InputUserClass) (
+ 		r.applyStoriesPinnedAvailableToUserFull(ctx, currentUserID, u.ID, &full)
+ 		r.applyNotifySettingsToUserFull(ctx, currentUserID, u.ID, &full)
+ 		r.applyBotVerificationToUserFull(ctx, u.ID, &full)
++		if !u.Bot && !full.Blocked {
++			if card, ok := r.widgetWalletCard(ctx, u.ID); ok {
++				full.SetWalletCard(card)
++			}
++		}
+ 		applyPrivateContactRestrictionToUserFull(&full, contactRestriction)
+ 		chats := r.applyPersonalChannelToUserFull(ctx, currentUserID, u.PersonalChannelID, &full)
+ 		return &tg.UsersUserFull{
+@@ -216,6 +221,11 @@ func (r *Router) onUsersGetFullUser(ctx context.Context, id tg.InputUserClass) (
+ 	// is not baked into the per-(viewer,target) cache, so a revoked badge is gone on
+ 	// the next response instead of lingering for the cache TTL.
+ 	r.applyBotVerificationToUserFull(ctx, u.ID, &full)
++	if !u.Bot && !full.Blocked {
++		if card, ok := r.widgetWalletCard(ctx, u.ID); ok {
++			full.SetWalletCard(card)
++		}
++	}
+ 	applyPrivateContactRestrictionToUserFull(&full, contactRestriction)
+ 	chats := r.applyPersonalChannelToUserFull(ctx, currentUserID, u.PersonalChannelID, &full)
+ 	return &tg.UsersUserFull{

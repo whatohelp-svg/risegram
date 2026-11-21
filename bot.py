@@ -29,8 +29,10 @@ from aiogram.types import CallbackQuery, LabeledPrice, Message, PreCheckoutQuery
 import config
 import database as db
 import gift_drops
+import native_economy as economy
 from admin import admin_router
-from api import start_api, sync_collectible_usernames, sync_mtproto_verification
+from aiohttp import ClientError
+from api import native_wallet, client_wallet_line, start_api, sync_collectible_usernames, sync_mtproto_verification
 from ui import back_row, btn, cancel_kb, esc, fmt_num, kb, safe_send, show
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
@@ -92,6 +94,11 @@ class GuardMiddleware(BaseMiddleware):
         user = await db.get_or_create_user(tg_user.id, tg_user.full_name or "User", tg_user.username)
         data["user"] = user
         try:
+            wallet = await native_wallet(user)
+        except (ClientError, TimeoutError):
+            wallet = None
+        user.update(wallet or {"risestars": None, "gram_balance": None})
+        try:
             await sync_collectible_usernames(int(user["tg_id"]))
             await sync_mtproto_verification(int(user["tg_id"]))
         except Exception:
@@ -120,6 +127,8 @@ class GuardMiddleware(BaseMiddleware):
                 await state.clear()
         try:
             return await handler(event, data)
+        except economy.WalletError as exc:
+            return await _reply_block(event, str(exc))
         finally:
             try:
                 await sync_collectible_usernames(int(user["tg_id"]))
@@ -162,7 +171,7 @@ async def main_text(user: dict) -> str:
         f"💼 <b>{config.BRAND}</b>\n\n"
         f"📞 <b>Номер:</b> <code>{esc(user['phone'])}</code>\n"
         f"👤 <b>Аккаунт:</b> {esc(user.get('name') or 'User')} · ID <code>{user['rise_id']}</code>{await badges(user)}\n"
-        f"⭐ {config.CURRENCY_NAME}: <b>{fmt_num(user['risestars'])}</b> · 💎 Gram: <b>{fmt_num(user['gram_balance'], 2)}</b>\n\n"
+        f"{await client_wallet_line(user)}\n"
         f"Выберите действие ниже или откройте приложение."
     )
 
@@ -350,8 +359,7 @@ async def cb_profile(call: CallbackQuery, user: dict):
         f"Telegram ID: <code>{user['tg_id']}</code>\n"
         f"{config.BRAND} ID: <code>{user['rise_id']}</code>\n"
         f"Номер: <code>{esc(user['phone'])}</code>\n\n"
-        f"⭐ {config.CURRENCY_NAME}: <b>{fmt_num(user['risestars'])}</b>\n"
-        f"💎 Gram: <b>{fmt_num(user['gram_balance'], 2)}</b>\n\n"
+        f"{await client_wallet_line(user)}\n"
         f"🏷 NFT-юзернеймов: {nft_u} · 📞 номеров: {nft_n}\n"
         f"📅 В экосистеме с {esc((user.get('created_at') or '')[:10])}"
     )
@@ -1015,7 +1023,7 @@ async def deliver_order(bot: Bot, uid: int, payload: str, stars: int, charge: st
     if kind == "rs":
         n, target = int(a[0]), int(a[1])
         amount = n * config.RISESTARS_PER_STAR
-        if await db.add_balance(target, "risestars", amount) is None:
+        if await db.add_balance(target, "risestars", amount, key="invoice:"+charge) is None:
             return False, "risestars", "Получатель не найден", ""
         t = await db.get_user(target)
         if target == uid:
@@ -1076,6 +1084,15 @@ async def deliver_order(bot: Bot, uid: int, payload: str, stars: int, charge: st
     return False, "unknown", "Неизвестный товар", ""
 
 
+async def complete_risestars_order(bot, order):
+    ok, kind, desc, message = await deliver_order(bot, order["tg_id"], order["payload"], order["price_xtr"], order["charge_id"])
+    if ok:
+        updated = await db.execute("UPDATE purchases SET item_type=?,item_desc=?,status='done' WHERE id=? AND status='processing'",
+                                   (kind, desc, order["id"]))
+        if updated:
+            await safe_send(bot, order["tg_id"], message)
+
+
 @router.message(F.successful_payment)
 async def on_paid(message: Message, user: dict):
     sp = message.successful_payment
@@ -1083,6 +1100,13 @@ async def on_paid(message: Message, user: dict):
     try:  # запись ДО выдачи: повторная доставка апдейта не выдаст товар второй раз
         pid = await db.add_purchase(uid, "pending", "В обработке", stars, charge, payload, "processing")
     except sqlite3.IntegrityError:
+        return
+    if payload.startswith("rs:"):
+        try:
+            await complete_risestars_order(message.bot, await db.get_purchase(pid))
+        except Exception:
+            log.exception("RiseStars credit deferred for order %s", pid)
+            await message.answer("Платёж получен. Зачисление RiseStars обрабатывается.")
         return
     try:
         ok, itype, desc, text = await deliver_order(message.bot, uid, payload, stars, charge)
@@ -1433,7 +1457,7 @@ async def msg_transfer_amount(message: Message, state: FSMContext, user: dict):
     data = await state.get_data()
     to = data.get("to")
     await state.clear()
-    ok, err = await db.transfer_risestars(user["tg_id"], to, amount, config.TRANSFER_FEE_PERCENT)
+    ok, err = await db.transfer_risestars(user["tg_id"], to, amount, config.TRANSFER_FEE_PERCENT, key=f"transfer:{message.chat.id}:{message.message_id}")
     if not ok:
         await message.answer("❌ " + err)
         return
@@ -1526,8 +1550,7 @@ async def cb_game_pick(call: CallbackQuery, user: dict):
         return
     await show(
         call,
-        f"{GAME_TITLES[game]}\n\nВыберите валюту ставки:\n"
-        f"💎 Gram: <b>{fmt_num(user['gram_balance'])}</b>\n⭐ RiseStars: <b>{fmt_num(user['risestars'])}</b>",
+        f"{GAME_TITLES[game]}\n\nВыберите валюту ставки:\n{await client_wallet_line(user)}",
         kb(
             [btn("💎 Gram", f"game:bet:{game}:gram", style="primary"), btn("⭐ RiseStars", f"game:bet:{game}:stars", style="success")],
             back_row("games:hub"),
@@ -1569,7 +1592,11 @@ async def msg_game_bet(message: Message, state: FSMContext, user: dict):
         await message.answer("Сессия устарела. Откройте /games заново.")
         return
     try:
-        bet = round(float(message.text.replace(" ", "").replace(",", ".")), 2)
+        bet = float(message.text.replace(" ", "").replace(",", "."))
+        if cur == "stars" and not bet.is_integer():
+            await message.answer("Ставка в звёздах должна быть целой.")
+            return
+        bet = round(bet, 2)
     except ValueError:
         await message.answer("Введите число.")
         return
@@ -1613,7 +1640,7 @@ def crash_kb(gid: int, win: float, cur: str):
 
 async def start_crash(message: Message, uid: int, bet: float, cur: str):
     cp = crash_point()
-    gid = await db.start_game(uid, "crash", bet, cp, cur)
+    gid = await economy.start(await db.get_user(uid), "Crash Rocket", cur, bet, f"{message.chat.id}:{message.message_id}")
     if gid is None:
         await message.answer(f"❌ Недостаточно {cur_name(cur)}.")
         return
@@ -1630,12 +1657,12 @@ async def finish_crash(uid: int, won: bool, mult: float):
         return
     g["done"] = True
     cur = g["cur"]
-    payout = round(g["bet"] * mult, 2) if won else 0.0
-    ok = await db.settle_game(g["gid"], won, payout)
+    payout = round(g["bet"] * mult, 0 if cur == "stars" else 2) if won else 0.0
+    ok = await economy.record_result(g["gid"], won, payout)
     crash_live.pop(uid, None)
     if not ok:
         return
-    user = await db.get_user(uid)
+    user = await native_wallet(await db.get_user(uid))
     bal = money(cur, user[cur_col(cur)]) if user else "—"
     if won:
         text = f"✅ Забрали на ×{mult:.2f}! Выигрыш <b>{money(cur, payout)}</b>\nБаланс: {bal}"
@@ -1663,7 +1690,7 @@ async def run_crash(bot: Bot, uid: int):
             try:
                 await g["msg"].edit_text(
                     f"🚀 Ракета летит… <b>×{m:.2f}</b>\nСтавка: {money(g['cur'], g['bet'])}",
-                    reply_markup=crash_kb(g["gid"], g["bet"] * m, g["cur"]),
+                    reply_markup=crash_kb(g["gid"], round(g["bet"] * m, 0 if g["cur"] == "stars" else 2), g["cur"]),
                 )
             except TelegramRetryAfter as e:
                 await asyncio.sleep(e.retry_after)
@@ -1675,8 +1702,7 @@ async def run_crash(bot: Bot, uid: int):
         log.exception("crash loop failed uid=%s", uid)
         g = crash_live.pop(uid, None)
         if g and not g["done"]:
-            await db.execute("UPDATE games SET status='refunded', finished_at=? WHERE id=? AND status='active'", (db.now(), g["gid"]))
-            await db.add_balance(uid, cur_col(g["cur"]), g["bet"])
+            await economy.record_result(g["gid"], False, 0, status="refunded")
     finally:
         crash_tasks.pop(uid, None)
 
@@ -1720,7 +1746,7 @@ def hl_next_mult(mult: float, p: float) -> float:
 
 
 def hl_cash_value(g: dict) -> float:
-    return round(g["bet"] * g["mult"], 2)
+    return round(g["bet"] * g["mult"], 0 if g["cur"] == "stars" else 2)
 
 
 def hl_text(g: dict) -> str:
@@ -1745,7 +1771,7 @@ def hl_kb(g: dict):
 
 
 async def start_hl(message: Message, uid: int, bet: float, cur: str):
-    gid = await db.start_game(uid, "highlow", bet, 0.0, cur)
+    gid = await economy.start(await db.get_user(uid), "Хай-Лоу", cur, bet, f"{message.chat.id}:{message.message_id}")
     if gid is None:
         await message.answer(f"❌ Недостаточно {cur_name(cur)}.")
         return
@@ -1766,14 +1792,14 @@ async def finish_hl(uid: int, won: bool, note: str = ""):
     g["done"] = True
     cur = g["cur"]
     if won and g["steps"] == 0:
-        ok = await db.settle_game(g["gid"], True, g["bet"], status="refunded")
+        ok = await economy.record_result(g["gid"], True, g["bet"], status="refunded")
         text = f"↩️ Ставка возвращена: {money(cur, g['bet'])}."
     elif won:
         payout = hl_cash_value(g)
-        ok = await db.settle_game(g["gid"], True, payout)
+        ok = await economy.record_result(g["gid"], True, payout)
         text = f"✅ Забрали на ×{g['mult']:.2f}! Выигрыш <b>{money(cur, payout)}</b>" + (f" ({esc(note)})" if note else "")
     else:
-        ok = await db.settle_game(g["gid"], False, 0.0)
+        ok = await economy.record_result(g["gid"], False, 0.0)
         text = f"💥 Выпала {card_str(g['rank'], g['suit'])}: не угадали. Ставка {money(cur, g['bet'])} потеряна."
     hl_live.pop(uid, None)
     t = hl_tasks.pop(uid, None)
@@ -1781,7 +1807,7 @@ async def finish_hl(uid: int, won: bool, note: str = ""):
         t.cancel()
     if not ok:
         return
-    user = await db.get_user(uid)
+    user = await native_wallet(await db.get_user(uid))
     text += f"\nБаланс: {money(cur, user[cur_col(cur)]) if user else '—'}"
     markup = kb([btn("🃏 Ещё раз", "game:pick:hl", style="success")], [btn("🎮 Игры", "games:hub")])
     try:
@@ -1979,7 +2005,7 @@ async def cb_market_buy(call: CallbackQuery, user: dict):
     if L["seller_id"] == user["tg_id"]:
         await call.answer("Это ваш лот.", show_alert=True)
         return
-    if user["risestars"] < L["price"]:
+    if (user["risestars"] or 0) < L["price"]:
         await call.answer(f"Не хватает RiseStars: нужно {fmt_num(L['price'])}.", show_alert=True)
         return
     await show(
@@ -2127,10 +2153,37 @@ async def msg_fallback(message: Message, user: dict):
 async def on_startup(bot: Bot):
     await db.init_db()
     await db.ensure_owner()
-    await bot.delete_webhook(drop_pending_updates=True)
+    await bot.delete_webhook(drop_pending_updates=False)
     me = await bot.get_me()
     log.info("%s запущен как @%s", config.BRAND, me.username)
     await db.log_admin_action(0, f"Бот запущен (@{me.username})")
+
+
+async def recover_wallet_jobs(bot):
+    while True:
+        try:
+            for result in await db.fetchall("SELECT game_id FROM native_game_results"):
+                gid = result["game_id"]
+                await economy.deliver_result(gid)
+                for games in (crash_live, hl_live):
+                    for uid, game in list(games.items()):
+                        if game["gid"] == gid and game["done"]:
+                            games.pop(uid, None)
+            live = [g["gid"] for g in (*crash_live.values(), *hl_live.values()) if not g.get("done")]
+            await economy.maintain_games(live)
+            for job in await db.fetchall("SELECT key FROM native_wallet_jobs WHERE status='pending' ORDER BY rowid"):
+                try:
+                    await economy.deliver(job["key"])
+                except Exception:
+                    log.exception("Wallet operation deferred")
+            for order in await db.fetchall("SELECT * FROM purchases WHERE status='processing' AND payload LIKE 'rs:%'"):
+                try:
+                    await complete_risestars_order(bot, order)
+                except Exception:
+                    log.exception("RiseStars credit deferred for order %s", order["id"])
+        except Exception:
+            log.exception("Native wallet recovery deferred")
+        await asyncio.sleep(20)
 
 
 async def main():
@@ -2145,10 +2198,29 @@ async def main():
     dp.startup.register(on_startup)
     await db.init_db()
     await asyncio.to_thread(gift_drops.setup)
+    await economy.setup()
     runner = await start_api(bot)
+    from issuer_marks import bootstrap
+    from native_drops import worker
+    recovery = asyncio.create_task(recover_wallet_jobs(bot))
+    from owner_replacement_once import run as replace_owner_gifts
+    replacement = asyncio.create_task(replace_owner_gifts())
+    drop_publisher = asyncio.create_task(worker())
+    issuer_setup = asyncio.create_task(bootstrap())
+    from gift_catalog import populate_seasonal_catalog
+    seasonal = asyncio.create_task(populate_seasonal_catalog())
+    from premium_emoji import install_packs
+    emoji_import = asyncio.create_task(install_packs())
     try:
         await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
     finally:
+        replacement.cancel()
+        recovery.cancel()
+        seasonal.cancel()
+        emoji_import.cancel()
+        issuer_setup.cancel()
+        drop_publisher.cancel()
+        await asyncio.gather(seasonal, recovery, gift_sync, issuer_setup, drop_publisher, return_exceptions=True)
         if runner:
             await runner.cleanup()
         for t in list(crash_tasks.values()) + list(hl_tasks.values()):

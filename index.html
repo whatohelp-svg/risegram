@@ -44,21 +44,26 @@ const views=['Кошелёк','Обмен','Игры','Маркет'];
 const fmt=n=>Number(n).toLocaleString('ru-RU',{maximumFractionDigits:2});
 const escapeText=value=>String(value??'').replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
 const messages={bad_item_or_price:"Проверь выбранный предмет и цену в RiseStars",unauthorized:'Сессия завершена. Войди ещё раз',invalid_code:'Код неверный или истёк',bad_phone:'Проверь номер RiseGram',too_many_requests:'Слишком много запросов. Попробуй позже',cooldown:'Подожди перед новым запросом кода',code_delivery_unavailable:'Бот пока не смог доставить код',market_disabled:'Маркет временно выключен'};
-const sessionKey='risegram-session';
+const fromBot=new URLSearchParams(location.search).get('from')==='bot';
+const sessionKey=fromBot?'risegram_session':'risegram-session';
 function rememberSession(value){
+ if(fromBot){
+  if(value)sessionStorage.setItem(sessionKey,value);else sessionStorage.removeItem(sessionKey);
+  return;
+ }
  if(value)localStorage.setItem(sessionKey,value);
  else localStorage.removeItem(sessionKey);
  sessionStorage.removeItem(sessionKey);
 }
-let token=localStorage.getItem(sessionKey)||sessionStorage.getItem(sessionKey)||'';
+let token=(!fromBot&&localStorage.getItem(sessionKey))||sessionStorage.getItem(sessionKey)||'';
 if(token)rememberSession(token);
 let section=0, serial=0, phone='',offset=0;
 window.addEventListener('storage',e=>{
- if(e.key!==sessionKey&&e.key!==null)return;
+ if(fromBot||(e.key!==sessionKey&&e.key!==null))return;
  token=localStorage.getItem(sessionKey)||'';
  phone='';offset=0;route();
 });
-function clearSession(){token='';rememberSession('');phone='';offset=0;section=0;location.hash='home';route()}
+function clearSession(){token='';rememberSession('');if(fromBot){location.replace('/miniapp');return}phone='';offset=0;section=0;location.hash='home';route()}
 async function api(path,body){
  const headers={Accept:'application/json'}, activeToken=token;
  if(activeToken)headers.Authorization='Bearer '+activeToken;
@@ -70,6 +75,7 @@ async function api(path,body){
  return data;
 }
 function login(){
+ if(fromBot){location.replace('/miniapp');return}
  serial++;nav.hidden=true;nav.style.display='none';$('#logout').hidden=true;$('#identity').textContent='Личный кабинет';$('#title').textContent='Вход в RiseGram';
  screen.innerHTML='<article class="panel compact"><h2>'+ (phone?'Введи код':'Твой аккаунт')+'</h2><p>'+(phone?'Код для '+escapeText(phone)+' придёт в личный чат с @risegrambot':'Введи постоянный номер, который выдал <a href="https://t.me/risegrambot" rel="noreferrer">@risegrambot</a>')+'</p><form id="auth"><label>'+(phone?'Одноразовый код<input name="value" autocomplete="one-time-code" inputmode="numeric" required maxlength="16">':'Номер RiseGram<input name="value" type="tel" autocomplete="tel" placeholder="+7 …" required maxlength="40">')+'</label><button class="primary">'+(phone?'Войти':'Получить код')+'</button></form>'+(phone?'<p><button id="back">Изменить номер или запросить новый код</button></p>':'')+'</article>';
  if(phone)$('#back').onclick=()=>{phone='';notice.textContent='';login()};
@@ -81,7 +87,7 @@ function login(){
 async function run(btn,action){if(btn.disabled)return;btn.disabled=true;notice.textContent='';try{await action()}catch(e){notice.textContent=e.message}finally{btn.disabled=false}}
 function card(title,body){return '<article class="panel"><h2>'+title+'</h2>'+body+'</article>'}
 function row(left,right=''){return '<div class="entry"><span>'+left+'</span>'+right+'</div>'}
-function balances(u){return '<div class="grid"><div class="asset">◈ Gram<strong>'+fmt(u.gram_balance)+'</strong></div><div class="asset">✦ RiseStars<strong>'+fmt(u.risestars)+'</strong></div></div>'}
+function balances(u){return '<div class="grid"><div class="asset">◈ Gram<strong>'+(u.gram_balance==null?"—":fmt(u.gram_balance))+'</strong></div><div class="asset">✦ RiseStars<strong>'+(u.risestars==null?"—":fmt(u.risestars))+'</strong></div></div>'}
 async function render(){
  const id=++serial;screen.dataset.view=String(section);notice.textContent='';if(!token){login();return}
  nav.hidden=false;nav.style.display='flex';$('#logout').hidden=false;$('#title').textContent=views[section];
