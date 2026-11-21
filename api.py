@@ -153,7 +153,7 @@ async def core_request_code(bot, phone: str) -> tuple[int, dict]:
     code = await db.issue_auth_code(user["tg_id"])
     delivered = await safe_send(
         bot,
-        chat_id,
+        user["tg_id"],
         f"🔒 <b>Код входа в {config.BRAND}</b>\n\nНомер: <code>{esc(user['phone'])}</code>\nКод: <code>{code}</code>\n\n"
         f"Действует {config.AUTH_CODE_TTL_SECONDS // 60} мин. Никому его не сообщайте.",
     )
