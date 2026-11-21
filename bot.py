@@ -237,13 +237,13 @@ async def cb_webapp(call: CallbackQuery):
 @router.message(Command("support"))
 async def cmd_support(message: Message, state: FSMContext):
     await state.set_state(Flow.support_message)
-    await message.answer("🆘 <b>Поддержка RiseGram</b>\\n\\nНапишите вопрос одним сообщением (до 3000 символов)\\n/cancel — отмена")
+    await message.answer("🆘 <b>Поддержка RiseGram</b>\n\nНапишите вопрос одним сообщением (до 3000 символов)\n/cancel — отмена")
 
 
 @router.callback_query(F.data == "menu:support")
 async def cb_support(call: CallbackQuery, state: FSMContext):
     await state.set_state(Flow.support_message)
-    await show(call, "🆘 <b>Поддержка RiseGram</b>\\n\\nНапишите вопрос одним сообщением (до 3000 символов)\\n/cancel — отмена", kb([btn("🏠 Меню", "menu:main")]))
+    await show(call, "🆘 <b>Поддержка RiseGram</b>\n\nНапишите вопрос одним сообщением (до 3000 символов)\n/cancel — отмена", kb([btn("🏠 Меню", "menu:main")]))
 
 
 @router.message(StateFilter(Flow.support_message), F.text)
@@ -254,13 +254,13 @@ async def msg_support(message: Message, state: FSMContext, user: dict):
         return
     ticket_id = await db.create_support_ticket(int(user["tg_id"]), content)
     await state.clear()
-    note = (f"🆘 <b>Тикет #{ticket_id}</b>\\n"
-            f"От: {esc(db.shown_username(user))} · ID <code>{user['tg_id']}</code>\\n\\n"
-            f"{esc(content)}\\n\\nОтветить: <code>/reply {ticket_id} ваш ответ</code>")
-    delivered = await safe_send(message.bot, config.OWNER_TELEGRAM_ID, note)
-    if delivered is None:
+    note = (f"🆘 <b>Тикет #{ticket_id}</b>\n"
+            f"От: {esc(db.shown_username(user))} · ID <code>{user['tg_id']}</code>\n\n"
+            f"{esc(content)}\n\nОтветить: <code>/reply {ticket_id} ваш ответ</code>")
+    delivered = await safe_send(message.bot, config.OWNER_ID, note)
+    if not delivered:
         log.warning("Support ticket %s saved but owner notification could not be delivered", ticket_id)
-    await message.answer(f"✅ Обращение #{ticket_id} зарегистрировано\\nОтвет придёт сюда от бота RiseGram", reply_markup=main_kb())
+    await message.answer(f"✅ Обращение #{ticket_id} зарегистрировано\nОтвет придёт сюда от бота RiseGram", reply_markup=main_kb())
 
 # ─── код входа и номер ──────────────────────────────────────────────────────
 
