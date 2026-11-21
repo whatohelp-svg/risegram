@@ -10,6 +10,7 @@ import logging
 import math
 import re
 
+from aiohttp import ClientError, ClientSession, ClientTimeout
 from aiogram import Bot, F, Router
 from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError, TelegramRetryAfter
 from aiogram.filters import Command, Filter, StateFilter
@@ -106,6 +107,7 @@ async def home_screen(event, user: dict):
         f"⭐ {config.CURRENCY_NAME}: <b>{fmt_num(me['risestars'])}</b>\n"
         f"💎 Gram: <b>{fmt_num(me['gram_balance'], 2)}</b>\n"
         f"☑️ Статус: <b>{'Официальный владелец' if int(user['tg_id']) == int(config.OWNER_ID) else 'Администратор / тестер'}</b>\n"
+        "🏷 NFT каналу или супергруппе: <code>/grantnft ID @имя</code>\n"
         f"🛠 Техработы: <b>{'ВКЛ' if maint else 'выкл'}</b>"
     )
     scam_label = f"⚠️ SCAM-заявки ({pending})" if pending else "⚠️ SCAM-заявки"
@@ -126,6 +128,48 @@ async def home_screen(event, user: dict):
         rows.insert(6, [btn("🛡 Админы", "adm:admins")])
     markup = kb(*rows)
     await show(event, text, markup)
+
+
+@admin_router.message(Command("grantnft"))
+async def grant_channel_username(message: Message):
+    parts = (message.text or "").split()
+    if len(parts) != 3 or not re.fullmatch(r"(?:-100)?[1-9][0-9]{0,18}", parts[1]) or not re.fullmatch(r"@?[A-Za-z][A-Za-z0-9_]{3,31}", parts[2]):
+        await message.answer("Используйте /grantnft ID @имя. Укажите ID канала или супергруппы RiseGram.")
+        return
+    channel_id = int(parts[1].removeprefix("-100"))
+    if channel_id > 2**63 - 1:
+        await message.answer("ID канала или супергруппы слишком большой.")
+        return
+    name = parts[2].lstrip("@").lower()
+    if not config.MTPROTO_ADMIN_API_URL or not config.MTPROTO_ADMIN_API_TOKEN:
+        await message.answer("Сервер выдачи NFT не настроен.")
+        return
+    payload = {
+        "command_id": f"channel-nft-{message.chat.id}-{message.message_id}",
+        "actor": f"risegram-admin-{message.from_user.id}",
+        "reason": "Issue a collectible username to a channel or supergroup",
+        "username": name,
+        "owner_channel_id": str(channel_id),
+        "purchase_date": int(message.date.timestamp()),
+        "currency": "USD",
+        "amount": "0",
+    }
+    try:
+        async with ClientSession(timeout=ClientTimeout(total=10)) as session:
+            async with session.post(
+                config.MTPROTO_ADMIN_API_URL.rstrip("/") + "/v1/collectible-usernames/mint",
+                headers={"Authorization": f"Bearer {config.MTPROTO_ADMIN_API_TOKEN}"},
+                json=payload,
+            ) as response:
+                result = await response.json(content_type=None)
+                completed = response.status == 200 and result.get("status") == "completed"
+    except (ClientError, TimeoutError, ValueError):
+        await message.answer("Сервер не подтвердил выдачу. Проверьте имя в профиле канала или супергруппы.")
+        return
+    if completed:
+        await message.answer(f"NFT @{name} выдан каналу или супергруппе {channel_id}.")
+    else:
+        await message.answer("Сервер отклонил выдачу. Проверьте ID и доступность имени.")
 
 
 @admin_router.message(Command(config.ADMIN_COMMAND))
