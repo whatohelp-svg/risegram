@@ -1168,10 +1168,11 @@ async def list_gift_drops(active_only: bool = True) -> list[dict]:
     return await fetchall(f"SELECT * FROM gift_drops {where} ORDER BY id DESC")
 
 
-async def list_user_gifts(tg_id: int) -> list[dict]:
+async def list_user_gifts(tg_id: int, include_pending: bool = False) -> list[dict]:
+    status_filter = "status IN ('sent','pending')" if include_pending else "status='sent'"
     return await fetchall(
-        """SELECT id,drop_id,telegram_gift_id,gift_name,emoji,serial_no,price_paid,received_at
-           FROM user_gifts WHERE tg_id=? AND status='sent' ORDER BY id DESC""",
+        f"""SELECT id,drop_id,telegram_gift_id,gift_name,emoji,serial_no,price_paid,status,received_at
+            FROM user_gifts WHERE tg_id=? AND {status_filter} ORDER BY id DESC""",
         (int(tg_id),),
     )
 
