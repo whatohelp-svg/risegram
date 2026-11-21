@@ -67,12 +67,12 @@ async def populate_client_catalog(bot):
 
     import aiohttp
     import config
+    import database as db
 
     log = logging.getLogger("risegram.gifts")
     base = config.MTPROTO_ADMIN_API_URL
     if not base or not config.MTPROTO_ADMIN_API_TOKEN:
         return
-    from urllib.parse import urlsplit
     stage = "Telegram catalog"
     imported = 0
     existing = 0
@@ -86,32 +86,31 @@ async def populate_client_catalog(bot):
                 key = str(gift.id)
                 if key not in GIFT_LABELS or gift.total_count or not gift.sticker.is_animated:
                     continue
-                stage = f"lookup {key} on {urlsplit(base).hostname}"
-                async with session.get(f"{base}/v1/gifts/{key}/animation") as response:
-                    if response.status == 200:
-                        existing += 1
-                        continue
-                    if response.status != 404:
-                        response.raise_for_status()
+                mapping = f"native_gift_id:{key}"
+                if await db.get_meta(mapping):
+                    existing += 1
+                    continue
                 stage = f"download {key}"
                 animation = await bot.download(gift.sticker)
                 form = aiohttp.FormData()
                 form.add_field("metadata", json.dumps({
-                    "command_id": f"risegram-standard-gift-{key}",
+                    "command_id": f"risegram-catalog-create-{key}",
                     "actor": "risegram-catalog", "reason": "Publish standard gift in RiseGram",
-                    "gift_id": int(key), "title": GIFT_LABELS[key], "stars": gift.star_count,
+                    "title": GIFT_LABELS[key], "stars": gift.star_count,
                     "convert_stars": 0, "enabled": True, "sort_order": list(GIFT_LABELS).index(key),
                 }))
                 form.add_field("file", animation.read(), filename=f"{key}.tgs",
                                content_type="application/x-tgsticker")
                 stage = f"import {key}"
                 async with session.post(f"{base}/v1/gifts/import", data=form) as response:
-                    response.raise_for_status()
-                    if (await response.json()).get("status") != "completed":
-                        raise ValueError("import incomplete")
+                    result = await response.json()
+                    if response.status != 200 or result.get("status") != "completed":
+                        log.warning("Gift %s rejected: %s", key, str(result.get("error", "incomplete"))[:180])
+                        continue
+                    await db.set_meta(mapping, str(int(result["details"]["gift_id"])))
                 imported += 1
         log.info("Client gift catalog: %d imported, %d already present", imported, existing)
-        return True
+        return imported + existing > 0
     except Exception as exc:
         log.warning("Client gift catalog: %d imported; %s failed (%s, HTTP %s)", imported, stage, type(exc).__name__, getattr(exc, "status", None))
         return False
