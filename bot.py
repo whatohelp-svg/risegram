@@ -6,6 +6,8 @@
 from __future__ import annotations
 
 import asyncio
+import os
+from urllib.parse import urlsplit
 import logging
 import math
 import random
@@ -171,12 +173,25 @@ def webapp_button(style: str | None = "primary"):
     return btn("📱 Открыть приложение", "menu:webapp", style=style)
 
 
+def local_miniapp_url() -> str:
+    """Always prefer the public HTTPS domain of this Railway service."""
+    raw = (os.environ.get("RAILWAY_PUBLIC_DOMAIN") or "").strip()
+    domain = raw.split("/", 1)[0]
+    if domain and "/" not in domain and ":" not in domain:
+        return f"https://{domain}/miniapp"
+    if config.WEBAPP_URL.startswith("https://"):
+        origin = urlsplit(config.WEBAPP_URL)
+        if origin.hostname:
+            return f"{origin.scheme}://{origin.netloc}/miniapp"
+    return ""
+
+
 def main_kb():
     return kb(
         [btn("🔒 Код входа", "menu:code", style="primary"), btn("📞 Мой номер", "menu:number")],
         [btn("💎 Донат", "donat:hub")],
         [webapp_button(None)],
-        ([btn("🎁 NFT Mini App", web_app=config.WEBAPP_URL.split("/")[0] + "//" + config.WEBAPP_URL.split("/")[2] + "/miniapp", style="primary")] if config.WEBAPP_URL.startswith("https://") else []),
+        ([btn("🎁 NFT Mini App", web_app=local_miniapp_url(), style="primary")] if local_miniapp_url() else []),
         [btn("🕒 Мои покупки", "menu:purchases"), btn("ℹ️ Как это работает", "menu:help")],
         [btn("⚙️ Настройки", "menu:settings"), btn("✨ Ещё", "menu:more")],
     )
