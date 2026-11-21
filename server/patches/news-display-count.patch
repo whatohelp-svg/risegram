@@ -7,7 +7,7 @@
 +}
 +
 +func channelDisplayCount(ch domain.Channel) int {
-+	if ch.Broadcast && ch.Username == "news" && ch.ParticipantsCount < 56400 {
++	if ch.Broadcast && ch.ID == 6 && ch.ParticipantsCount < 56400 {
 +		return 56400
 +	}
 +	return ch.ParticipantsCount

@@ -25,15 +25,19 @@ async def install_pack(session, title, emoji):
                 set_id = saved
                 continue
             fields = {"set_id": set_id} if index else {"short_name": slug, "title": title, "kind": "emoji"}
+            attempt = await db.get_meta(key + ":limit-retries") or "0"
             form = FormData()
-            form.add_field("metadata", json.dumps(dict(command_id=key.replace(":", "-") + ("-extended" if index >= 120 else ""), actor="risegram-emoji",
+            form.add_field("metadata", json.dumps(dict(command_id=key.replace(":", "-") + (f"-extended-{attempt}" if index >= 120 else ""), actor="risegram-emoji",
                            reason="Publish premium emoji pack", emoji=emoji, **fields)))
             form.add_field("file", bundle.read(name), filename=name, content_type="application/x-tgsticker")
             action = "add" if index else "create"
             async with session.post(config.MTPROTO_ADMIN_API_URL + "/v1/stickers/" + action, data=form) as response:
                 result = await response.json()
                 if result.get("status") != "completed":
-                    raise ValueError(str(result.get("error") or result.get("code") or response.status)[:150])
+                    reason = str(result.get("error") or result.get("code") or response.status)
+                    if index >= 120 and ("too much" in reason.lower() or "too_many" in reason.lower() or "too_much" in reason.lower()):
+                        await db.set_meta(key + ":limit-retries", str(int(attempt) + 1))
+                    raise ValueError(reason[:150])
                 details = result["details"]
                 set_id = str(details["set_id"])
                 if index and int(details["count"]) != index + 1:
@@ -46,13 +50,6 @@ async def install_pack(session, title, emoji):
 async def install_packs():
     async with ClientSession(headers={"Authorization": "Bearer " + config.MTPROTO_ADMIN_API_TOKEN},
                              timeout=ClientTimeout(total=30)) as session:
-        from native_economy import transaction
-        try:
-            async with transaction() as conn:
-                row = await (await conn.execute("SELECT id FROM channels WHERE username=%s AND broadcast", ("rise_gram",))).fetchone()
-                log.info("Channel lookup rise_gram: %s", row["id"] if row else None)
-        except Exception:
-            log.warning("News channel lookup deferred")
         pending = dict(PACKS)
         while pending:
             for title, emoji in list(pending.items()):
