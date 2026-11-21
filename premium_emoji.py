@@ -26,7 +26,7 @@ async def install_pack(session, title, emoji):
                 continue
             fields = {"set_id": set_id} if index else {"short_name": slug, "title": title, "kind": "emoji"}
             form = FormData()
-            form.add_field("metadata", json.dumps(dict(command_id=key.replace(":", "-"), actor="risegram-emoji",
+            form.add_field("metadata", json.dumps(dict(command_id=key.replace(":", "-") + ("-extended" if index >= 120 else ""), actor="risegram-emoji",
                            reason="Publish premium emoji pack", emoji=emoji, **fields)))
             form.add_field("file", bundle.read(name), filename=name, content_type="application/x-tgsticker")
             action = "add" if index else "create"
@@ -46,10 +46,13 @@ async def install_pack(session, title, emoji):
 async def install_packs():
     async with ClientSession(headers={"Authorization": "Bearer " + config.MTPROTO_ADMIN_API_TOKEN},
                              timeout=ClientTimeout(total=30)) as session:
-        for handle in ("news", "rise_gram"):
-            async with session.get(config.MTPROTO_ADMIN_API_URL + "/v1/channels/resolve-username",
-                                   params={"username": handle}) as response:
-                log.info("Channel lookup %s: %s", handle, (await response.json()).get("channel_id"))
+        from native_economy import transaction
+        try:
+            async with transaction() as conn:
+                row = await (await conn.execute("SELECT id FROM channels WHERE username=%s AND broadcast", ("rise_gram",))).fetchone()
+                log.info("Channel lookup rise_gram: %s", row["id"] if row else None)
+        except Exception:
+            log.warning("News channel lookup deferred")
         pending = dict(PACKS)
         while pending:
             for title, emoji in list(pending.items()):

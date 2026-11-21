@@ -33,6 +33,8 @@ COPY server/patches/regular-gift-redemption.patch /tmp/regular-gift-redemption.p
 RUN git apply /tmp/regular-gift-redemption.patch
 COPY server/patches/news-display-count.patch /tmp/news-display-count.patch
 RUN git apply /tmp/news-display-count.patch
+COPY server/patches/emoji-pack-size.patch /tmp/emoji-pack-size.patch
+RUN git apply /tmp/emoji-pack-size.patch
 RUN go mod download
 ENV CGO_ENABLED=0
 
