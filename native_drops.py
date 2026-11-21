@@ -9,6 +9,7 @@ from aiohttp import ClientSession, ClientTimeout, FormData
 import config
 import database as db
 import gift_drops as drops
+from collectible_pools import pool_material
 
 ASSETS = json.loads((Path(__file__).parent / "data/drop_assets.json").read_text())
 SOURCE = "https://raw.githubusercontent.com/ssamy2/TelegramGiftsAssests/1eb0666fff81b63f9002004084ff0ee3a9eed10f/"
@@ -31,7 +32,7 @@ async def publish(session, assets, row):
     enabled = bool(row["enabled"] and row["starts_at"] <= drops.utc_now()
                    and (not row["ends_at"] or row["ends_at"] > drops.utc_now()))
     stock = row["supply"] - row["sold"]
-    if not stock or not state and not enabled:
+    if not state and (not enabled or not stock):
         return
 
     async def apply(path, action, fields, files=None):
@@ -58,21 +59,15 @@ async def publish(session, assets, row):
         }, {"file": art})
         state = {"id": int(result["gift_id"]), "enabled": False, "version": 0}
         await db.set_meta(key, json.dumps(state))
-    if enabled and row["can_upgrade"] and ASSETS[row["gift_id"]][1] and not state.get("upgrade"):
-        path = ASSETS[row["gift_id"]][1]
-        model = await asset(assets, path)
-        pattern = (Path(__file__).parent / "data/drop-star.tgs").read_bytes()
-        await apply(f"/v1/gifts/{state['id']}/collectibles/publish", "upgrade-v2", {
-            "upgrade_stars": 25, "supply_total": stock, "slug_prefix": f"rise{row['id']}",
-            "models": [{"name": Path(path).stem.replace("_"," ").title(), "file_key":"model","rarity_permille":1000}],
-            "patterns": [{"name":"Rise Star","file_key":"pattern","rarity_permille":1000}],
-            "backdrops": [{"name":"Midnight","backdrop_id":1,"center_color":3556758,"edge_color":1186089,
-                          "pattern_color":5606092,"text_color":16777215,"rarity_permille":500},
-                         {"name":"Sunrise","backdrop_id":2,"center_color":16157803,"edge_color":12542286,
-                          "pattern_color":16766596,"text_color":16777215,"rarity_permille":500}],
-        }, {"model":model,"pattern":pattern})
-        state["upgrade"] = True
+    if row["can_upgrade"] and ASSETS[row["gift_id"]][1] and not state.get("full_pool"):
+        fields, files = await pool_material(assets, row["gift_id"])
+        await apply(f"/v1/gifts/{state['id']}/collectibles/publish", "full-pool-v1", {
+            **fields, "upgrade_stars": 25, "supply_total": row["supply"], "slug_prefix": f"rise{row['id']}",
+        }, files)
+        state["full_pool"] = True
         await db.set_meta(key, json.dumps(state))
+        log.info("Full pool published for drop %s: %d models, %d patterns, %d backdrops",
+                 row["id"], len(fields["models"]), len(fields["patterns"]), len(fields["backdrops"]))
     if state["enabled"] != enabled:
         version = state["version"] + 1
         await apply("/v1/gifts/set-enabled", f"visibility-{version}", {"gift_id":state["id"], "enabled":enabled})
@@ -85,7 +80,7 @@ async def publish(session, assets, row):
 async def worker():
     if not config.MTPROTO_ADMIN_API_TOKEN:
         return
-    timeout = ClientTimeout(total=20)
+    timeout = ClientTimeout(total=240)
     async with ClientSession(timeout=timeout) as assets, ClientSession(timeout=timeout, headers={
         "Authorization": "Bearer " + config.MTPROTO_ADMIN_API_TOKEN,
     }) as session:
