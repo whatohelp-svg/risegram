@@ -18,8 +18,8 @@ GIFT_LABELS = {
 }
 
 
-PUBLIC_STANDARD = {"5170145012310081615", "5170233102089322756", "5170144170496491616"}
-PUBLIC_SEASONAL = {"halloween-bear", "soldier-bear"}
+PUBLIC_STANDARD = set(GIFT_LABELS)
+PUBLIC_SEASONAL = {"halloween-bear", "soldier-bear", "christmas-tree", "valentine-heart", "football-bear", "easter-bear"}
 
 
 def gift_field(gift, key: str, default=None):
@@ -64,62 +64,6 @@ async def available_telegram_gifts(bot) -> list[dict]:
     return out
 
 
-async def populate_client_catalog(bot):
-    """Import missing standard gifts with their Bot API price and animation."""
-    import json
-    import logging
-
-    import aiohttp
-    import config
-    import database as db
-
-    log = logging.getLogger("risegram.gifts")
-    base = config.MTPROTO_ADMIN_API_URL
-    if not base or not config.MTPROTO_ADMIN_API_TOKEN:
-        return
-    stage = "Telegram catalog"
-    imported = 0
-    existing = 0
-    try:
-        catalog = await bot.get_available_gifts()
-        async with aiohttp.ClientSession(
-            headers={"Authorization": f"Bearer {config.MTPROTO_ADMIN_API_TOKEN}"},
-            timeout=aiohttp.ClientTimeout(total=15),
-        ) as session:
-            for gift in catalog.gifts:
-                key = str(gift.id)
-                if key not in PUBLIC_STANDARD or gift.total_count or not gift.sticker.is_animated:
-                    continue
-                mapping = f"native_gift_id:{key}"
-                if await db.get_meta(mapping):
-                    existing += 1
-                    continue
-                stage = f"download {key}"
-                animation = await bot.download(gift.sticker)
-                form = aiohttp.FormData()
-                form.add_field("metadata", json.dumps({
-                    "command_id": f"risegram-catalog-create-{key}",
-                    "actor": "risegram-catalog", "reason": "Publish standard gift in RiseGram",
-                    "title": GIFT_LABELS[key], "stars": gift.star_count,
-                    "convert_stars": 0, "enabled": True, "sort_order": list(GIFT_LABELS).index(key),
-                }))
-                form.add_field("file", animation.read(), filename=f"{key}.tgs",
-                               content_type="application/x-tgsticker")
-                stage = f"import {key}"
-                async with session.post(f"{base}/v1/gifts/import", data=form) as response:
-                    result = await response.json()
-                    if response.status != 200 or result.get("status") != "completed":
-                        log.warning("Gift %s rejected: %s", key, str(result.get("error", "incomplete"))[:180])
-                        continue
-                    await db.set_meta(mapping, str(int(result["details"]["gift_id"])))
-                imported += 1
-        log.info("Client gift catalog: %d imported, %d already present", imported, existing)
-        return imported + existing > 0
-    except Exception as exc:
-        log.warning("Client gift catalog: %d imported; %s failed (%s, HTTP %s)", imported, stage, type(exc).__name__, getattr(exc, "status", None))
-        return False
-
-
 async def populate_seasonal_catalog():
     import asyncio
     import json
@@ -130,6 +74,9 @@ async def populate_seasonal_catalog():
     import database as db
 
     entries = json.loads((Path(__file__).parent / "data/seasonal_catalog.json").read_text())
+    standard_prices = [15, 15, 25, 25, 50, 50, 50, 50, 100, 100, 100]
+    entries.extend({"key": key, "title": title, "path": "standard/" + key + ".tgs", "stars": price}
+                   for (key, title), price in zip(GIFT_LABELS.items(), standard_prices, strict=True))
     log = logging.getLogger("risegram.seasonal")
     timeout = ClientTimeout(total=30)
     async with ClientSession(timeout=timeout, headers={
@@ -139,7 +86,7 @@ async def populate_seasonal_catalog():
             pending = 0
             hidden = [(f"native_gift_id:{key}", key) for key in GIFT_LABELS if key not in PUBLIC_STANDARD]
             hidden.extend(("risegram-seasonal-" + item["key"], item["key"])
-                          for item in entries if item["key"] not in PUBLIC_SEASONAL)
+                          for item in entries if item["key"] not in PUBLIC_SEASONAL | PUBLIC_STANDARD)
             for mapping, source in hidden:
                 gid = await db.get_meta(mapping)
                 if not gid or await db.get_meta("drop-only:" + mapping) == str(gid):
@@ -157,11 +104,12 @@ async def populate_seasonal_catalog():
                     pending += 1
                     log.warning("Moving %s to drop catalog: %s", source, str(exc)[:150])
             for index, item in enumerate(entries):
-                if item["key"] not in PUBLIC_SEASONAL:
+                if item["key"] not in PUBLIC_SEASONAL | PUBLIC_STANDARD:
                     continue
-                key = "risegram-seasonal-" + item["key"]
+                standard = item["key"] in PUBLIC_STANDARD
+                key = ("native_gift_id:" if standard else "risegram-seasonal-") + item["key"]
                 gid = await db.get_meta(key)
-                revision = key + "-art-v2"
+                revision = key.replace(":", "-") + "-catalog-v3"
                 if gid and await db.get_meta(revision) == str(gid):
                     continue
                 try:
@@ -171,7 +119,7 @@ async def populate_seasonal_catalog():
                     form.add_field("metadata", json.dumps({
                         "command_id": revision, "gift_id": int(gid or 0), "actor": "risegram-catalog", "reason": "Seasonal gift catalog",
                         "title": item["title"], "stars": price, "convert_stars": (price * 85 + 50) // 100,
-                        "enabled": True, "sort_order": 1000 + index,
+                        "enabled": True, "sort_order": list(GIFT_LABELS).index(item["key"]) if standard else 1000 + index,
                     }))
                     form.add_field("file", image, filename=item["key"]+".tgs", content_type="application/x-tgsticker")
                     async with service.post(config.MTPROTO_ADMIN_API_URL+"/v1/gifts/import", data=form) as response:

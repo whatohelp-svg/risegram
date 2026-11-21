@@ -520,5 +520,29 @@
     "title": "Soldier Bear",
     "stars": 50,
     "path": "soldier-bear.tgs"
+  },
+  {
+    "key": "christmas-tree",
+    "title": "Christmas Tree",
+    "stars": 50,
+    "path": "christmas-tree.tgs"
+  },
+  {
+    "key": "valentine-heart",
+    "title": "Valentine Heart",
+    "stars": 50,
+    "path": "valentine-heart.tgs"
+  },
+  {
+    "key": "football-bear",
+    "title": "Football Bear",
+    "stars": 50,
+    "path": "football-bear.tgs"
+  },
+  {
+    "key": "easter-bear",
+    "title": "Easter Bunny Bear",
+    "stars": 50,
+    "path": "easter-bear.tgs"
   }
 ]

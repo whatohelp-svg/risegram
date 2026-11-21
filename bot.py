@@ -2159,14 +2159,6 @@ async def on_startup(bot: Bot):
     await db.log_admin_action(0, f"Бот запущен (@{me.username})")
 
 
-async def sync_client_gifts(bot):
-    from gift_catalog import populate_client_catalog
-    for delay in (0, 10, 30, 60, 120, 300):
-        await asyncio.sleep(delay)
-        if await populate_client_catalog(bot):
-            return
-
-
 async def recover_wallet_jobs(bot):
     while True:
         try:
@@ -2215,13 +2207,14 @@ async def main():
     issuer_setup = asyncio.create_task(bootstrap())
     from gift_catalog import populate_seasonal_catalog
     seasonal = asyncio.create_task(populate_seasonal_catalog())
-    gift_sync = asyncio.create_task(sync_client_gifts(bot))
+    from premium_emoji import install_packs
+    emoji_import = asyncio.create_task(install_packs())
     try:
         await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
     finally:
         recovery.cancel()
         seasonal.cancel()
-        gift_sync.cancel()
+        emoji_import.cancel()
         issuer_setup.cancel()
         drop_publisher.cancel()
         await asyncio.gather(seasonal, recovery, gift_sync, issuer_setup, drop_publisher, return_exceptions=True)
