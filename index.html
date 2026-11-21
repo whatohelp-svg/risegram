@@ -3,26 +3,73 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="theme-color" content="#0d131d">
-<title>RiseGram</title>
+<meta name="theme-color" content="#0c131e">
+<meta name="referrer" content="no-referrer">
+<title>RiseGram · Кошелёк</title>
 <style>
-:root{color-scheme:dark;font-family:Inter,system-ui,sans-serif;background:#0d131d;color:#edf3fb}
-*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;padding:24px}
-main{width:min(100%,520px);padding:30px;border:1px solid #26364b;border-radius:24px;background:#17212f;box-shadow:0 20px 80px #0005}
-.mark{font-size:42px}h1{margin:12px 0 8px;font-size:32px}p{color:#a9b8ca;line-height:1.6}
-.status{display:inline-flex;align-items:center;gap:8px;padding:7px 12px;border-radius:99px;background:#153b31;color:#8be0b8;font-size:13px}
-a{color:#8bc4ff}small{color:#8496ad}
+:root{color-scheme:dark;font:16px/1.5 system-ui,sans-serif;background:#0c131e;color:#eff5ff}
+*{box-sizing:border-box}body{margin:0}header,main{width:min(1020px,92%);margin:auto}header{display:flex;justify-content:space-between;align-items:center;padding:22px 0;border-bottom:1px solid #28364a}.brand{font-weight:800;font-size:24px;letter-spacing:-1px}.logo{display:inline-grid;place-items:center;background:#70d2ff;color:#0e1d2c;border-radius:10px;width:38px;height:38px;margin-right:10px;font-style:italic}main{padding:34px 0 70px}h1{font-size:clamp(32px,5vw,50px);letter-spacing:-1.8px;margin:6px 0 20px}h2{font-size:22px;margin:0 0 12px}p{color:#bac9dc}button,input,select,a.cta{font:inherit}button,a.cta{cursor:pointer;padding:10px 16px;border-radius:10px;border:1px solid #394961;color:#eaf3ff;background:#1a2739;text-decoration:none}button:disabled{opacity:.5;cursor:default}.primary,a.cta{background:#86dbff;color:#0c2434;border-color:transparent;font-weight:700}nav{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0 24px}nav [aria-current=page]{background:#26445c;color:#a9eaff}.panel{border:1px solid #2a394c;border-radius:18px;background:#152031;padding:24px;margin:14px 0}.compact{max-width:560px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.asset{border-radius:16px;background:linear-gradient(125deg,#193955,#142536);padding:24px}.asset:nth-child(2){background:linear-gradient(125deg,#45384c,#221f31)}.asset strong{display:block;font-size:clamp(26px,4vw,42px);overflow-wrap:anywhere}.muted,small{color:#afc2d6}.entry{padding:12px 0;border-bottom:1px solid #2c3b4d;display:flex;align-items:center;justify-content:space-between;gap:12px;overflow-wrap:anywhere}.entry:last-child{border:0}input,select{background:#0d1826;color:white;border:1px solid #43546a;border-radius:9px;padding:12px;width:100%;margin:6px 0 16px}label{display:block}a{color:#87ddff}#notice:not(:empty){padding:12px 16px;border-radius:10px;background:#24364a;margin:14px 0}button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible{outline:3px solid #8ce0ff}form{margin-top:16px}#identity{overflow-wrap:anywhere}@media(max-width:560px){.grid{gap:8px}.asset,.panel{padding:16px}nav button{padding:8px 11px}.entry{flex-wrap:wrap}}
 </style>
 </head>
-<body>
-<main>
-  <div class="mark">🚀</div>
-  <h1>RiseGram</h1>
-  <div class="status"><span>●</span> Сервер доступен</div>
-  <p>Независимый мессенджер с общей экономикой, RiseStars, Gram и NFT-юзернеймами</p>
-  <p>Баланс аккаунта и владение NFT синхронизируются между ботом и Android-клиентом через одну базу данных</p>
-  <p>Android-клиент готовится к публикации. Не используйте сторонние страницы, которые обещают вход в RiseGram</p>
-  <small>RiseGram API · <a href="/health">проверить состояние сервера</a></small>
-</main>
-</body>
-</html>
+<body><header><span class="brand"><span class="logo">R</span>RiseGram</span><button id="logout" hidden>Выйти</button></header>
+<main><div id="identity" class="muted"></div><h1 id="title">Кошелёк</h1><nav hidden aria-label="Разделы"></nav><div id="notice" role="status" aria-live="polite"></div><section id="screen"></section></main>
+<script>
+'use strict';
+const $=s=>document.querySelector(s);
+const screen=$('#screen'), notice=$('#notice'), nav=$('nav');
+const views=['Кошелёк','Обмен','Игры','Маркет'];
+const fmt=n=>Number(n).toLocaleString('ru-RU',{maximumFractionDigits:2});
+const escapeText=value=>String(value??'').replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+const messages={unauthorized:'Сессия завершена. Войди ещё раз',invalid_code:'Код неверный или истёк',bad_phone:'Проверь номер RiseGram',too_many_requests:'Слишком много запросов. Попробуй позже',cooldown:'Подожди перед новым запросом кода',code_delivery_unavailable:'Бот пока не смог доставить код',market_disabled:'Маркет временно выключен'};
+let token=sessionStorage.getItem('risegram-session')||'', section=0, serial=0, phone='',offset=0;
+function clearSession(){token='';sessionStorage.removeItem('risegram-session');phone='';offset=0;section=0;login()}
+async function api(path,body){
+ const headers={Accept:'application/json'}, activeToken=token;
+ if(activeToken)headers.Authorization='Bearer '+activeToken;
+ if(body!==undefined)headers['Content-Type']='application/json';
+ const response=await fetch('/api/'+path,{method:body===undefined?'GET':'POST',headers,body:body===undefined?undefined:JSON.stringify(body),cache:'no-store',redirect:'error'});
+ const data=await response.json();
+ if(response.status===401&&activeToken&&token===activeToken)clearSession();
+ if(!response.ok||!data.ok)throw Error(data.message||messages[data.error]||data.error||'Сервис временно недоступен');
+ return data;
+}
+function login(){
+ serial++;nav.hidden=true;nav.style.display='none';$('#logout').hidden=true;$('#identity').textContent='Личный кабинет';$('#title').textContent='Вход в RiseGram';
+ screen.innerHTML='<article class="panel compact"><h2>'+ (phone?'Введи код':'Твой аккаунт')+'</h2><p>'+(phone?'Код для '+escapeText(phone)+' придёт в личный чат с @risegrambot':'Введи постоянный номер, который выдал <a href="https://t.me/risegrambot" rel="noreferrer">@risegrambot</a>')+'</p><form id="auth"><label>'+(phone?'Одноразовый код<input name="value" autocomplete="one-time-code" inputmode="numeric" required maxlength="16">':'Номер RiseGram<input name="value" type="tel" autocomplete="tel" placeholder="+7 …" required maxlength="40">')+'</label><button class="primary">'+(phone?'Войти':'Получить код')+'</button></form>'+(phone?'<p><button id="back">Изменить номер или запросить новый код</button></p>':'')+'</article>';
+ if(phone)$('#back').onclick=()=>{phone='';notice.textContent='';login()};
+ $('#auth').onsubmit=e=>{e.preventDefault();const form=e.target,value=form.elements.value.value.trim();run(form.querySelector('button'),async()=>{
+ if(!phone){await api('auth/request',{phone:value});phone=value;login()}
+ else{const data=await api('auth/verify',{phone,code:value});token=data.token;sessionStorage.setItem('risegram-session',token);phone='';await render()}
+ })};
+}
+async function run(btn,action){if(btn.disabled)return;btn.disabled=true;notice.textContent='';try{await action()}catch(e){notice.textContent=e.message}finally{btn.disabled=false}}
+function card(title,body){return '<article class="panel"><h2>'+title+'</h2>'+body+'</article>'}
+function row(left,right=''){return '<div class="entry"><span>'+left+'</span>'+right+'</div>'}
+function balances(u){return '<div class="grid"><div class="asset">◈ Gram<strong>'+fmt(u.gram_balance)+'</strong></div><div class="asset">✦ RiseStars<strong>'+fmt(u.risestars)+'</strong></div></div>'}
+async function render(){
+ const id=++serial;notice.textContent='';if(!token){login();return}
+ nav.hidden=false;nav.style.display='flex';$('#logout').hidden=false;$('#title').textContent=views[section];
+ nav.innerHTML=views.map((v,i)=>'<button data-tab="'+i+'" '+(i===section?'aria-current="page"':'')+'>'+v+'</button>').join('');
+ screen.textContent='Загрузка…';
+ try{
+ const paths=[['inventory','purchases'],[],['games/stats'],['market?limit=20&offset='+offset,'inventory']][section];
+ const [profile,...data]=await Promise.all(['me',...paths].map(path=>api(path)));
+ if(id!==serial)return;
+ const u=profile.user;$('#identity').textContent=(u.name||'RiseGram')+' · ID '+u.rise_id;
+ if(section===0){const [inv,log]=data;
+ screen.innerHTML=balances(u)+card('Моя коллекция',[...inv.items.map(x=>x.value),...inv.gifts.map(x=>x.gift_name||'Подарок')].map(x=>row(escapeText(x))).join('')||'<p>В коллекции пока пусто</p>')+card('Последние покупки',log.purchases.map(x=>row(escapeText(x.description||x.type),'<small>'+escapeText(x.created_at)+'</small>')).join('')||'<p>Покупок пока нет</p>')}
+ if(section===1){screen.innerHTML=balances(u)+card('Обмен валют','<p>1 Gram = 100 RiseStars</p><form class="compact" id="swap"><label>Направление<select name="direction"><option value="gram_to_stars">Gram → RiseStars</option><option value="stars_to_gram">RiseStars → Gram</option></select></label><label>Отдаёшь<input name="amount" type="number" min="0.01" step="0.01" required></label><p id="quote"></p><button class="primary">Подтвердить обмен</button></form>');
+ const form=$('#swap'),amount=form.elements.amount,dir=form.elements.direction;
+ function quote(){const gram=dir.value==='gram_to_stars';amount.min=amount.step=gram?'0.01':'1';$('#quote').textContent='Получишь '+fmt(Number(amount.value)*(gram?100:0.01))+(gram?' RiseStars':' Gram')}
+ form.oninput=quote;quote();form.onsubmit=e=>{e.preventDefault();run(form.querySelector('button'),async()=>{await api('exchange',{direction:dir.value,amount:Number(amount.value)});await render();if(token&&!notice.textContent)notice.textContent='Обмен выполнен'})}}
+ if(section===2){const s=data[0].stats;screen.innerHTML=card('Crash Rocket и Хай-Лоу','<p>Открой игровой зал в @risegrambot и выбери игру. Баланс общий с кошельком RiseGram</p><a class="cta" href="https://t.me/risegrambot?start=games" rel="noreferrer">Открыть игры в боте</a>')+card('Твои результаты',row('Завершено игр',fmt(s.played))+row('Победы',fmt(s.wins))+'<button id="refresh">Обновить</button>');$('#refresh').onclick=render}
+ if(section===3){const [market,inv]=data;
+ screen.innerHTML=card('Лоты','<p>Доступно '+fmt(market.balance)+' RiseStars</p>'+(market.items.map(x=>row(escapeText(x.value),'<button data-buy="'+Number(x.id)+'">'+fmt(x.price)+' RiseStars · Купить</button>')).join('')||'<p>На этой странице нет активных лотов</p>')+'<p>'+(offset?'<button id="prev">Назад</button> ':'')+(market.items.length===20?'<button id="next">Дальше</button>':'')+'</p>')+card('Выставить на продажу',inv.items.length?'<form id="sell" class="compact"><label>Предмет<select name="item">'+inv.items.map(x=>'<option value="'+Number(x.id)+'">'+escapeText(x.value)+'</option>').join('')+'</select></label><label>Цена в RiseStars<input name="price" type="number" min="0.01" step="0.01" required></label><button>Выставить лот</button></form>':'<p>Нет NFT-номеров или юзернеймов для продажи</p>');
+ for(const btn of screen.querySelectorAll('[data-buy]'))btn.onclick=()=>{const item=market.items.find(x=>x.id==btn.dataset.buy);if(confirm('Купить '+item.value+' за '+fmt(item.price)+' RiseStars?'))run(btn,async()=>{await api('market/'+Number(item.id)+'/buy',{});await render();if(token&&!notice.textContent)notice.textContent='Предмет добавлен в коллекцию'})};
+ if($('#prev'))$('#prev').onclick=()=>{offset-=20;render()};if($('#next'))$('#next').onclick=()=>{offset+=20;render()};
+ if($('#sell'))$('#sell').onsubmit=e=>{e.preventDefault();const form=e.target;run(form.querySelector('button'),async()=>{await api('market',{item_id:Number(form.elements.item.value),price:Number(form.elements.price.value)});offset=0;await render();if(token&&!notice.textContent)notice.textContent='Лот выставлен'})}}
+ }catch(e){if(id===serial){notice.textContent=e.message;screen.innerHTML='<button id="retry">Повторить загрузку</button>';$('#retry').onclick=render}else if(!token)notice.textContent=e.message}
+}
+nav.onclick=e=>{if(e.target.dataset.tab!==undefined){section=Number(e.target.dataset.tab);offset=0;render()}};
+$('#logout').onclick=()=>{notice.textContent='';clearSession()};render();
+</script></body></html>
