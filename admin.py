@@ -113,7 +113,7 @@ async def home_screen(event, user: dict):
         [btn("📊 Аналитика", "adm:stats", style="primary"), btn("👥 Юзеры", "adm:users:0", style="primary")],
         [btn("💰 Выдача валюты", "adm:grant", style="success"), btn("🏷 Выдать юзернеймы", "adm:inv", style="success")],
         [btn("🎁 Дропы подарков", "adm:gifts", style="success")],
-        [btn("🧩 NFT RiseGram · 50/стр", "adm:localgifts:0", style="primary")],
+        [btn("🎁 Дроп подарков", "adm:localgifts:0", style="primary")],
         [btn("⚡ Тумблеры функций", "adm:feat", style="success"), btn("🔨 Банхаммер", "adm:ban", style="danger")],
         [btn("🎯 Задания", "adm:tasks"), btn("🛒 Маркет", "adm:mkt:0"), btn(scam_label, "adm:scam:0", style="danger" if pending else None)],
         [btn("🧾 Покупки", "adm:buys:0"), btn("📣 Рассылка", "adm:cast")],
