@@ -362,7 +362,7 @@ async def revoke_goods(p: dict) -> str:
                 await db.set_balance(u["tg_id"], "risestars", new)
             return f"списано до {fmt_num(amount)} RiseStars"
         if kind == "vm" and a[0] == "a":
-            await db.set_verified(uid, False)
+            await db.set_verification(uid, "major", False)
             return "снят Мажор"
         if kind == "vm":
             await db.execute("DELETE FROM verified_entities WHERE target=?", (a[1],))
