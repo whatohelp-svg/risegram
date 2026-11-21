@@ -1,0 +1,7 @@
+[submodule "client/telegram-android"]
+	path = client/telegram-android
+	url = https://github.com/TelegramMessenger/Telegram-Android.git
+
+[submodule "server/mtproto"]
+	path = server/mtproto
+	url = https://github.com/iamxvbaba/gramsrv.git

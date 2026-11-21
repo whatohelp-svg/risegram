@@ -1,0 +1,16 @@
+# Do not send the very large Android client source tree to the MTProto image build
+client/telegram-android
+app/
+.gradle/
+**/.gradle/
+**/build/
+**/node_modules/
+**/.git/
+.git/
+.github/
+tests/
+*.db
+*.sqlite
+*.sqlite3
+.venv/
+__pycache__/

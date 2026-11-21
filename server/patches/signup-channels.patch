@@ -1,0 +1,28 @@
+--- a/internal/rpc/auth.go
++++ b/internal/rpc/auth.go
+@@ -985,7 +985,25 @@
+ 	}
+ 	r.bindSessionUser(ctx, u.ID)
+ 	r.enqueueLoginMessageBootstrap(ctx, loginMessage)
++	r.joinSignupChannels(ctx, u.ID)
+ 	return &tg.AuthAuthorization{User: r.tgSelfUserWithUsernames(ctx, u)}, nil
++}
++
++// joinSignupChannels is only called on initial native account registration.
++func (r *Router) joinSignupChannels(ctx context.Context, userID int64) {
++	if r.deps.Channels == nil {
++		return
++	}
++	ctx = WithUserID(ctx, userID)
++	for _, username := range []string{"chat", "news"} {
++		channel, found, err := r.deps.Channels.ResolvePublicUsername(ctx, userID, username)
++		if err == nil && found {
++			_, err = r.onChannelsJoinChannel(ctx, &tg.InputChannel{ChannelID: channel.ID, AccessHash: channel.AccessHash})
++		}
++		if (!found || err != nil) && r.log != nil {
++			r.log.Warn("signup channel unavailable", zap.String("username", username), zap.Error(err))
++		}
++	}
+ }
+ 
+ // onAuthLogOut handles auth.logOut: unbinds the current auth_key's authorization.

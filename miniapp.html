@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0b0d12"><title>Приложения RiseGram</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+:root{color-scheme:dark;--bg:#0b0d12;--panel:#1c2029;--border:#353946;--text:#fafcff;--muted:#959baa;--blue:#4c9aff;--gold:#f7c64e}
+*{box-sizing:border-box}body{margin:0;font:15px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:var(--bg);color:var(--text)}
+main{max-width:720px;margin:0 auto;padding:20px 16px 110px}
+h1{font-size:29px;margin:5px 0 4px;letter-spacing:-.6px}h2{font-size:20px;margin:26px 0 15px}.small{color:var(--muted);font-size:13px}.top{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.wallet{background:linear-gradient(110deg,#144b81,#15253e);border:1px solid #335681;border-radius:40px;padding:9px 14px;font-weight:750;white-space:nowrap}
+.info{background:var(--panel);border:1px solid var(--border);border-radius:18px;padding:16px;margin-top:20px}
+input{width:100%;background:#161921;color:white;border:1px solid #444a57;border-radius:12px;padding:14px;font:inherit;outline:0}
+input:focus{border-color:var(--blue)}label{display:block;margin:16px 0 6px;color:#d1d7e2}
+button{color:white;cursor:pointer;font:inherit;border:0;transition:transform .15s;touch-action:manipulation}
+button:active{transform:scale(.98)}button:disabled{opacity:.5;cursor:default}
+.primary{width:100%;border-radius:12px;background:#277cde;padding:14px;font-weight:750;margin-top:18px}
+.secondary{background:#323948;border:1px solid #434a58;border-radius:11px;padding:10px 14px}
+.row{display:flex;justify-content:space-between;align-items:center;gap:10px}
+.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.tile{min-width:0;background:linear-gradient(145deg,#232a39,#1a1c25);border:1px solid #363d4c;border-radius:20px;padding:12px;overflow:hidden}
+.apps a{display:flex;align-items:center;min-height:70px;padding:16px;border-radius:14px;background:var(--panel);color:var(--text);font-weight:650;text-decoration:none}
+.art{height:110px;display:flex;align-items:center;justify-content:center;border-radius:13px;background:radial-gradient(circle at 45% 35%,#805de7,#302858 55%,#191b2d);font-size:54px;margin-bottom:12px}
+.tile:nth-child(3n+1) .art{background:radial-gradient(circle at 30% 30%,#f3ae3d,#593719 65%,#1c2026)}
+.tile:nth-child(3n+2) .art{background:radial-gradient(circle at 30% 30%,#2da8e5,#203f71 65%,#1c2026)}
+.tile b{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.price{color:var(--gold);font-weight:800;font-size:15px;margin-top:8px}
+.buy{padding:9px 11px;border-radius:12px;background:#2476d2;font-size:14px;font-weight:700}
+.empty{text-align:center;color:var(--muted);padding:45px 20px;background:#1a1c23;border-radius:18px}
+nav{position:fixed;bottom:0;left:0;right:0;display:flex;justify-content:space-around;padding:10px 10px calc(env(safe-area-inset-bottom) + 10px);background:rgba(24,29,39,.97);border-top:1px solid #34394a;backdrop-filter:blur(18px);max-width:720px;margin:auto}
+nav button{flex:1;max-width:110px;color:#aab3c4;background:none;border-radius:15px;padding:8px;font-size:13px}
+nav button.active{color:#58aaff;background:#263c5d}
+nav span{display:block;font-size:22px;margin-bottom:4px}
+.hidden{display:none!important}.pill{display:inline-block;border-radius:30px;padding:5px 11px;background:#26313e;color:#a5bce0;font-size:12px}
+#notice{position:fixed;top:10px;left:50%;transform:translateX(-50%);z-index:100;background:#353a48;color:white;border:1px solid #777;padding:11px 15px;border-radius:15px;max-width:90vw;display:none}
+#modal{position:fixed;inset:0;background:#000c;display:none;align-items:end;justify-content:center;z-index:50}
+#modal .sheet{width:100%;max-width:720px;background:#252936;border-radius:22px 22px 0 0;padding:22px 18px 35px}
+</style></head><body>
+<div id="notice" role="status"></div>
+<main>
+<section class="top"><div><div class="small">RISEGRAM</div><h1 id="heading">Приложения</h1></div><div class="wallet">⭐ <span id="balance">—</span></div></section>
+<section id="auth" class="info hidden">
+ <h2 style="margin-top:0">Войти в RiseGram</h2>
+ <p class="small">Введи виртуальный номер, который выдал бот RiseGram. Код придёт в личный чат с ботом</p>
+ <form id="phoneForm"><label for="phone">Номер RiseGram</label><input id="phone" type="tel" autocomplete="tel" placeholder="+7 или +888" required>
+ <button class="primary" type="submit">Получить код в боте</button></form>
+ <form id="codeForm" class="hidden"><label for="code">Код из бота</label><input id="code" inputmode="numeric" pattern="[0-9]{5,8}" placeholder="12345" required>
+ <button class="primary" type="submit">Войти</button><button class="secondary" style="margin-top:10px" type="button" id="changePhone">Изменить номер</button></form>
+</section>
+<section id="content" class="hidden">
+ <div id="shop"><div class="grid apps">
+   <a href="/?from=bot#wallet">Кошелёк</a><a href="/?from=bot#exchange">Обмен</a>
+   <a href="/?from=bot#games">Игры</a><a href="/?from=bot#market">Маркет NFT-юзернеймов и номеров</a>
+ </div><p>Дропы доступны в приложении RiseGram в разделе «Отправить подарок».</p></div>
+ <div id="inventory" class="hidden"><h2>Мои подарки</h2><div id="owned" class="grid"></div></div>
+ <div id="account" class="hidden"><div class="info"><h2 style="margin:0 0 14px">Аккаунт RiseGram</h2><div id="accountInfo"></div>
+ <button id="logout" class="secondary" style="margin-top:20px">Выйти</button></div>
+ <div class="info"><b>О безопасности</b><p class="small">Код входа выдаёт только официальный бот. Не сообщай его другим. Доступ к покупкам привязан к твоему аккаунту</p></div></div>
+</section>
+</main>
+<nav id="tabs" class="hidden">
+<button data-tab="shop" class="active"><span>📱</span>Приложения</button>
+<button data-tab="inventory"><span>🎁</span>Инвентарь</button>
+<button data-tab="account"><span>👤</span>Аккаунт</button>
+</nav>
+<script>
+"use strict";
+const tg=window.Telegram?.WebApp; tg?.ready(); tg?.expand();
+const $=id=>document.getElementById(id);
+const state={token:sessionStorage.getItem("risegram_session")||"",user:null,initData:tg?.initData||"",drops:[],tab:"shop",selected:null};
+const fmt=n=>n==null?"—":Number(n).toLocaleString("ru-RU");
+const safe=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+function toast(msg){$("notice").textContent=msg;$("notice").style.display="block";clearTimeout(toast.t);toast.t=setTimeout(()=>$("notice").style.display="none",3700)}
+async function req(path,options={}){
+ const headers={"Content-Type":"application/json",...(state.token?{"Authorization":"Bearer "+state.token}:{})};
+ const r=await fetch(path,{...options,headers:{...headers,...(options.headers||{})}});
+ let j={};try{j=await r.json()}catch{}
+ if(j.error==="invalid_telegram_signature")throw Error("Не удалось подтвердить вход. Закройте мини-приложение и откройте его снова кнопкой в боте RiseGram.");
+ if(!r.ok||j.ok===false)throw Error(j.error||"Ошибка сервера");
+ return j;
+}
+function showAuth(){
+ $("auth").classList.remove("hidden");$("content").classList.add("hidden");$("tabs").classList.add("hidden");
+ $("balance").textContent="—";$("heading").textContent="Вход";
+}
+function showApp(){
+ $("auth").classList.add("hidden");$("content").classList.remove("hidden");$("tabs").classList.remove("hidden");
+ $("balance").textContent=fmt(state.user?.risestars);
+ selectTab(state.tab);
+}
+async function syncUser(){
+ const j=await req("/api/me");state.user=j.user;
+ $("balance").textContent=fmt(state.user.risestars);
+ $("accountInfo").innerHTML="<p>👤 "+safe(state.user.name||state.user.username||"Аккаунт")+"</p><p>📞 "+safe(state.user.phone)+"</p><p>⭐ "+fmt(state.user.risestars)+" RiseStars</p><p>💎 "+fmt(state.user.gram_balance)+" Gram</p>";
+}
+function selectTab(tab){
+ state.tab=tab;for(const id of ["shop","inventory","account"])$(id).classList.toggle("hidden",id!==tab);
+ document.querySelectorAll("nav button").forEach(b=>b.classList.toggle("active",b.dataset.tab===tab));
+ $("heading").textContent=({shop:"Приложения",inventory:"Инвентарь",account:"Профиль"})[tab];
+ if(tab==="inventory")loadInventory();
+}
+function art(title){return /ring|locket|signet/i.test(title)?"💍":/heart|love/i.test(title)?"💝":/cup|glass/i.test(title)?"🏆":/hat|cap/i.test(title)?"🎩":"🎁"}
+async function loadInventory(){
+ try{
+  const j=await req("/api/local-gifts/inventory");
+  $("owned").innerHTML=j.items.length?j.items.map(g=>
+   '<article class="tile"><div class="art">'+art(g.title)+'</div><b>'+safe(g.title)+'</b><p class="small">№ '+g.serial+(g.upgraded?' · ✨ Улучшен':'')+'</p>'+
+   '</article>').join("") :
+   '<div class="empty" style="grid-column:1/-1">Подарков пока нет</div>';
+ }catch(e){toast(e.message)}
+}
+function logout(){state.token="";state.user=null;sessionStorage.removeItem("risegram_session");showAuth()}
+$("phoneForm").addEventListener("submit",async e=>{
+ e.preventDefault();
+ if(!state.initData){toast("Открой Mini App кнопкой в боте Telegram");return}
+ try{await req("/api/webapp/auth/request",{method:"POST",body:JSON.stringify({init_data:state.initData,phone:$("phone").value})});
+ $("phoneForm").classList.add("hidden");$("codeForm").classList.remove("hidden");toast("Если номер твой, код отправлен в бот");
+ }catch(err){toast(err.message)}
+});
+$("codeForm").addEventListener("submit",async e=>{
+ e.preventDefault();
+ try{const j=await req("/api/webapp/auth/verify",{method:"POST",
+ body:JSON.stringify({init_data:state.initData,phone:$("phone").value,code:$("code").value})});
+ state.token=j.token;sessionStorage.setItem("risegram_session",state.token);
+ await syncUser();showApp();}catch(err){toast(err.message)}
+});
+$("changePhone").onclick=()=>{$("codeForm").classList.add("hidden");$("phoneForm").classList.remove("hidden")};
+$("logout").onclick=logout;
+document.querySelectorAll("nav button").forEach(b=>b.onclick=()=>selectTab(b.dataset.tab));
+(async()=>{if(!state.token){showAuth();return}
+ try{await syncUser();showApp()}
+ catch(e){logout()}})();
+</script></body></html>

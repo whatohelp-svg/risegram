@@ -1,11 +1,13 @@
 """bot.py — основной бот RiseGram: авторизация, магазин (Telegram Stars), номера, NFT, игры.
 
 Запуск:  python bot.py
-Админка: файл admin.py, вход только у владельца по команде /admin7206852053.
+Админка: владелец /owner, администраторы и тестеры /admin.
 """
 from __future__ import annotations
 
 import asyncio
+import os
+from urllib.parse import urlsplit
 import logging
 import math
 import random
@@ -26,8 +28,11 @@ from aiogram.types import CallbackQuery, LabeledPrice, Message, PreCheckoutQuery
 
 import config
 import database as db
+import gift_drops
+import native_economy as economy
 from admin import admin_router
-from api import start_api
+from aiohttp import ClientError
+from api import native_wallet, client_wallet_line, start_api, sync_collectible_usernames, sync_mtproto_verification
 from ui import back_row, btn, cancel_kb, esc, fmt_num, kb, safe_send, show
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
@@ -88,15 +93,32 @@ class GuardMiddleware(BaseMiddleware):
                 _last_click.clear()
         user = await db.get_or_create_user(tg_user.id, tg_user.full_name or "User", tg_user.username)
         data["user"] = user
+        try:
+            wallet = await native_wallet(user)
+        except (ClientError, TimeoutError):
+            wallet = None
+        user.update(wallet or {"risestars": None, "gram_balance": None})
+        try:
+            await sync_collectible_usernames(int(user["tg_id"]))
+            await sync_mtproto_verification(int(user["tg_id"]))
+        except Exception:
+            logging.getLogger("risegram.bot").debug("RiseGram account sync deferred", exc_info=True)
         if isinstance(event, Message) and event.successful_payment:
             # Деньги уже списаны Telegram: товар выдаём всегда, даже при бане или техработах,
             # иначе человек заплатил бы и ничего не получил (и возврата тоже не было бы).
-            return await handler(event, data)
-        is_owner = tg_user.id == config.OWNER_ID
-        if user.get("banned") and not is_owner:
+            result = await handler(event, data)
+            try:
+                await sync_collectible_usernames(int(user["tg_id"]))
+                await sync_mtproto_verification(int(user["tg_id"]), force=True)
+            except Exception:
+                logging.getLogger("risegram.bot").debug("post-payment RiseGram sync deferred", exc_info=True)
+            return result
+        is_admin = tg_user.id == config.OWNER_TELEGRAM_ID or await db.is_admin(int(user["tg_id"]))
+        data["is_admin"] = is_admin
+        if user.get("banned") and not is_admin:
             await _reply_block(event, "❌ Ваш аккаунт заблокирован.")
             return
-        if not is_owner and await db.get_meta("maintenance") == "1":
+        if not is_admin and await db.get_meta("maintenance") == "1":
             await _reply_block(event, "🛠 Технические работы. Загляните позже.")
             return
         if is_cb and not (event.data or "").startswith("adm:"):
@@ -105,7 +127,13 @@ class GuardMiddleware(BaseMiddleware):
                 await state.clear()
         try:
             return await handler(event, data)
+        except economy.WalletError as exc:
+            return await _reply_block(event, str(exc))
         finally:
+            try:
+                await sync_collectible_usernames(int(user["tg_id"]))
+            except Exception:
+                logging.getLogger("risegram.bot").debug("collectible username post-handler sync deferred", exc_info=True)
             if is_cb:
                 try:
                     await event.answer()
@@ -129,8 +157,10 @@ async def need_feature(event, name: str) -> bool:
 
 async def badges(user: dict) -> str:
     parts = []
-    if user.get("verified"):
+    if user.get("verified_risegram"):
         parts.append("☑️ Верификация RiseGram")
+    if user.get("verified_major"):
+        parts.append("💠 Верификация Major")
     if await db.is_scam_target(user.get("username")) or await db.is_scam_target(user.get("active_username")):
         parts.append("⚠️ SCAM")
     return (" · " + " · ".join(parts)) if parts else ""
@@ -141,7 +171,7 @@ async def main_text(user: dict) -> str:
         f"💼 <b>{config.BRAND}</b>\n\n"
         f"📞 <b>Номер:</b> <code>{esc(user['phone'])}</code>\n"
         f"👤 <b>Аккаунт:</b> {esc(user.get('name') or 'User')} · ID <code>{user['rise_id']}</code>{await badges(user)}\n"
-        f"⭐ {config.CURRENCY_NAME}: <b>{fmt_num(user['risestars'])}</b> · 💎 Gram: <b>{fmt_num(user['gram_balance'], 2)}</b>\n\n"
+        f"{await client_wallet_line(user)}\n"
         f"Выберите действие ниже или откройте приложение."
     )
 
@@ -152,11 +182,24 @@ def webapp_button(style: str | None = "primary"):
     return btn("📱 Открыть приложение", "menu:webapp", style=style)
 
 
+def local_miniapp_url() -> str:
+    """Always prefer the public HTTPS domain of this Railway service."""
+    raw = (os.environ.get("RAILWAY_PUBLIC_DOMAIN") or "").strip()
+    domain = raw.split("/", 1)[0]
+    if domain and "/" not in domain and ":" not in domain:
+        return f"https://{domain}/miniapp"
+    if config.WEBAPP_URL.startswith("https://"):
+        origin = urlsplit(config.WEBAPP_URL)
+        if origin.hostname:
+            return f"{origin.scheme}://{origin.netloc}/miniapp"
+    return ""
+
+
 def main_kb():
     return kb(
         [btn("🔒 Код входа", "menu:code", style="primary"), btn("📞 Мой номер", "menu:number")],
-        [btn("💎 Донат", "donat:hub", style="success")],
-        [webapp_button(None)],
+        [btn("💎 Донат", "donat:hub")],
+        [btn("📱 Открыть приложение", web_app=local_miniapp_url(), style="primary")] if local_miniapp_url() else [webapp_button("primary")],
         [btn("🕒 Мои покупки", "menu:purchases"), btn("ℹ️ Как это работает", "menu:help")],
         [btn("⚙️ Настройки", "menu:settings"), btn("✨ Ещё", "menu:more")],
     )
@@ -165,6 +208,9 @@ def main_kb():
 @router.message(CommandStart())
 async def cmd_start(message: Message, state: FSMContext, user: dict):
     await state.clear()
+    if (message.text or "").split(maxsplit=1)[1:] == ["games"]:
+        await games_hub(message, user)
+        return
     await message.answer(await main_text(user), reply_markup=main_kb())
 
 
@@ -295,7 +341,8 @@ async def cb_more(call: CallbackQuery):
             [btn("👤 Профиль", "more:profile"), btn("🗂 Мои NFT и номера", "my:items")],
             [btn("🎮 Игры", "games:hub", style="success"), btn("🏆 Топ", "more:top")],
             [btn("🎯 Задания", "more:tasks"), btn("🛒 Маркет", "market:hub", style="success")],
-            [btn("💸 Перевод", "more:send"), btn("🎁 Бонус", "more:bonus")],
+            [btn("💸 Перевод", "more:send")],
+            [btn("🎁 Бонус", "more:bonus")],
             back_row(),
         ),
     )
@@ -312,8 +359,7 @@ async def cb_profile(call: CallbackQuery, user: dict):
         f"Telegram ID: <code>{user['tg_id']}</code>\n"
         f"{config.BRAND} ID: <code>{user['rise_id']}</code>\n"
         f"Номер: <code>{esc(user['phone'])}</code>\n\n"
-        f"⭐ {config.CURRENCY_NAME}: <b>{fmt_num(user['risestars'])}</b>\n"
-        f"💎 Gram: <b>{fmt_num(user['gram_balance'], 2)}</b>\n\n"
+        f"{await client_wallet_line(user)}\n"
         f"🏷 NFT-юзернеймов: {nft_u} · 📞 номеров: {nft_n}\n"
         f"📅 В экосистеме с {esc((user.get('created_at') or '')[:10])}"
     )
@@ -421,9 +467,12 @@ async def send_rs_invoice(bot: Bot, payer: dict, stars: int, target_id: int) -> 
     if not target or target.get("banned"):
         return "Получатель не найден."
     amount = stars * config.RISESTARS_PER_STAR
+    chat_id = await db.telegram_chat_id(payer["tg_id"])
+    if chat_id is None:
+        return "Сначала откройте личный чат с ботом и привяжите аккаунт."
     await send_stars_invoice(
         bot,
-        payer["tg_id"],
+        chat_id,
         title=f"{fmt_num(amount)} {config.CURRENCY_NAME}",
         description=f"Пополнение {config.CURRENCY_NAME} в {config.BRAND} для {db.shown_username(target)}.",
         payload=f"rs:{stars}:{target_id}",
@@ -953,10 +1002,14 @@ async def validate_order(uid: int, payload: str, total: int) -> str | None:
 @router.pre_checkout_query()
 async def on_pre_checkout(q: PreCheckoutQuery):
     # На техработах оплату не принимаем: pre_checkout не проходит через GuardMiddleware, поэтому проверяем здесь.
-    if q.from_user.id != config.OWNER_ID and await db.get_meta("maintenance") == "1":
+    if q.from_user.id != config.OWNER_TELEGRAM_ID and await db.get_meta("maintenance") == "1":
         await q.answer(ok=False, error_message="Технические работы. Оплатите чуть позже.")
         return
-    err = await validate_order(q.from_user.id, q.invoice_payload, q.total_amount)
+    linked = await db.get_by_telegram(q.from_user.id)
+    if not linked:
+        await q.answer(ok=False, error_message="Сначала запустите бота для привязки аккаунта.")
+        return
+    err = await validate_order(linked["tg_id"], q.invoice_payload, q.total_amount)
     if err:
         await q.answer(ok=False, error_message=err)
     else:
@@ -970,7 +1023,7 @@ async def deliver_order(bot: Bot, uid: int, payload: str, stars: int, charge: st
     if kind == "rs":
         n, target = int(a[0]), int(a[1])
         amount = n * config.RISESTARS_PER_STAR
-        if await db.add_balance(target, "risestars", amount) is None:
+        if await db.add_balance(target, "risestars", amount, key="invoice:"+charge) is None:
             return False, "risestars", "Получатель не найден", ""
         t = await db.get_user(target)
         if target == uid:
@@ -983,7 +1036,7 @@ async def deliver_order(bot: Bot, uid: int, payload: str, stars: int, charge: st
         )
     if kind == "vm":
         if a[0] == "a":
-            await db.set_verified(uid, True)
+            await db.set_verification(uid, "major", True)
             return True, "verify", "Мажор · аккаунт", "✅ Готово! Ваш аккаунт получил статус <b>Мажор</b>."
         await db.add_verified_entity(uid, "channel", a[1])
         return True, "verify", f"Мажор · @{a[1]}", f"✅ Готово! @{esc(a[1])} получил(а) статус <b>Мажор</b>."
@@ -1017,19 +1070,43 @@ async def deliver_order(bot: Bot, uid: int, payload: str, stars: int, charge: st
         if not valid_username(name) or await db.username_taken(name) or not await db.add_nft(uid, "username", name, stars):
             await db.release("username", name)
             return False, "nft_username", "Юзернейм уже занят", ""
-        await db.set_active_username(uid, name)
+        # Purchasing another NFT username must not deactivate previously enabled aliases.
+        await db.execute(
+            "UPDATE user_nft_inventory SET is_active=1 WHERE tg_id=? AND item_type='username' AND value=?",
+            (uid, name),
+        )
+        await db.execute(
+            "UPDATE users SET active_username=COALESCE(active_username, ?) WHERE tg_id=?",
+            (name, uid),
+        )
         await db.release("username", name)
         return True, "nft_username", f"NFT @{name}", f"✅ Юзернейм <b>@{esc(name)}</b> теперь ваш и выбран активным."
     return False, "unknown", "Неизвестный товар", ""
 
 
+async def complete_risestars_order(bot, order):
+    ok, kind, desc, message = await deliver_order(bot, order["tg_id"], order["payload"], order["price_xtr"], order["charge_id"])
+    if ok:
+        updated = await db.execute("UPDATE purchases SET item_type=?,item_desc=?,status='done' WHERE id=? AND status='processing'",
+                                   (kind, desc, order["id"]))
+        if updated:
+            await safe_send(bot, order["tg_id"], message)
+
+
 @router.message(F.successful_payment)
 async def on_paid(message: Message, user: dict):
     sp = message.successful_payment
-    uid, stars, charge, payload = message.from_user.id, sp.total_amount, sp.telegram_payment_charge_id, sp.invoice_payload
+    uid, stars, charge, payload = user["tg_id"], sp.total_amount, sp.telegram_payment_charge_id, sp.invoice_payload
     try:  # запись ДО выдачи: повторная доставка апдейта не выдаст товар второй раз
         pid = await db.add_purchase(uid, "pending", "В обработке", stars, charge, payload, "processing")
     except sqlite3.IntegrityError:
+        return
+    if payload.startswith("rs:"):
+        try:
+            await complete_risestars_order(message.bot, await db.get_purchase(pid))
+        except Exception:
+            log.exception("RiseStars credit deferred for order %s", pid)
+            await message.answer("Платёж получен. Зачисление RiseStars обрабатывается.")
         return
     try:
         ok, itype, desc, text = await deliver_order(message.bot, uid, payload, stars, charge)
@@ -1047,7 +1124,10 @@ async def on_paid(message: Message, user: dict):
             )
         return
     try:
-        await message.bot.refund_star_payment(user_id=uid, telegram_payment_charge_id=charge)
+        telegram_id = await db.telegram_chat_id(uid)
+        if telegram_id is None:
+            raise RuntimeError("account has no Telegram payment link")
+        await message.bot.refund_star_payment(user_id=telegram_id, telegram_payment_charge_id=charge)
         status, note = "refunded", "Не удалось выдать покупку, поэтому звёзды возвращены на ваш счёт Telegram."
     except Exception:
         log.exception("refund failed uid=%s charge=%s", uid, charge)
@@ -1087,16 +1167,19 @@ async def items_screen(event, user: dict):
         text += "Пока пусто. Купить можно в разделе «Донат»."
     if names:
         text += "<b>Юзернеймы</b>\n"
+        active_count = sum(1 for n in names if n.get("is_active"))
+        text += f"Активно: {active_count} из {len(names)} — ограничений по количеству нет\n"
         for n in names[:ITEMS_SHOWN]:
-            on = db.norm_username(user.get("active_username")) == n["value"]
+            on = bool(n.get("is_active"))
             lock = " 🛒 на маркете" if n["id"] in listed else ""
             text += f"{'🟢' if on else '⚪'} @{esc(n['value'])}{lock}\n"
-            if not on and n["id"] not in listed:
-                rows.append([btn(f"Выбрать @{n['value']}", f"my:un:{n['id']}")])
+            if n["id"] not in listed:
+                action = "Отключить" if on else "Использовать"
+                rows.append([btn(f"{action} @{n['value']}", f"my:un:{n['id']}")])
         if len(names) > ITEMS_SHOWN:
             text += f"…и ещё {len(names) - ITEMS_SHOWN}\n"
-        if user.get("active_username"):
-            rows.append([btn("Убрать активный юзернейм", "my:un:0")])
+        if active_count:
+            rows.append([btn("Отключить все NFT-юзернеймы", "my:un:0")])
         text += "\n"
     if nums:
         text += "<b>Номера</b>\n"
@@ -1121,18 +1204,18 @@ async def cb_items(call: CallbackQuery, user: dict):
 async def cb_my_username(call: CallbackQuery, user: dict):
     item_id = int(call.data.split(":")[2])
     if item_id == 0:
+        await db.execute("UPDATE user_nft_inventory SET is_active=0 WHERE tg_id=? AND item_type='username'", (user["tg_id"],))
         await db.set_active_username(user["tg_id"], None)
-        user["active_username"] = None
     else:
         it = await db.get_nft(item_id)
         if not it or it["tg_id"] != user["tg_id"] or it["item_type"] != "username":
             await call.answer("Не найдено.", show_alert=True)
             return
-        if await db.listing_for_item(item_id):
-            await call.answer("Юзернейм выставлен на маркете. Сначала снимите лот.", show_alert=True)
+        ok, _ = await db.set_nft_username_active(user["tg_id"], item_id, not bool(it.get("is_active")))
+        if not ok:
+            await call.answer("NFT не найден или выставлен на маркете.", show_alert=True)
             return
-        await db.set_active_username(user["tg_id"], it["value"])
-        user["active_username"] = it["value"]
+    user = await db.get_user(user["tg_id"])
     await items_screen(call, user)
 
 
@@ -1374,7 +1457,7 @@ async def msg_transfer_amount(message: Message, state: FSMContext, user: dict):
     data = await state.get_data()
     to = data.get("to")
     await state.clear()
-    ok, err = await db.transfer_risestars(user["tg_id"], to, amount, config.TRANSFER_FEE_PERCENT)
+    ok, err = await db.transfer_risestars(user["tg_id"], to, amount, config.TRANSFER_FEE_PERCENT, key=f"transfer:{message.chat.id}:{message.message_id}")
     if not ok:
         await message.answer("❌ " + err)
         return
@@ -1467,8 +1550,7 @@ async def cb_game_pick(call: CallbackQuery, user: dict):
         return
     await show(
         call,
-        f"{GAME_TITLES[game]}\n\nВыберите валюту ставки:\n"
-        f"💎 Gram: <b>{fmt_num(user['gram_balance'])}</b>\n⭐ RiseStars: <b>{fmt_num(user['risestars'])}</b>",
+        f"{GAME_TITLES[game]}\n\nВыберите валюту ставки:\n{await client_wallet_line(user)}",
         kb(
             [btn("💎 Gram", f"game:bet:{game}:gram", style="primary"), btn("⭐ RiseStars", f"game:bet:{game}:stars", style="success")],
             back_row("games:hub"),
@@ -1510,7 +1592,11 @@ async def msg_game_bet(message: Message, state: FSMContext, user: dict):
         await message.answer("Сессия устарела. Откройте /games заново.")
         return
     try:
-        bet = round(float(message.text.replace(" ", "").replace(",", ".")), 2)
+        bet = float(message.text.replace(" ", "").replace(",", "."))
+        if cur == "stars" and not bet.is_integer():
+            await message.answer("Ставка в звёздах должна быть целой.")
+            return
+        bet = round(bet, 2)
     except ValueError:
         await message.answer("Введите число.")
         return
@@ -1554,7 +1640,7 @@ def crash_kb(gid: int, win: float, cur: str):
 
 async def start_crash(message: Message, uid: int, bet: float, cur: str):
     cp = crash_point()
-    gid = await db.start_game(uid, "crash", bet, cp, cur)
+    gid = await economy.start(await db.get_user(uid), "Crash Rocket", cur, bet, f"{message.chat.id}:{message.message_id}")
     if gid is None:
         await message.answer(f"❌ Недостаточно {cur_name(cur)}.")
         return
@@ -1571,12 +1657,12 @@ async def finish_crash(uid: int, won: bool, mult: float):
         return
     g["done"] = True
     cur = g["cur"]
-    payout = round(g["bet"] * mult, 2) if won else 0.0
-    ok = await db.settle_game(g["gid"], won, payout)
+    payout = round(g["bet"] * mult, 0 if cur == "stars" else 2) if won else 0.0
+    ok = await economy.record_result(g["gid"], won, payout)
     crash_live.pop(uid, None)
     if not ok:
         return
-    user = await db.get_user(uid)
+    user = await native_wallet(await db.get_user(uid))
     bal = money(cur, user[cur_col(cur)]) if user else "—"
     if won:
         text = f"✅ Забрали на ×{mult:.2f}! Выигрыш <b>{money(cur, payout)}</b>\nБаланс: {bal}"
@@ -1604,7 +1690,7 @@ async def run_crash(bot: Bot, uid: int):
             try:
                 await g["msg"].edit_text(
                     f"🚀 Ракета летит… <b>×{m:.2f}</b>\nСтавка: {money(g['cur'], g['bet'])}",
-                    reply_markup=crash_kb(g["gid"], g["bet"] * m, g["cur"]),
+                    reply_markup=crash_kb(g["gid"], round(g["bet"] * m, 0 if g["cur"] == "stars" else 2), g["cur"]),
                 )
             except TelegramRetryAfter as e:
                 await asyncio.sleep(e.retry_after)
@@ -1616,15 +1702,18 @@ async def run_crash(bot: Bot, uid: int):
         log.exception("crash loop failed uid=%s", uid)
         g = crash_live.pop(uid, None)
         if g and not g["done"]:
-            await db.execute("UPDATE games SET status='refunded', finished_at=? WHERE id=? AND status='active'", (db.now(), g["gid"]))
-            await db.add_balance(uid, cur_col(g["cur"]), g["bet"])
+            await economy.record_result(g["gid"], False, 0, status="refunded")
     finally:
         crash_tasks.pop(uid, None)
 
 
 @router.callback_query(F.data.startswith("crash:cash:"))
 async def cb_crash_cash(call: CallbackQuery):
-    uid = call.from_user.id
+    linked = await db.get_by_telegram(call.from_user.id)
+    if not linked:
+        await call.answer("Аккаунт не найден.", show_alert=True)
+        return
+    uid = linked["tg_id"]
     g = crash_live.get(uid)
     if not g or g["done"] or g["gid"] != int(call.data.split(":")[2]):
         await call.answer("Игра уже закончилась.")
@@ -1657,7 +1746,7 @@ def hl_next_mult(mult: float, p: float) -> float:
 
 
 def hl_cash_value(g: dict) -> float:
-    return round(g["bet"] * g["mult"], 2)
+    return round(g["bet"] * g["mult"], 0 if g["cur"] == "stars" else 2)
 
 
 def hl_text(g: dict) -> str:
@@ -1682,7 +1771,7 @@ def hl_kb(g: dict):
 
 
 async def start_hl(message: Message, uid: int, bet: float, cur: str):
-    gid = await db.start_game(uid, "highlow", bet, 0.0, cur)
+    gid = await economy.start(await db.get_user(uid), "Хай-Лоу", cur, bet, f"{message.chat.id}:{message.message_id}")
     if gid is None:
         await message.answer(f"❌ Недостаточно {cur_name(cur)}.")
         return
@@ -1703,14 +1792,14 @@ async def finish_hl(uid: int, won: bool, note: str = ""):
     g["done"] = True
     cur = g["cur"]
     if won and g["steps"] == 0:
-        ok = await db.settle_game(g["gid"], True, g["bet"], status="refunded")
+        ok = await economy.record_result(g["gid"], True, g["bet"], status="refunded")
         text = f"↩️ Ставка возвращена: {money(cur, g['bet'])}."
     elif won:
         payout = hl_cash_value(g)
-        ok = await db.settle_game(g["gid"], True, payout)
+        ok = await economy.record_result(g["gid"], True, payout)
         text = f"✅ Забрали на ×{g['mult']:.2f}! Выигрыш <b>{money(cur, payout)}</b>" + (f" ({esc(note)})" if note else "")
     else:
-        ok = await db.settle_game(g["gid"], False, 0.0)
+        ok = await economy.record_result(g["gid"], False, 0.0)
         text = f"💥 Выпала {card_str(g['rank'], g['suit'])}: не угадали. Ставка {money(cur, g['bet'])} потеряна."
     hl_live.pop(uid, None)
     t = hl_tasks.pop(uid, None)
@@ -1718,7 +1807,7 @@ async def finish_hl(uid: int, won: bool, note: str = ""):
         t.cancel()
     if not ok:
         return
-    user = await db.get_user(uid)
+    user = await native_wallet(await db.get_user(uid))
     text += f"\nБаланс: {money(cur, user[cur_col(cur)]) if user else '—'}"
     markup = kb([btn("🃏 Ещё раз", "game:pick:hl", style="success")], [btn("🎮 Игры", "games:hub")])
     try:
@@ -1746,7 +1835,11 @@ async def hl_watchdog(uid: int, gid: int):
 
 @router.callback_query(F.data.startswith("hl:go:"))
 async def cb_hl_go(call: CallbackQuery):
-    uid = call.from_user.id
+    linked = await db.get_by_telegram(call.from_user.id)
+    if not linked:
+        await call.answer("Аккаунт не найден.", show_alert=True)
+        return
+    uid = linked["tg_id"]
     parts = call.data.split(":")
     g = hl_live.get(uid)
     if not g or g["done"] or g["gid"] != int(parts[2]) or parts[3] not in ("hi", "lo"):
@@ -1780,7 +1873,11 @@ async def cb_hl_go(call: CallbackQuery):
 
 @router.callback_query(F.data.startswith("hl:cash:"))
 async def cb_hl_cash(call: CallbackQuery):
-    uid = call.from_user.id
+    linked = await db.get_by_telegram(call.from_user.id)
+    if not linked:
+        await call.answer("Аккаунт не найден.", show_alert=True)
+        return
+    uid = linked["tg_id"]
     g = hl_live.get(uid)
     if not g or g["done"] or g["gid"] != int(call.data.split(":")[2]):
         await call.answer("Игра уже закончилась.")
@@ -1908,7 +2005,7 @@ async def cb_market_buy(call: CallbackQuery, user: dict):
     if L["seller_id"] == user["tg_id"]:
         await call.answer("Это ваш лот.", show_alert=True)
         return
-    if user["risestars"] < L["price"]:
+    if (user["risestars"] or 0) < L["price"]:
         await call.answer(f"Не хватает RiseStars: нужно {fmt_num(L['price'])}.", show_alert=True)
         return
     await show(
@@ -2055,10 +2152,38 @@ async def msg_fallback(message: Message, user: dict):
 
 async def on_startup(bot: Bot):
     await db.init_db()
-    await bot.delete_webhook(drop_pending_updates=True)
+    await db.ensure_owner()
+    await bot.delete_webhook(drop_pending_updates=False)
     me = await bot.get_me()
     log.info("%s запущен как @%s", config.BRAND, me.username)
     await db.log_admin_action(0, f"Бот запущен (@{me.username})")
+
+
+async def recover_wallet_jobs(bot):
+    while True:
+        try:
+            for result in await db.fetchall("SELECT game_id FROM native_game_results"):
+                gid = result["game_id"]
+                await economy.deliver_result(gid)
+                for games in (crash_live, hl_live):
+                    for uid, game in list(games.items()):
+                        if game["gid"] == gid and game["done"]:
+                            games.pop(uid, None)
+            live = [g["gid"] for g in (*crash_live.values(), *hl_live.values()) if not g.get("done")]
+            await economy.maintain_games(live)
+            for job in await db.fetchall("SELECT key FROM native_wallet_jobs WHERE status='pending' ORDER BY rowid"):
+                try:
+                    await economy.deliver(job["key"])
+                except Exception:
+                    log.exception("Wallet operation deferred")
+            for order in await db.fetchall("SELECT * FROM purchases WHERE status='processing' AND payload LIKE 'rs:%'"):
+                try:
+                    await complete_risestars_order(bot, order)
+                except Exception:
+                    log.exception("RiseStars credit deferred for order %s", order["id"])
+        except Exception:
+            log.exception("Native wallet recovery deferred")
+        await asyncio.sleep(20)
 
 
 async def main():
@@ -2068,14 +2193,34 @@ async def main():
     dp = Dispatcher(storage=MemoryStorage())
     dp.message.outer_middleware(GuardMiddleware())
     dp.callback_query.outer_middleware(GuardMiddleware())
-    dp.include_router(admin_router)  # админка первой: /admin7206852053 не должна попадать в обычный fallback
+    dp.include_router(admin_router)  # панель /admin и владелец /owner обрабатываются раньше общего меню
     dp.include_router(router)
     dp.startup.register(on_startup)
     await db.init_db()
+    await asyncio.to_thread(gift_drops.setup)
+    await economy.setup()
     runner = await start_api(bot)
+    from issuer_marks import bootstrap
+    from native_drops import worker
+    recovery = asyncio.create_task(recover_wallet_jobs(bot))
+    from owner_replacement_once import run as replace_owner_gifts
+    replacement = asyncio.create_task(replace_owner_gifts())
+    drop_publisher = asyncio.create_task(worker())
+    issuer_setup = asyncio.create_task(bootstrap())
+    from gift_catalog import populate_seasonal_catalog
+    seasonal = asyncio.create_task(populate_seasonal_catalog())
+    from premium_emoji import install_packs
+    emoji_import = asyncio.create_task(install_packs())
     try:
         await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
     finally:
+        replacement.cancel()
+        recovery.cancel()
+        seasonal.cancel()
+        emoji_import.cancel()
+        issuer_setup.cancel()
+        drop_publisher.cancel()
+        await asyncio.gather(seasonal, recovery, gift_sync, issuer_setup, drop_publisher, return_exceptions=True)
         if runner:
             await runner.cleanup()
         for t in list(crash_tasks.values()) + list(hl_tasks.values()):

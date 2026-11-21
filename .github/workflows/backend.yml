@@ -1,0 +1,34 @@
+name: Validate RiseGram backend
+on:
+  push:
+    branches: [main, feature/market-economy-sync]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Compile Python modules
+        run: python -m compileall -q .
+      - name: Run identity tests
+        run: python -m unittest discover -s tests -v
+      - name: Check required independent identity schema
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          db = Path("database.py").read_text()
+          cfg = Path("config.py").read_text()
+          assert "user_id TEXT UNIQUE" in db
+          assert "CREATE TABLE IF NOT EXISTS telegram_links" in db
+          assert "OWNER_TELEGRAM_ID" in cfg
+          assert "async def get_by_telegram" in db
+          assert "async def telegram_chat_id" in db
+          print("RiseGram identity schema checks passed")
+          PY

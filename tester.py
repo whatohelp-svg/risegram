@@ -23,6 +23,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, Message
 
+from api import client_wallet_line
 import config
 import database as db
 from ui import btn, esc, fmt_num, kb, safe_send, show
@@ -43,7 +44,8 @@ class TesterAccess(Filter):
         u = event.from_user
         if u is None:
             return False
-        return u.id == config.OWNER_ID or await is_tester(u.id)
+        linked = await db.get_by_telegram(u.id)
+        return bool(linked and (linked["tg_id"] == config.OWNER_ID or await is_tester(linked["tg_id"])))
 
 
 class TesterFlow(StatesGroup):
@@ -78,7 +80,7 @@ async def screen_home(event, user: dict):
         f"🧪 <b>Панель тестера {config.BRAND}</b>\n\n"
         f"👤 {esc(db.shown_username(u))} · ID <code>{u['tg_id']}</code> · {config.BRAND} ID <code>{u['rise_id']}</code>\n"
         f"📞 Номер: <code>{esc(u['phone'])}</code>\n"
-        f"⭐ {config.CURRENCY_NAME}: <b>{fmt_num(u['risestars'])}</b> · 💎 Gram: <b>{fmt_num(u['gram_balance'], 2)}</b>\n"
+        f"{await client_wallet_line(u)}\n"
         f"🛠 Техработы: <b>{'ВКЛ' if maint else 'выкл'}</b>\n\n"
         "Здесь можно проверить вход, посмотреть состояние бота и отправить отчёт о баге владельцу."
     )

@@ -1,0 +1,69 @@
+--- a/internal/domain/media.go
++++ b/internal/domain/media.go
+@@ -978,6 +978,13 @@
+ 	MaxStickerSetKeywordLen   = 32
+ )
+ 
++func StickerSetItemLimit(kind StickerSetKind) int {
++	if kind == StickerSetKindEmoji {
++		return 200
++	}
++	return MaxStickerSetItems
++}
++
+ type StickerSetItemInput struct {
+ 	DocumentID         int64
+ 	DocumentAccessHash int64
+--- a/internal/app/files/sticker_admin.go
++++ b/internal/app/files/sticker_admin.go
+@@ -63,7 +63,7 @@
+ 	if !found || set.Deleted || set.Kind == domain.StickerSetKindSystem {
+ 		return domain.ErrStickerSetInvalid
+ 	}
+-	if len(set.DocumentIDs) >= domain.MaxStickerSetItems {
++	if len(set.DocumentIDs) >= domain.StickerSetItemLimit(set.Kind) {
+ 		return domain.ErrStickerSetTooMuch
+ 	}
+ 	return nil
+@@ -147,7 +147,7 @@
+ 	if !found || set.ID == 0 || set.Deleted {
+ 		return domain.StickerSet{}, nil, domain.ErrStickerSetInvalid
+ 	}
+-	if len(set.DocumentIDs) >= domain.MaxStickerSetItems {
++	if len(set.DocumentIDs) >= domain.StickerSetItemLimit(set.Kind) {
+ 		return domain.StickerSet{}, nil, domain.ErrStickerSetTooMuch
+ 	}
+ 	doc, err := s.loadStickerMaterialDocument(ctx, item.DocumentID, item.DocumentAccessHash)
+--- a/internal/app/files/sticker_management.go
++++ b/internal/app/files/sticker_management.go
+@@ -12,7 +12,7 @@
+ 	if err != nil {
+ 		return domain.StickerSet{}, nil, err
+ 	}
+-	if len(set.DocumentIDs) >= domain.MaxStickerSetItems {
++	if len(set.DocumentIDs) >= domain.StickerSetItemLimit(set.Kind) {
+ 		return domain.StickerSet{}, nil, domain.ErrStickerSetTooMuch
+ 	}
+ 	doc, err := s.loadStickerMaterialDocument(ctx, item.DocumentID, item.DocumentAccessHash)
+--- a/internal/app/files/sticker_creator.go
++++ b/internal/app/files/sticker_creator.go
+@@ -85,7 +85,7 @@
+ 	if len(req.Items) == 0 {
+ 		return domain.StickerSet{}, nil, domain.ErrStickerSetEmpty
+ 	}
+-	if len(req.Items) > domain.MaxStickerSetItems {
++	if len(req.Items) > domain.StickerSetItemLimit(kind) {
+ 		return domain.StickerSet{}, nil, domain.ErrStickerSetTooMuch
+ 	}
+ 	shortName := normalizeStickerSetShortName(req.ShortName)
+--- a/internal/app/files/sticker_management_test.go
++++ b/internal/app/files/sticker_management_test.go
+@@ -140,7 +140,7 @@
+ 
+ func TestValidateAdminStickerSetUploadPreconditions(t *testing.T) {
+ 	ctx := context.Background()
+-	fullIDs := make([]int64, domain.MaxStickerSetItems)
++	fullIDs := make([]int64, domain.StickerSetItemLimit(domain.StickerSetKindEmoji))
+ 	for i := range fullIDs {
+ 		fullIDs[i] = int64(i + 1)
+ 	}

@@ -1,0 +1,538 @@
+{
+  "intelligencecup": [
+    "tgs/by_name/intelligence_cup.tgs",
+    "models/intelligence_cup/silver.tgs"
+  ],
+  "algorithmcup": [
+    "tgs/by_name/algorithm_cup.tgs",
+    "models/algorithm_cup/gold.tgs"
+  ],
+  "durovsglasses": [
+    "tgs/by_name/durovs_glasses.tgs",
+    "models/durovs_glasses/cat_core.tgs"
+  ],
+  "heartlocket": [
+    "tgs/by_name/heart_locket.tgs",
+    "models/heart_locket/acorn_hunter.tgs"
+  ],
+  "heroichelmet": [
+    "tgs/by_name/heroic_helmet.tgs",
+    "models/heroic_helmet/aegean_sea.tgs"
+  ],
+  "mightyarm": [
+    "tgs/by_name/mighty_arm.tgs",
+    "models/mighty_arm/best_muscles.tgs"
+  ],
+  "nailbracelet": [
+    "tgs/by_name/nail_bracelet.tgs",
+    "models/nail_bracelet/aqua_ring.tgs"
+  ],
+  "preciouspeach": [
+    "tgs/by_name/precious_peach.tgs",
+    "models/precious_peach/airy_bright.tgs"
+  ],
+  "perfumebottle": [
+    "tgs/by_name/perfume_bottle.tgs",
+    "models/perfume_bottle/aurora_joy.tgs"
+  ],
+  "minioscar": [
+    "tgs/by_name/mini_oscar.tgs",
+    "models/mini_oscar/action_film.tgs"
+  ],
+  "gemsignet": [
+    "tgs/by_name/gem_signet.tgs",
+    "models/gem_signet/amethyst.tgs"
+  ],
+  "blingbinky": [
+    "tgs/by_name/bling_binky.tgs",
+    "models/bling_binky/abyss_binky.tgs"
+  ],
+  "plushpepe": [
+    "tgs/by_name/plush_pepe.tgs",
+    "models/plush_pepe/amalgam.tgs"
+  ],
+  "iongem": [
+    "tgs/by_name/ion_gem.tgs",
+    "models/ion_gem/amethyst.tgs"
+  ],
+  "genielamp": [
+    "tgs/by_name/genie_lamp.tgs",
+    "models/genie_lamp/aladdin.tgs"
+  ],
+  "ionicdryer": [
+    "tgs/by_name/ionic_dryer.tgs",
+    "models/ionic_dryer/ace_machine.tgs"
+  ],
+  "astralshard": [
+    "tgs/by_name/astral_shard.tgs",
+    "models/astral_shard/amethyst.tgs"
+  ],
+  "bondedring": [
+    "tgs/by_name/bonded_ring.tgs",
+    "models/bonded_ring/anaconda.tgs"
+  ],
+  "artisanbrick": [
+    "tgs/by_name/artisan_brick.tgs",
+    "models/artisan_brick/art_nouveau.tgs"
+  ],
+  "durovscap": [
+    "tgs/by_name/durovs_cap.tgs",
+    "models/durovs_cap/apple_slice.tgs"
+  ],
+  "magicpotion": [
+    "tgs/by_name/magic_potion.tgs",
+    "models/magic_potion/agent_orange.tgs"
+  ],
+  "lovecandle": [
+    "tgs/by_name/love_candle.tgs",
+    "models/love_candle/afterglow.tgs"
+  ],
+  "surgeboard": [
+    "tgs/by_name/surge_board.tgs",
+    "models/surge_board/akoya_pearl.tgs"
+  ],
+  "khabibspapakha": [
+    "tgs/by_name/khabibs_papakha.tgs",
+    "models/khabibs_papakha/29-0_record.tgs"
+  ],
+  "rarebird": [
+    "tgs/by_name/rare_bird.tgs",
+    "models/rare_bird/amber_toucan.tgs"
+  ],
+  "sharptongue": [
+    "tgs/by_name/sharp_tongue.tgs",
+    "models/sharp_tongue/acid_witch.tgs"
+  ],
+  "valentinebox": [
+    "tgs/by_name/valentine_box.tgs",
+    "models/valentine_box/art_deco.tgs"
+  ],
+  "nekohelmet": [
+    "tgs/by_name/neko_helmet.tgs",
+    "models/neko_helmet/acid_punch.tgs"
+  ],
+  "joyfulbundle": [
+    "tgs/by_name/joyful_bundle.tgs",
+    "models/joyful_bundle/antarctica.tgs"
+  ],
+  "electricskull": [
+    "tgs/by_name/electric_skull.tgs",
+    "models/electric_skull/bad_fortune.tgs"
+  ],
+  "sleighbell": [
+    "tgs/by_name/sleigh_bell.tgs",
+    "models/sleigh_bell/arctic_igloo.tgs"
+  ],
+  "snowmittens": [
+    "tgs/by_name/snow_mittens.tgs",
+    "models/snow_mittens/alpine_fern.tgs"
+  ],
+  "westsidesign": [
+    "tgs/by_name/westside_sign.tgs",
+    "models/westside_sign/all_in.tgs"
+  ],
+  "recordplayer": [
+    "tgs/by_name/record_player.tgs",
+    "models/record_player/acid_jazz.tgs"
+  ],
+  "eternalrose": [
+    "tgs/by_name/eternal_rose.tgs",
+    "models/eternal_rose/3d_glow.tgs"
+  ],
+  "cupidcharm": [
+    "tgs/by_name/cupid_charm.tgs",
+    "models/cupid_charm/antique.tgs"
+  ],
+  "prettyposy": [
+    "tgs/by_name/pretty_posy.tgs",
+    "models/pretty_posy/art_therapy.tgs"
+  ],
+  "skystilettos": [
+    "tgs/by_name/sky_stilettos.tgs",
+    "models/sky_stilettos/april.tgs"
+  ],
+  "lootbag": [
+    "tgs/by_name/loot_bag.tgs",
+    "models/loot_bag/academic.tgs"
+  ],
+  "holidaydrink": [
+    "tgs/by_name/holiday_drink.tgs",
+    "models/holiday_drink/apple_mousse.tgs"
+  ],
+  "snowglobe": [
+    "tgs/by_name/snow_globe.tgs",
+    "models/snow_globe/amethyst.tgs"
+  ],
+  "madpumpkin": [
+    "tgs/by_name/mad_pumpkin.tgs",
+    "models/mad_pumpkin/bee_movie.tgs"
+  ],
+  "flyingbroom": [
+    "tgs/by_name/flying_broom.tgs",
+    "models/flying_broom/berry_blaster.tgs"
+  ],
+  "lowrider": [
+    "tgs/by_name/low_rider.tgs",
+    "models/low_rider/alpine_gold.tgs"
+  ],
+  "lovepotion": [
+    "tgs/by_name/love_potion.tgs",
+    "models/love_potion/aerogel.tgs"
+  ],
+  "lushbouquet": [
+    "tgs/by_name/lush_bouquet.tgs",
+    "models/lush_bouquet/artichoke.tgs"
+  ],
+  "bunnymuffin": [
+    "tgs/by_name/bunny_muffin.tgs",
+    "models/bunny_muffin/airy_souffle.tgs"
+  ],
+  "ufcstrike": [
+    "tgs/by_name/ufc_strike.tgs",
+    "models/ufc_strike/a._pantoja.tgs"
+  ],
+  "skullflower": [
+    "tgs/by_name/skull_flower.tgs",
+    "models/skull_flower/azalea.tgs"
+  ],
+  "hangingstar": [
+    "tgs/by_name/hanging_star.tgs",
+    "models/hanging_star/advice_dog.tgs"
+  ],
+  "signetring": [
+    "tgs/by_name/signet_ring.tgs",
+    "models/signet_ring/black_noir.tgs"
+  ],
+  "kissedfrog": [
+    "tgs/by_name/kissed_frog.tgs",
+    "models/kissed_frog/banana_pox.tgs"
+  ],
+  "moussecake": [
+    "tgs/by_name/mousse_cake.tgs",
+    "models/mousse_cake/angel_cake.tgs"
+  ],
+  "crystalball": [
+    "tgs/by_name/crystal_ball.tgs",
+    "models/crystal_ball/amanita.tgs"
+  ],
+  "diamondring": [
+    "tgs/by_name/diamond_ring.tgs",
+    "models/diamond_ring/acid_green.tgs"
+  ],
+  "bowtie": [
+    "tgs/by_name/bow_tie.tgs",
+    "models/bow_tie/baby_yoda.tgs"
+  ],
+  "vintagecigar": [
+    "tgs/by_name/vintage_cigar.tgs",
+    "models/vintage_cigar/aquaviolet.tgs"
+  ],
+  "jinglebells": [
+    "tgs/by_name/jingle_bells.tgs",
+    "models/jingle_bells/antique.tgs"
+  ],
+  "berrybox": [
+    "tgs/by_name/berry_box.tgs",
+    "models/berry_box/alpha.tgs"
+  ],
+  "tophat": [
+    "tgs/by_name/top_hat.tgs",
+    "models/top_hat/abracadabra.tgs"
+  ],
+  "hypnolollipop": [
+    "tgs/by_name/hypno_lollipop.tgs",
+    "models/hypno_lollipop/amphibian.tgs"
+  ],
+  "starnotepad": [
+    "tgs/by_name/star_notepad.tgs",
+    "models/star_notepad/alien_script.tgs"
+  ],
+  "timelessbook": [
+    "tgs/by_name/timeless_book.tgs",
+    "models/timeless_book/academic.tgs"
+  ],
+  "trappedheart": [
+    "tgs/by_name/trapped_heart.tgs",
+    "models/trapped_heart/abyss_heart.tgs"
+  ],
+  "moneypot": [
+    "tgs/by_name/money_pot.tgs",
+    "models/money_pot/ammunition.tgs"
+  ],
+  "restlessjar": [
+    "tgs/by_name/restless_jar.tgs",
+    "models/restless_jar/aquarium.tgs"
+  ],
+  "winterwreath": [
+    "tgs/by_name/winter_wreath.tgs",
+    "models/winter_wreath/aquamarine.tgs"
+  ],
+  "snakebox": [
+    "tgs/by_name/snake_box.tgs",
+    "models/snake_box/aquarium.tgs"
+  ],
+  "swisswatch": [
+    "tgs/by_name/swiss_watch.tgs",
+    "models/swiss_watch/amazon.tgs"
+  ],
+  "voodoodoll": [
+    "tgs/by_name/voodoo_doll.tgs",
+    "models/voodoo_doll/aqua_gem.tgs"
+  ],
+  "tamagadget": [
+    "tgs/by_name/tama_gadget.tgs",
+    "models/tama_gadget/alien_attack.tgs"
+  ],
+  "happybrownie": [
+    "tgs/by_name/happy_brownie.tgs",
+    "models/happy_brownie/alien.tgs"
+  ],
+  "petsnake": [
+    "tgs/by_name/pet_snake.tgs",
+    "models/pet_snake/albino.tgs"
+  ],
+  "faithamulet": [
+    "tgs/by_name/faith_amulet.tgs",
+    "models/faith_amulet/aurora.tgs"
+  ],
+  "spicedwine": [
+    "tgs/by_name/spiced_wine.tgs",
+    "models/spiced_wine/absinthe.tgs"
+  ],
+  "eternalcandle": [
+    "tgs/by_name/eternal_candle.tgs",
+    "models/eternal_candle/baphomet.tgs"
+  ],
+  "freshsocks": [
+    "tgs/by_name/fresh_socks.tgs",
+    "models/fresh_socks/adventure.tgs"
+  ],
+  "santahat": [
+    "tgs/by_name/santa_hat.tgs",
+    "models/santa_hat/80s_tv.tgs"
+  ],
+  "bigyear": [
+    "tgs/by_name/big_year.tgs",
+    "models/big_year/2048.tgs"
+  ],
+  "moonpendant": [
+    "tgs/by_name/moon_pendant.tgs",
+    "models/moon_pendant/amethyst.tgs"
+  ],
+  "jesterhat": [
+    "tgs/by_name/jester_hat.tgs",
+    "models/jester_hat/aquarium.tgs"
+  ],
+  "springbasket": [
+    "tgs/by_name/spring_basket.tgs",
+    "models/spring_basket/baby_dragon.tgs"
+  ],
+  "cookieheart": [
+    "tgs/by_name/cookie_heart.tgs",
+    "models/cookie_heart/affection.tgs"
+  ],
+  "jellybunny": [
+    "tgs/by_name/jelly_bunny.tgs",
+    "models/jelly_bunny/artificial.tgs"
+  ],
+  "scaredcat": [
+    "tgs/by_name/scared_cat.tgs",
+    "models/scared_cat/azuki_siam.tgs"
+  ],
+  "sakuraflower": [
+    "tgs/by_name/sakura_flower.tgs",
+    "models/sakura_flower/aetheris.tgs"
+  ],
+  "hexpot": [
+    "tgs/by_name/hex_pot.tgs",
+    "models/hex_pot/amethyst.tgs"
+  ],
+  "inputkey": [
+    "tgs/by_name/input_key.tgs",
+    "models/input_key/angel.tgs"
+  ],
+  "jollychimp": [
+    "tgs/by_name/jolly_chimp.tgs",
+    "models/jolly_chimp/abubu.tgs"
+  ],
+  "whipcupcake": [
+    "tgs/by_name/whip_cupcake.tgs",
+    "models/whip_cupcake/alien_slime.tgs"
+  ],
+  "victorymedal": [
+    "tgs/by_name/victory_medal.tgs",
+    "models/victory_medal/aegis.tgs"
+  ],
+  "moodpack": [
+    "tgs/by_name/mood_pack.tgs",
+    "models/mood_pack/angel_wings.tgs"
+  ],
+  "jackinthebox": [
+    "tgs/by_name/jackinthebox.tgs",
+    "models/jackinthebox/aliens.tgs"
+  ],
+  "xmasstocking": [
+    "tgs/by_name/xmas_stocking.tgs",
+    "models/xmas_stocking/abandoned.tgs"
+  ],
+  "poolfloat": [
+    "tgs/by_name/pool_float.tgs",
+    "models/pool_float/air_bunny.tgs"
+  ],
+  "stellarrocket": [
+    "tgs/by_name/stellar_rocket.tgs",
+    "models/stellar_rocket/alien_pizza.tgs"
+  ],
+  "candycane": [
+    "tgs/by_name/candy_cane.tgs",
+    "models/candy_cane/amber_glitter.tgs"
+  ],
+  "lightsword": [
+    "tgs/by_name/light_sword.tgs",
+    "models/light_sword/absinthe.tgs"
+  ],
+  "evileye": [
+    "tgs/by_name/evil_eye.tgs",
+    "models/evil_eye/8_ball.tgs"
+  ],
+  "gingercookie": [
+    "tgs/by_name/ginger_cookie.tgs",
+    "models/ginger_cookie/adam.tgs"
+  ],
+  "snoopcigar": [
+    "tgs/by_name/snoop_cigar.tgs",
+    "models/snoop_cigar/america.tgs"
+  ],
+  "cloverpin": [
+    "tgs/by_name/clover_pin.tgs",
+    "models/clover_pin/balloon.tgs"
+  ],
+  "lunarsnake": [
+    "tgs/by_name/lunar_snake.tgs",
+    "models/lunar_snake/adhesive.tgs"
+  ],
+  "swagbag": [
+    "tgs/by_name/swag_bag.tgs",
+    "models/swag_bag/april_20th.tgs"
+  ],
+  "partysparkler": [
+    "tgs/by_name/party_sparkler.tgs",
+    "models/party_sparkler/4th_of_july.tgs"
+  ],
+  "bdaycandle": [
+    "tgs/by_name/bday_candle.tgs",
+    "models/bday_candle/anniversary.tgs"
+  ],
+  "libertyfigure": [
+    "tgs/by_name/liberty_figure.tgs",
+    "models/liberty_figure/amethyst.tgs"
+  ],
+  "instantramen": [
+    "tgs/by_name/instant_ramen.tgs",
+    "models/instant_ramen/abduction.tgs"
+  ],
+  "easteregg": [
+    "tgs/by_name/easter_egg.tgs",
+    "models/easter_egg/3d_render.tgs"
+  ],
+  "spyagaric": [
+    "tgs/by_name/spy_agaric.tgs",
+    "models/spy_agaric/acid_trip.tgs"
+  ],
+  "toybear": [
+    "tgs/by_name/toy_bear.tgs",
+    "models/toy_bear/alter_ego.tgs"
+  ],
+  "witchhat": [
+    "tgs/by_name/witch_hat.tgs",
+    "models/witch_hat/aeromancy.tgs"
+  ],
+  "homemadecake": [
+    "tgs/by_name/homemade_cake.tgs",
+    "models/homemade_cake/angel_cake.tgs"
+  ],
+  "deskcalendar": [
+    "tgs/by_name/desk_calendar.tgs",
+    "models/desk_calendar/adult_tasks.tgs"
+  ],
+  "icecream": [
+    "tgs/by_name/ice_cream.tgs",
+    "models/ice_cream/apple_dip.tgs"
+  ],
+  "chillflame": [
+    "tgs/by_name/chill_flame.tgs",
+    "models/chill_flame/baba_yaga.tgs"
+  ],
+  "vicecream": [
+    "tgs/by_name/vice_cream.tgs",
+    "models/vice_cream/bamboo_ice.tgs"
+  ],
+  "snoopdogg": [
+    "tgs/by_name/snoop_dogg.tgs",
+    "models/snoop_dogg/afro_disco.tgs"
+  ],
+  "lolpop": [
+    "tgs/by_name/lol_pop.tgs",
+    "models/lol_pop/andromeda.tgs"
+  ],
+  "trojanhorse": [
+    "tgs/by_id/5956308547863052791.tgs",
+    null
+  ],
+  "1may": [
+    "tgs/by_id/5807641025165919973.tgs",
+    null
+  ],
+  "coffin": [
+    "tgs/by_id/5776227780391864916.tgs",
+    null
+  ],
+  "eastercake": [
+    "tgs/by_id/5773791997064119815.tgs",
+    null
+  ],
+  "eightroses": [
+    "tgs/by_id/5933770397739647689.tgs",
+    null
+  ],
+  "gravestone": [
+    "tgs/by_id/5775955135867913556.tgs",
+    null
+  ],
+  "redstar": [
+    "tgs/by_id/5830323722413671504.tgs",
+    null
+  ],
+  "standard-5170250947678437525": [
+    "tgs/by_id/5170250947678437525.tgs",
+    null
+  ],
+  "standard-5168103777563050263": [
+    "tgs/by_id/5168103777563050263.tgs",
+    null
+  ],
+  "standard-5170314324215857265": [
+    "tgs/by_id/5170314324215857265.tgs",
+    null
+  ],
+  "standard-5170564780938756245": [
+    "tgs/by_id/5170564780938756245.tgs",
+    null
+  ],
+  "standard-6028601630662853006": [
+    "tgs/by_id/6028601630662853006.tgs",
+    null
+  ],
+  "standard-5168043875654172773": [
+    "tgs/by_id/5168043875654172773.tgs",
+    null
+  ],
+  "standard-5170690322832818290": [
+    "tgs/by_id/5170690322832818290.tgs",
+    null
+  ],
+  "standard-5170521118301225164": [
+    "tgs/by_id/5170521118301225164.tgs",
+    null
+  ]
+}
