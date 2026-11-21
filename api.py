@@ -23,7 +23,7 @@ from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError, Teleg
 
 import config
 import database as db
-from admin import available_telegram_gifts
+from gift_catalog import available_telegram_gifts
 from media_api import create_media_handlers, public_media
 from ui import esc, safe_send
 
