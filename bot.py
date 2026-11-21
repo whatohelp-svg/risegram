@@ -1009,7 +1009,7 @@ async def deliver_order(bot: Bot, uid: int, payload: str, stars: int, charge: st
         )
     if kind == "vm":
         if a[0] == "a":
-            await db.set_verified(uid, True)
+            await db.set_verification(uid, "major", True)
             return True, "verify", "Мажор · аккаунт", "✅ Готово! Ваш аккаунт получил статус <b>Мажор</b>."
         await db.add_verified_entity(uid, "channel", a[1])
         return True, "verify", f"Мажор · @{a[1]}", f"✅ Готово! @{esc(a[1])} получил(а) статус <b>Мажор</b>."
