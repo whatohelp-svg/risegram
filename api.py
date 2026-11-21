@@ -752,6 +752,11 @@ async def h_inventory(request: web.Request):
     ], "gifts": gifts})
 
 
+async def _telegram_bot_star_balance(bot) -> int:
+    balance = await bot.get_my_star_balance()
+    return max(0, int(getattr(balance, "amount", 0)))
+
+
 async def h_gifts(request: web.Request):
     user = await _current_user(request)
     if not user:
@@ -762,10 +767,26 @@ async def h_gifts(request: web.Request):
     except Exception:  # noqa: BLE001
         # Published drops remain available if Telegram catalog refresh is down.
         log.warning("NFT gift catalog refresh deferred in API", exc_info=True)
+
+    try:
+        bot_stars = await _telegram_bot_star_balance(request.app["bot"])
+    except Exception:  # noqa: BLE001
+        bot_stars = None
+        log.warning("Unable to read Telegram bot Stars balance", exc_info=True)
+
+    drops = await db.list_gift_drops(active_only=True)
+    for drop in drops:
+        required = int(drop.get("telegram_stars", 0) or 0)
+        if drop.get("pay_for_upgrade"):
+            required += int(drop.get("upgrade_stars", 0) or 0)
+        drop["telegram_stars_required"] = required
+        drop["can_deliver"] = None if bot_stars is None else bot_stars >= required
+
     return web.json_response({
         "ok": True,
-        "drops": await db.list_gift_drops(active_only=True),
+        "drops": drops,
         "inventory": await db.list_user_gifts(user["tg_id"], include_pending=True),
+        "bot_stars_balance": bot_stars,
         "user": public_user(user),
     })
 
@@ -782,6 +803,32 @@ async def h_buy_gift(request: web.Request):
     ok, message, gift = await db.reserve_gift_drop(user["tg_id"], drop_id)
     if not ok:
         return web.json_response({"ok": False, "error": message}, status=409)
+
+    # Telegram separately charges the bot's own Stars balance for the base gift
+    # and the unique-gift upgrade. Check it before attempting delivery.
+    required_bot_stars = int(gift.get("telegram_stars", 0) or 0)
+    if gift.get("pay_for_upgrade"):
+        required_bot_stars += int(gift.get("upgrade_stars", 0) or 0)
+    try:
+        available_bot_stars = await _telegram_bot_star_balance(request.app["bot"])
+    except Exception:  # noqa: BLE001
+        await db.rollback_gift_purchase(gift["instance_id"])
+        log.exception("Unable to verify Telegram Stars before NFT delivery")
+        return web.json_response({
+            "ok": False,
+            "error": "Не удалось проверить резерв Telegram Stars. RiseStars и тираж возвращены.",
+        }, status=503)
+    if available_bot_stars < required_bot_stars:
+        await db.rollback_gift_purchase(gift["instance_id"])
+        return web.json_response({
+            "ok": False,
+            "error": (
+                f"На боте не хватает Telegram Stars: нужно {required_bot_stars}, "
+                f"доступно {available_bot_stars}. RiseStars и тираж возвращены."
+            ),
+            "required_bot_stars": required_bot_stars,
+            "available_bot_stars": available_bot_stars,
+        }, status=409)
 
     # RiseGram stores an internal account ID. Bot API needs the linked Telegram user ID.
     telegram_user_id = await db.telegram_chat_id(user["tg_id"])
