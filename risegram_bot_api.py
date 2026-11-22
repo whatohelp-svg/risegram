@@ -473,6 +473,84 @@ async def _edit_message(bot, data):
     return _ok(_telegram_message(row, bot, user))
 
 
+async def _send_dice(bot, data):
+    user = await _target(bot, data.get("chat_id"))
+    if user is None:
+        return _err("Chat not found or user has not started the bot", 403)
+    emoji = str(data.get("emoji") or "🎲")
+    ranges = {"🎲": 6, "🎯": 6, "🏀": 5, "⚽": 5, "🎳": 6, "🎰": 64}
+    if emoji not in ranges:
+        return _err("Unsupported dice emoji")
+    value = secrets.randbelow(ranges[emoji]) + 1
+    now = db.now()
+    async with db.connect() as conn:
+        cur = await conn.execute(
+            """INSERT INTO rg_bot_messages(bot_id,user_id,from_bot,body,created_at)
+               VALUES(?,?,1,?,?)""",
+            (bot["id"], user["tg_id"], emoji + " " + str(value), now),
+        )
+        mid = int(cur.lastrowid)
+        await conn.execute(
+            "UPDATE rg_bot_conversations SET last_at=? WHERE bot_id=? AND user_id=?",
+            (now, bot["id"], user["tg_id"]),
+        )
+        await conn.commit()
+    from api import _publish_event
+    await _publish_event(int(user["tg_id"]), {"type": "new_message", "from_bot_id": bot["id"]})
+    return _ok({
+        "message_id": mid, "date": _unix(now), "chat": chat_obj(user),
+        "from": bot_api_user(bot), "dice": {"emoji": emoji, "value": value},
+    })
+
+
+async def _edit_markup(bot, data):
+    user = await _target(bot, data.get("chat_id"))
+    if user is None:
+        return _err("Chat not found", 404)
+    try:
+        mid = int(data.get("message_id", 0))
+    except (ValueError, TypeError):
+        return _err("Invalid message_id")
+    row = await db.fetchone(
+        """SELECT * FROM rg_bot_messages
+           WHERE id=? AND bot_id=? AND user_id=? AND from_bot=1""",
+        (mid, bot["id"], user["tg_id"]),
+    )
+    if row is None:
+        return _err("Message not found", 404)
+    try:
+        markup = _markup(data.get("reply_markup"))
+    except ValueError as exc:
+        return _err(str(exc))
+    await db.execute(
+        "UPDATE rg_bot_messages SET reply_markup=?,edited_at=? WHERE id=?",
+        (json.dumps(markup, ensure_ascii=False) if markup else None, db.now(), mid),
+    )
+    from api import _publish_event
+    await _publish_event(int(user["tg_id"]), {"type": "new_message", "from_bot_id": bot["id"]})
+    row = await db.fetchone("SELECT * FROM rg_bot_messages WHERE id=?", (mid,))
+    return _ok(_telegram_message(row, bot, user))
+
+
+async def _delete_message(bot, data):
+    user = await _target(bot, data.get("chat_id"))
+    if user is None:
+        return _err("Chat not found", 404)
+    try:
+        mid = int(data.get("message_id", 0))
+    except (ValueError, TypeError):
+        return _err("Invalid message_id")
+    deleted = await db.execute(
+        """DELETE FROM rg_bot_messages WHERE id=? AND bot_id=? AND user_id=? AND from_bot=1""",
+        (mid, bot["id"], user["tg_id"]),
+    )
+    if not deleted:
+        return _err("Message not found or not owned by bot", 404)
+    from api import _publish_event
+    await _publish_event(int(user["tg_id"]), {"type": "new_message", "from_bot_id": bot["id"]})
+    return _ok(True)
+
+
 async def handle(request: web.Request):
     bot = await _authenticate(request)
     if bot is None:
@@ -507,6 +585,12 @@ async def handle(request: web.Request):
         return _ok([{"update_id": row["id"], **json.loads(row["payload"])} for row in rows])
     if method == "sendMessage":
         return await _send_message(bot, data)
+    if method == "sendDice":
+        return await _send_dice(bot, data)
+    if method == "editMessageReplyMarkup":
+        return await _edit_markup(bot, data)
+    if method == "deleteMessage":
+        return await _delete_message(bot, data)
     if method == "editMessageText":
         return await _edit_message(bot, data)
     if method == "answerCallbackQuery":
