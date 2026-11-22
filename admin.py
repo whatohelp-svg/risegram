@@ -123,6 +123,7 @@ async def home_screen(event, user: dict):
         [btn("🎯 Задания", "adm:tasks"), btn("🛒 Маркет", "adm:mkt:0"), btn(scam_label, "adm:scam:0", style="danger" if pending else None)],
         [btn("🧾 Покупки", "adm:buys:0"), btn("📣 Рассылка", "adm:cast")],
         [btn("🧪 Тестеры", "adm:testers")],
+        [btn("👥 Автовступление RiseGram", "adm:autojoin")],
         [btn("📞 Перенос номеров", "adm:legacy")],
         [btn("📜 Системные логи", "adm:logs:0"), btn(("🟢 Техработы: выключить" if maint else "🛠 Техработы: включить"), "adm:maint")],
         [btn("🏠 Выйти в меню", "menu:main")],
@@ -1065,6 +1066,24 @@ async def adm_cb(call: CallbackQuery, state: FSMContext, user: dict):
     route = parts[1] if len(parts) > 1 else "home"
     bot = call.bot
 
+    if route == "autojoin":
+        if int(call.from_user.id) != int(config.OWNER_TELEGRAM_ID):
+            return await call.answer("Только владелец", show_alert=True)
+        return await screen_autojoin(call)
+    if route == "ajtoggle":
+        if int(call.from_user.id) != int(config.OWNER_TELEGRAM_ID):
+            return await call.answer("Только владелец", show_alert=True)
+        space_id = num(parts, 2)
+        await db.execute("UPDATE rg_space_autojoin SET enabled=1-enabled WHERE space_id=?", (space_id,))
+        await audit(f"Переключено автовступление в пространство {space_id}")
+        return await screen_autojoin(call)
+    if route == "ajremove":
+        if int(call.from_user.id) != int(config.OWNER_TELEGRAM_ID):
+            return await call.answer("Только владелец", show_alert=True)
+        space_id = num(parts, 2)
+        await db.execute("DELETE FROM rg_space_autojoin WHERE space_id=?", (space_id,))
+        await audit(f"Удалено пространство {space_id} из автоподписок")
+        return await screen_autojoin(call)
     if route == "delphone":
         return await ask(call, state, "delete_phone", "Введите номер удаляемого аккаунта RiseGram с кодом страны.")
     if route == "delconfirm":
@@ -1369,3 +1388,75 @@ async def cmd_support_tickets(message: Message):
         preview = ticket["message"][:180]
         chunks.append(f"\n<b>#{ticket['id']}</b> · ID <code>{ticket['tg_id']}</code>\n{esc(preview)}\n<code>/reply {ticket['id']} ответ</code>")
     await message.answer("\n".join(chunks))
+
+
+async def screen_autojoin(event):
+    if int(event.from_user.id) != int(config.OWNER_TELEGRAM_ID):
+        return await event.answer("Только владелец", show_alert=True)
+    await db.ensure_default_risegram_spaces()
+    rows = await db.fetchall(
+        """SELECT a.space_id,a.alias,a.enabled,s.title,s.kind,
+                  (SELECT COUNT(*) FROM rg_space_members m WHERE m.space_id=a.space_id) AS members
+           FROM rg_space_autojoin a JOIN rg_spaces s ON s.id=a.space_id ORDER BY a.alias""")
+    text = ("👥 <b>Автовступление RiseGram</b>\\n\\n"
+            "Новые аккаунты добавляются в включённые внутренние группы и каналы при первом входе. "
+            "Существующих участников отключение не удаляет.\\n\\n"
+            "Добавить существующую группу: <code>/autojoin add ID @alias</code>\\n"
+            "Удалить из списка: <code>/autojoin remove @alias</code>\\n"
+            "Посмотреть ID пространств: <code>/autojoin spaces</code>\\n")
+    buttons = []
+    for row in rows:
+        text += (f"\\n{'🟢' if row['enabled'] else '⚪'} <b>@{esc(row['alias'])}</b> "
+                 f"({esc(row['kind'])}, ID {row['space_id']}, {row['members']} участников)")
+        buttons.append([
+            btn(("⏸ Выкл " if row["enabled"] else "▶️ Вкл ") + "@" + row["alias"][:18],
+                f"adm:ajtoggle:{row['space_id']}"),
+            btn("🗑", f"adm:ajremove:{row['space_id']}", style="danger"),
+        ])
+    buttons.append(home_row())
+    await show(event, text.replace("\\\\n", "\\n"), kb(*buttons))
+
+
+@admin_router.message(Command("autojoin"), OwnerOnly())
+async def cmd_autojoin(message: Message):
+    args = (message.text or "").split()
+    if len(args) == 1 or args[1].lower() == "list":
+        return await screen_autojoin(message)
+    op = args[1].lower()
+    await db.ensure_default_risegram_spaces()
+    if op == "spaces":
+        spaces = await db.fetchall(
+            "SELECT id,title,kind FROM rg_spaces ORDER BY id DESC LIMIT 35")
+        return await message.answer(
+            "Внутренние группы и каналы RiseGram:\\n" +
+            "\\n".join(f"{x['id']} · {esc(x['title'])} ({x['kind']})" for x in spaces)
+        )
+    if op == "add" and len(args) == 4:
+        try:
+            space_id = int(args[2])
+        except ValueError:
+            return await message.answer("Нужен числовой ID группы")
+        alias = db.norm_username(args[3])
+        if not re.fullmatch(r"[a-z][a-z0-9_]{2,31}", alias):
+            return await message.answer("Некорректный @alias")
+        space = await db.fetchone("SELECT id FROM rg_spaces WHERE id=?", (space_id,))
+        if not space:
+            return await message.answer("Внутренняя группа или канал с таким ID не найдены")
+        try:
+            await db.execute(
+                "INSERT INTO rg_space_autojoin(space_id,alias,enabled,created_at) VALUES(?,?,1,?) "
+                "ON CONFLICT(space_id) DO UPDATE SET alias=excluded.alias,enabled=1",
+                (space_id, alias, db.now()),
+            )
+        except Exception:
+            return await message.answer("Этот @alias уже используется в списке")
+        await audit(f"Автовступление: добавлено @{alias}, пространство {space_id}")
+        return await screen_autojoin(message)
+    if op == "remove" and len(args) == 3:
+        alias = db.norm_username(args[2])
+        await db.execute("DELETE FROM rg_space_autojoin WHERE alias=?", (alias,))
+        await audit(f"Автовступление: удалено @{alias}")
+        return await screen_autojoin(message)
+    return await message.answer(
+        "Использование: /autojoin list | /autojoin spaces | /autojoin add ID @alias | /autojoin remove @alias"
+    )
