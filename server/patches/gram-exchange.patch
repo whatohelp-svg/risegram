@@ -1,0 +1,157 @@
+--- a/internal/store/postgres/star_gift_lifecycle.go
++++ b/internal/store/postgres/star_gift_lifecycle.go
+@@ -1786,6 +1786,55 @@
+ 	return withdrawal, nil
+ }
+ 
++// ExchangeGram commits both currency movements and their history in one transaction.
++func (s *StarGiftLifecycleStore) ExchangeGram(ctx context.Context, uid, delta int64, key string) (int64, int64, error) {
++	if uid <= 0 || delta == 0 || delta > 900000000000 || delta < -900000000000 || len(key) < 16 || len(key) > 64 {
++		return 0, 0, domain.ErrStarsInvalidAmount
++	}
++	var stars, gram int64
++	date := int(time.Now().Unix())
++	err := withTx(ctx, s.db, "exchange GRAM", func(tx pgx.Tx) error {
++		if _, err := tx.Exec(ctx, `INSERT INTO stars_balances(user_id,balance) VALUES($1,0) ON CONFLICT DO NOTHING`, uid); err != nil {
++			return err
++		}
++		if err := tx.QueryRow(ctx, `SELECT balance FROM stars_balances WHERE user_id=$1 FOR UPDATE`, uid).Scan(&stars); err != nil {
++			return err
++		}
++		var err error
++		gram, err = s.ensureTonGrantTx(ctx, tx, uid, date)
++		if err != nil {
++			return err
++		}
++		var previous int64
++		err = tx.QueryRow(ctx, `SELECT amount FROM stars_transactions WHERE user_id=$1 AND reason='gram_exchange' AND description=$2 LIMIT 1`, uid, key).Scan(&previous)
++		if err == nil {
++			if previous != delta {
++				return domain.ErrStarsInvalidAmount
++			}
++			return nil
++		}
++		if !errors.Is(err, pgx.ErrNoRows) {
++			return err
++		}
++		nano := -delta * 10000000 // 1 GRAM = 100 Stars
++		if stars < -delta || gram < -nano {
++			return domain.ErrStarsInsufficient
++		}
++		if err := tx.QueryRow(ctx, `UPDATE stars_balances SET balance=balance+$2,updated_at=now() WHERE user_id=$1 RETURNING balance`, uid, delta).Scan(&stars); err != nil {
++			return err
++		}
++		if err := tx.QueryRow(ctx, `UPDATE ton_balances SET balance_nanoton=balance_nanoton+$2,updated_at=now() WHERE user_id=$1 RETURNING balance_nanoton`, uid, nano).Scan(&gram); err != nil {
++			return err
++		}
++		if err := insertStarsTxn(ctx, tx, uid, delta, "gram_exchange", domain.Peer{}, date, "Обмен GRAM", key); err != nil {
++			return err
++		}
++		_, err = tx.Exec(ctx, `INSERT INTO ton_transactions(user_id,amount_nanoton,reason,date) VALUES($1,$2,'gram_exchange',$3)`, uid, nano, date)
++		return err
++	})
++	return stars, gram, err
++}
++
+ func (s *StarGiftLifecycleStore) TonBalance(ctx context.Context, userID int64) (int64, error) {
+ 	if userID <= 0 {
+ 		return 0, domain.ErrStarGiftOwnerInvalid
+--- a/internal/app/stargifts/service.go
++++ b/internal/app/stargifts/service.go
+@@ -960,6 +960,16 @@
+ 	return ok
+ }
+ 
++func (s *Service) ExchangeGram(ctx context.Context, uid, delta int64, key string) (int64, int64, error) {
++	ledger, ok := s.lifecycle.(interface {
++		ExchangeGram(context.Context, int64, int64, string) (int64, int64, error)
++	})
++	if !ok {
++		return 0, 0, domain.ErrStarsInvalidAmount
++	}
++	return ledger.ExchangeGram(ctx, uid, delta, key)
++}
++
+ func (s *Service) TonBalance(ctx context.Context, userID int64) (int64, error) {
+ 	if s == nil || s.lifecycle == nil {
+ 		return 0, nil
+--- a/internal/admin/service.go
++++ b/internal/admin/service.go
+@@ -3380,6 +3380,30 @@
+ 	return ""
+ }
+ 
++func (s *Service) ExchangeClientGram(ctx context.Context, phone string, delta int64, key string) (int64, int64, error) {
++	user, found, err := s.ResolveUserByPhone(ctx, phone)
++	if err != nil || !found {
++		return 0, 0, domain.ErrStarsInvalidAmount
++	}
++	reader, ok := s.stars.(interface {
++		GetBalance(context.Context, int64) (domain.StarsBalance, error)
++	})
++	ledger, configured := s.gifts.(interface {
++		ExchangeGram(context.Context, int64, int64, string) (int64, int64, error)
++	})
++	if !ok || !configured {
++		return 0, 0, fmt.Errorf("wallet unavailable")
++	}
++	if _, err := reader.GetBalance(ctx, user.ID); err != nil {
++		return 0, 0, err
++	}
++	stars, nano, err := ledger.ExchangeGram(ctx, user.ID, delta, key)
++	if err == nil {
++		_ = s.notifyStarsBalanceChanged(ctx, domain.StarsBalance{UserID: user.ID, Balance: stars, Granted: true})
++	}
++	return stars, nano, err
++}
++
+ // ClientBalances reads the same personal ledgers as payments.getStarsStatus.
+ func (s *Service) ClientBalances(ctx context.Context, phone string) (int64, int64, bool, error) {
+ 	user, found, err := s.ResolveUserByPhone(ctx, phone)
+--- a/internal/adminapi/server.go
++++ b/internal/adminapi/server.go
+@@ -264,6 +264,7 @@
+ 	mux.HandleFunc("POST /v1/accounts/set-color", s.authenticated(s.handleSetUserColor))
+ 	mux.HandleFunc("POST /v1/accounts/set-emoji-status", s.authenticated(s.handleSetUserEmojiStatus))
+ 	mux.HandleFunc("POST /v1/accounts/revoke-sessions", s.authenticated(s.handleRevokeSessions))
++	mux.HandleFunc("POST /v1/accounts/exchange-gram", s.authenticated(s.handleClientExchange))
+ 	mux.HandleFunc("POST /v1/accounts/client-balances", s.authenticated(s.handleClientBalances))
+ 	mux.HandleFunc("GET /v1/channels/resolve-username", s.authenticated(s.handleResolveChannelUsername))
+ 	mux.HandleFunc("POST /v1/channels/set-verified", s.authenticated(s.handleSetChannelVerified))
+--- a/internal/adminapi/server.go
++++ b/internal/adminapi/server.go
+@@ -555,6 +555,34 @@
+ 	writeCommandResult(w, result, err)
+ }
+ 
++func (s *Server) handleClientExchange(w http.ResponseWriter, r *http.Request) {
++	var req struct {
++		Phone string `json:"phone"`
++		Delta int64 `json:"stars_delta"`
++		Key   string `json:"request_id"`
++	}
++	if !decodeJSON(w, r, &req) {
++		return
++	}
++	ledger, ok := s.svc.(interface {
++		ExchangeClientGram(context.Context, string, int64, string) (int64, int64, error)
++	})
++	if !ok {
++		writeError(w, http.StatusServiceUnavailable, "wallet unavailable")
++		return
++	}
++	stars, nano, err := ledger.ExchangeClientGram(r.Context(), req.Phone, req.Delta, req.Key)
++	if errors.Is(err, domain.ErrStarsInsufficient) {
++		writeError(w, http.StatusConflict, "insufficient balance")
++		return
++	}
++	if err != nil {
++		writeError(w, http.StatusBadRequest, "exchange unavailable")
++		return
++	}
++	writeJSON(w, http.StatusOK, map[string]any{"stars": strconv.FormatInt(stars, 10), "gram_nano": strconv.FormatInt(nano, 10)})
++}
++
+ func (s *Server) handleClientBalances(w http.ResponseWriter, r *http.Request) {
+ 	var req admin.ResolveUserByPhoneRequest
+ 	if !decodeJSON(w, r, &req) {

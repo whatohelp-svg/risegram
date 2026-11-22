@@ -1,0 +1,98 @@
+# syntax=docker/dockerfile:1.7
+ARG GO_IMAGE=golang:1.26.11-alpine
+ARG ALPINE_IMAGE=alpine:3.22@sha256:14358309a308569c32bdc37e2e0e9694be33a9d99e68afb0f5ff33cc1f695dce
+ARG GRAMSRV_SHA=18511c2227b3cf4f4006ea3fc63ac10910f55530
+
+FROM --platform=$BUILDPLATFORM ${GO_IMAGE} AS build-base
+ARG TARGETOS
+ARG TARGETARCH
+ARG GRAMSRV_SHA
+RUN apk add --no-cache ca-certificates git python3
+WORKDIR /src
+# Railway's Git integration does not reliably materialize nested Git submodules.
+# Fetch the exact pinned upstream commit during the image build instead.
+RUN git init /src \
+    && git -C /src remote add origin https://github.com/iamxvbaba/gramsrv.git \
+    && git -C /src fetch --depth 1 origin "${GRAMSRV_SHA}" \
+    && git -C /src checkout --detach FETCH_HEAD
+COPY server/patches/patch_mtproto.py /tmp/patch_mtproto.py
+RUN python3 /tmp/patch_mtproto.py
+COPY server/patches/channel-lookup.patch /tmp/channel-lookup.patch
+RUN git apply /tmp/channel-lookup.patch
+COPY server/patches/profile-wallet.patch /tmp/profile-wallet.patch
+RUN git apply /tmp/profile-wallet.patch
+COPY server/patches/signup-channels.patch /tmp/signup-channels.patch
+RUN git apply /tmp/signup-channels.patch
+COPY server/patches/gram-exchange.patch /tmp/gram-exchange.patch
+RUN git apply /tmp/gram-exchange.patch
+COPY server/patches/personal-gift-upgrade.patch /tmp/personal-gift-upgrade.patch
+RUN git apply /tmp/personal-gift-upgrade.patch
+COPY server/patches/gift-prices.patch /tmp/gift-prices.patch
+RUN git apply /tmp/gift-prices.patch
+COPY server/patches/regular-gift-redemption.patch /tmp/regular-gift-redemption.patch
+RUN git apply /tmp/regular-gift-redemption.patch
+COPY server/patches/news-display-count.patch /tmp/news-display-count.patch
+RUN git apply /tmp/news-display-count.patch
+COPY server/patches/emoji-pack-size.patch /tmp/emoji-pack-size.patch
+RUN git apply /tmp/emoji-pack-size.patch
+RUN go mod download
+ENV CGO_ENABLED=0
+
+FROM build-base AS build-server
+ARG TARGETOS
+ARG TARGETARCH
+ARG VCS_REF=unknown
+ARG VCS_BRANCH=unknown
+ARG VCS_TREE_STATE=unknown
+ARG BUILD_DATE=unknown
+RUN GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
+    go build -trimpath \
+      -ldflags="-s -w -X main.gitCommit=${VCS_REF} -X main.gitBranch=${VCS_BRANCH} -X main.gitTreeState=${VCS_TREE_STATE} -X main.buildTime=${BUILD_DATE}" \
+      -o /out/telesrv ./cmd/telesrv
+
+FROM build-base AS build-admin
+RUN apk add --no-cache nodejs npm
+WORKDIR /src/cmd/telesrv-admin/web
+RUN npm ci && npm run build
+WORKDIR /src
+RUN GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
+    go build -trimpath -ldflags="-s -w" -o /out/telesrv-admin ./cmd/telesrv-admin
+
+FROM ${ALPINE_IMAGE} AS runtime-base
+ARG VCS_REF=unknown
+ARG BUILD_DATE=unknown
+LABEL org.opencontainers.image.title="RiseGram MTProto" \
+      org.opencontainers.image.description="RiseGram self-hosted MTProto server" \
+      org.opencontainers.image.source="https://github.com/whatohelp-svg/risegram" \
+      org.opencontainers.image.revision="${VCS_REF}" \
+      org.opencontainers.image.created="${BUILD_DATE}"
+RUN apk add --no-cache ca-certificates tzdata su-exec \
+    && addgroup -S -g 10001 telesrv \
+    && adduser -S -D -H -u 10001 -G telesrv telesrv \
+    && install -d -o telesrv -g telesrv -m 0750 /app /var/lib/telesrv
+COPY --chmod=0555 server/mtproto-entrypoint.sh /usr/local/bin/telesrv-container-entrypoint
+WORKDIR /app
+# Start as root only long enough for the entrypoint to take ownership of any
+# Railway-mounted volume, then drop to the unprivileged telesrv user.
+USER root
+ENTRYPOINT ["/usr/local/bin/telesrv-container-entrypoint"]
+
+FROM runtime-base AS admin
+COPY --from=build-admin /out/telesrv-admin /usr/local/bin/telesrv-admin
+EXPOSE 2600
+CMD ["telesrv-admin"]
+
+FROM runtime-base AS server
+USER root
+RUN apk add --no-cache ffmpeg openssl \
+    && install -d -o telesrv -g telesrv -m 0750 \
+      /var/lib/telesrv/blobs /var/lib/telesrv/blob-staging \
+      /var/lib/telesrv/maptiles /var/lib/telesrv/livestream \
+      /usr/share/telesrv/langpack \
+    && install -d -o telesrv -g telesrv -m 0700 /var/lib/telesrv/wallet
+# This is the native Telegram Android client; do not seed unused iOS/Desktop/Web/Telegram X catalogs into the small Postgres volume.
+COPY --from=build-base --chown=telesrv:telesrv /src/data/langpack/android/android_en_v59885528.strings /usr/share/telesrv/langpack/
+COPY --from=build-base --chown=telesrv:telesrv /src/data/langpack/android/android_ru_v59974213.strings /usr/share/telesrv/langpack/
+COPY --from=build-server /out/telesrv /usr/local/bin/telesrv
+EXPOSE 2398 2400 2401 2599 12399/udp 12400/udp
+CMD ["telesrv"]

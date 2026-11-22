@@ -1,0 +1,30 @@
+--- a/internal/rpc/payments_star_gifts.go
++++ b/internal/rpc/payments_star_gifts.go
+@@ -1803,12 +1803,10 @@
+ 	if in.FromUserID != 0 && !in.NameHidden {
+ 		action.SetFromID(&tg.PeerUser{UserID: in.FromUserID})
+ 	}
+-	if in.PeerUserID != 0 {
+-		action.SetPeer(&tg.PeerUser{UserID: in.PeerUserID})
+-	} else if in.PeerChannelID != 0 {
++	// Peer and saved_id share TL flag 12. Personal receipts are addressed by
++	// message ID. Setting peer alone makes Android submit a channel ref with ID zero.
++	if in.PeerChannelID > 0 && in.SavedID > 0 {
+ 		action.SetPeer(&tg.PeerChannel{ChannelID: in.PeerChannelID})
+-	}
+-	if in.SavedID != 0 {
+ 		action.SetSavedID(in.SavedID)
+ 	}
+ 	return action
+--- a/internal/rpc/payments_star_gifts_rpc_test.go
++++ b/internal/rpc/payments_star_gifts_rpc_test.go
+@@ -1087,6 +1087,9 @@
+ 		}},
+ 	}
+ 	ownerAction := tgMessage(ownerMessage).(*tg.MessageService).Action.(*tg.MessageActionStarGift)
++	if _, set := ownerAction.GetSavedID(); set {
++		t.Fatal("personal upgrade incorrectly advertises a channel saved_id")
++	}
+ 	if !ownerAction.CanUpgrade {
+ 		t.Fatal("owner message lost receiver-only can_upgrade")
+ 	}

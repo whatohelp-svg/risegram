@@ -1,6 +1,6 @@
 """admin.py — GOD MODE RiseGram.
 
-Доступ: ТОЛЬКО владелец (config.OWNER_ID) и только по команде /admin7206852053.
+Доступ: владелец через /owner, администраторы и тестеры через /admin.
 Кнопки админки нигде в обычном меню нет. Проверка идёт по числовому ID, юзернеймам доверять нельзя.
 """
 from __future__ import annotations
@@ -9,7 +9,9 @@ import asyncio
 import logging
 import math
 import re
+import secrets
 
+from aiohttp import ClientError, ClientSession, ClientTimeout
 from aiogram import Bot, F, Router
 from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError, TelegramRetryAfter
 from aiogram.filters import Command, Filter, StateFilter
@@ -19,26 +21,43 @@ from aiogram.types import CallbackQuery, Message
 
 import config
 import database as db
+import gift_admin
+import native_economy as economy
+from api import client_wallet_line, sync_mtproto_verification
 from ui import btn, esc, fmt_num, kb, safe_send, show
 
 log = logging.getLogger("risegram.admin")
 
 PAGE = 8
 
+from gift_catalog import available_telegram_gifts
+
 
 class OwnerOnly(Filter):
     async def __call__(self, event: Message | CallbackQuery) -> bool:
         u = event.from_user
-        return bool(u and u.id == config.OWNER_ID)
+        return bool(u and u.id == config.OWNER_TELEGRAM_ID)
+
+
+class AdminOnly(Filter):
+    async def __call__(self, event: Message | CallbackQuery) -> bool:
+        u = event.from_user
+        if not u:
+            return False
+        if u.id == config.OWNER_TELEGRAM_ID:
+            return True
+        account = await db.get_by_telegram(u.id)
+        return bool(account and await db.is_admin(int(account["tg_id"])))
 
 
 admin_router = Router(name="admin")
-admin_router.message.filter(OwnerOnly(), F.chat.type == "private")
-admin_router.callback_query.filter(OwnerOnly(), F.message.chat.type == "private")
+admin_router.message.filter(AdminOnly(), F.chat.type == "private")
+admin_router.callback_query.filter(AdminOnly(), F.message.chat.type == "private")
 
 
 class Adm(StatesGroup):
     input = State()      # универсальный ввод; действие лежит в data["act"]
+    delete_confirm = State()
     cast_confirm = State()
 
 
@@ -69,7 +88,7 @@ async def audit(text: str):
 
 
 def user_line(u: dict) -> str:
-    flags = ("🚫" if u.get("banned") else "") + ("✅" if u.get("verified") else "")
+    flags = ("🚫" if u.get("banned") else "") + ("☑️" if u.get("verified_risegram") else "") + ("💠" if u.get("verified_major") else "")
     return f"{esc(db.shown_username(u))} · <code>{u['tg_id']}</code> {flags}".strip()
 
 
@@ -88,23 +107,108 @@ async def home_screen(event, user: dict):
     text = (
         f"💎 <b>{config.BRAND} Ecosystem — GOD MODE</b>\n\n"
         f"{config.BRAND} ID: <b>{me['rise_id']}</b>\n"
-        f"⭐ {config.CURRENCY_NAME}: <b>{fmt_num(me['risestars'])}</b>\n"
-        f"💎 Gram: <b>{fmt_num(me['gram_balance'], 2)}</b>\n"
-        f"☑️ Статус: <b>Официальный владелец</b>\n"
+        f"{await client_wallet_line(me)}\n"
+        f"☑️ Статус: <b>{'Официальный владелец' if int(user['tg_id']) == int(config.OWNER_ID) else 'Администратор / тестер'}</b>\n"
+        "🏷 NFT каналу или супергруппе: <code>/grantnft @чат @имя</code>\nПроверка чата: <code>/grantverify @чат official|major|risegram</code>\n"
         f"🛠 Техработы: <b>{'ВКЛ' if maint else 'выкл'}</b>"
     )
     scam_label = f"⚠️ SCAM-заявки ({pending})" if pending else "⚠️ SCAM-заявки"
-    markup = kb(
+    rows = [
         [btn("📊 Аналитика", "adm:stats", style="primary"), btn("👥 Юзеры", "adm:users:0", style="primary")],
         [btn("💰 Выдача валюты", "adm:grant", style="success"), btn("🏷 Выдать юзернеймы", "adm:inv", style="success")],
+        [btn("🗑 Удалить аккаунт по номеру", "adm:delphone", style="danger")],
+        [btn("🎁 Дроп подарков", "adm:localgifts:0", style="success")],
+        [btn("☑️ Верификация RiseGram", "adm:verifyrise", style="primary"), btn("💠 Верификация Major", "adm:verifymajor", style="primary")],
         [btn("⚡ Тумблеры функций", "adm:feat", style="success"), btn("🔨 Банхаммер", "adm:ban", style="danger")],
         [btn("🎯 Задания", "adm:tasks"), btn("🛒 Маркет", "adm:mkt:0"), btn(scam_label, "adm:scam:0", style="danger" if pending else None)],
         [btn("🧾 Покупки", "adm:buys:0"), btn("📣 Рассылка", "adm:cast")],
-        [btn("🧪 Тестеры", "adm:testers"), btn("📞 Перенос номеров", "adm:legacy")],
+        [btn("🧪 Тестеры", "adm:testers")],
+        [btn("👥 Автовступление RiseGram", "adm:autojoin")],
+        [btn("📞 Перенос номеров", "adm:legacy")],
         [btn("📜 Системные логи", "adm:logs:0"), btn(("🟢 Техработы: выключить" if maint else "🛠 Техработы: включить"), "adm:maint")],
         [btn("🏠 Выйти в меню", "menu:main")],
-    )
+    ]
+    if int(user["tg_id"]) == int(config.OWNER_ID):
+        rows.insert(6, [btn("🛡 Админы", "adm:admins")])
+    markup = kb(*rows)
     await show(event, text, markup)
+
+
+@admin_router.message(Command("grantnft", "grantverify"))
+async def grant_channel_username(message: Message):
+    parts = (message.text or "").split()
+    verify = parts[0].split("@")[0].lower() == "/grantverify"
+    name_pattern = r"[A-Za-z][A-Za-z0-9_]{3,31}"
+    usage = ("Используйте /grantverify @чат official|risegram|major" if verify
+             else "Используйте /grantnft @чат @новое_имя. Вместо @чата можно указать ID.")
+    if len(parts) != 3:
+        await message.answer(usage)
+        return
+    target, value = parts[1], parts[2].lower()
+    numeric = re.fullmatch(r"(?:-100)?[1-9][0-9]{0,18}", target)
+    if not numeric and not re.fullmatch("@" + name_pattern, target):
+        await message.answer(usage)
+        return
+    if (verify and value not in ("official", "risegram", "major")) or (
+        not verify and not re.fullmatch("@?" + name_pattern, value)
+    ):
+        await message.answer(usage)
+        return
+    base = config.MTPROTO_ADMIN_API_URL.rstrip("/")
+    if not base or not config.MTPROTO_ADMIN_API_TOKEN:
+        await message.answer("Сервер выдачи не настроен.")
+        return
+    headers = {"Authorization": f"Bearer {config.MTPROTO_ADMIN_API_TOKEN}"}
+    payload = {
+        "command_id": f"channel-grant-{message.chat.id}-{message.message_id}",
+        "actor": f"risegram-admin-{message.from_user.id}",
+        "reason": "Administrator grant to a RiseGram group or channel",
+    }
+    try:
+        async with ClientSession(timeout=ClientTimeout(total=10), headers=headers) as session:
+            if numeric:
+                channel_id = int(target.removeprefix("-100"))
+            else:
+                async with session.get(base + "/v1/channels/resolve-username",
+                                       params={"username": target[1:].lower()}) as response:
+                    response.raise_for_status()
+                    peer = await response.json()
+                if not peer.get("found"):
+                    await message.answer("Публичная группа или канал с таким именем не найдены.")
+                    return
+                channel_id = int(peer["channel_id"])
+            if not 0 < channel_id < 2**63:
+                await message.answer("Некорректный ID чата.")
+                return
+            if not verify:
+                endpoint = "/v1/collectible-usernames/mint"
+                name = value.lstrip("@")
+                payload.update(username=name, owner_channel_id=str(channel_id), currency="USD",
+                               amount="0", purchase_date=int(message.date.timestamp()))
+                success = f"NFT @{name} выдан чату {channel_id}."
+            elif value == "official":
+                endpoint = "/v1/channels/set-verified"
+                payload.update(channel_id=channel_id, verified=True)
+                success = f"Чату {channel_id} выдана официальная галочка."
+            else:
+                async with session.get(base + "/v1/botverification/verifiers",
+                                       params={"enabled_only": "true", "limit": "200"}) as response:
+                    response.raise_for_status()
+                    verifiers = (await response.json())["rows"]
+                matches = [v for v in verifiers if v["Enabled"] and v["CompanyName"].strip().lower() == value]
+                if len(matches) != 1:
+                    await message.answer(f"Для {value} не настроен однозначный активный верификатор.")
+                    return
+                endpoint = "/v1/botverification/marks/grant"
+                payload.update(peer_type="channel", peer_id=channel_id, verifier_bot_id=int(matches[0]["BotID"]))
+                success = f"Чату {channel_id} выдана верификация {value}."
+            async with session.post(base + endpoint, json=payload) as response:
+                response.raise_for_status()
+                completed = (await response.json()).get("status") == "completed"
+    except (ClientError, TimeoutError, ValueError, KeyError):
+        await message.answer("Сервер не подтвердил выдачу. Проверьте чат и статус в профиле.")
+        return
+    await message.answer(success if completed else "Сервер не подтвердил выдачу.")
 
 
 @admin_router.message(Command(config.ADMIN_COMMAND))
@@ -113,7 +217,85 @@ async def cmd_admin(message: Message, state: FSMContext, user: dict):
     await home_screen(message, user)
 
 
+@admin_router.message(Command(config.OWNER_COMMAND), OwnerOnly())
+async def cmd_owner(message: Message, state: FSMContext, user: dict):
+    await state.clear()
+    await home_screen(message, user)
+
+
 # ════════════════════════════ экраны ══════════════════════════════════════
+
+
+async def screen_gifts(call: CallbackQuery, page: int = 0):
+    try:
+        all_gifts = await available_telegram_gifts(call.bot)
+        catalog = [gift for gift in all_gifts if gift["can_upgrade"]]
+        sync_result = await db.sync_gift_catalog_drops(catalog)
+    except Exception:  # noqa: BLE001
+        log.exception("Telegram NFT gift catalog synchronization failed")
+        catalog = []
+        sync_result = {"created": 0, "upgraded": 0, "already_live": 0, "skipped": 0}
+
+    per_page = 8
+    total = len(catalog)
+    pages = max(1, math.ceil(total / per_page))
+    page = min(max(0, page), pages - 1)
+    current = catalog[page * per_page:(page + 1) * per_page]
+    try:
+        bot_star_balance = await call.bot.get_my_star_balance()
+        bot_stars = int(getattr(bot_star_balance, "amount", 0))
+        bot_balance_line = f"Баланс Telegram Stars бота: <b>{fmt_num(bot_stars)}</b> ⭐\n"
+    except Exception:  # noqa: BLE001
+        bot_stars = None
+        bot_balance_line = "Баланс Telegram Stars бота: <b>не удалось проверить</b>\n"
+
+    text = (
+        "🎁 <b>NFT-дропы подарков</b>\n\n"
+        "Каталог автоматически синхронизируется с Telegram Bot API. В дроп попадают все подарки, "
+        "которые бот может отправить и которые поддерживают апгрейд до уникального NFT. "
+        "Бот оплачивает подарок и апгрейд своими Telegram Stars.\n\n"
+        f"{bot_balance_line}"
+        f"NFT-подарков доступно боту: <b>{total}</b> · страница {page + 1}/{pages}\n"
+        f"Синхронизация: +{sync_result['created']} новых · {sync_result['upgraded']} обновлено · "
+        f"{sync_result['already_live']} уже в продаже\n"
+    )
+    rows = []
+    pair = []
+    for gift in current:
+        label = f"💎 {gift['emoji']} {gift['name']} · {gift['stars']}+{gift['upgrade_stars']}⭐"
+        pair.append(btn(label[:60], f"adm:gifts:pick:{gift['id']}"))
+        if len(pair) == 2:
+            rows.append(pair)
+            pair = []
+    if pair:
+        rows.append(pair)
+
+    if total == 0:
+        text += "\nTelegram сейчас не вернул ни одного подарка, доступного этому боту."
+    else:
+        text += "\nНажмите на подарок, чтобы выпустить ограниченный тираж."
+    active = await db.list_gift_drops(active_only=False)
+    text += "\n\n<b>Текущие дропы RiseGram</b>\n"
+    for drop in active[:12]:
+        status = "активен" if drop["active"] and drop["stock_remaining"] > 0 else "закрыт"
+        text += (
+            f"\n{esc(drop['emoji'])} {esc(drop['gift_name'])} · "
+            f"{drop['stock_remaining']}/{drop['stock_total']} · "
+            f"{fmt_num(drop['price_risestars'])} RS · {status}"
+        )
+    if not active:
+        text += "\nПока нет выпущенных дропов."
+
+    nav = []
+    if page > 0:
+        nav.append(btn("◀️", f"adm:gifts:page:{page - 1}"))
+    if page + 1 < pages:
+        nav.append(btn("▶️", f"adm:gifts:page:{page + 1}"))
+    if nav:
+        rows.append(nav)
+    rows.append([btn("🔄 Обновить каталог", "adm:gifts")])
+    rows.append(home_row())
+    await show(call, text, kb(*rows))
 
 
 async def screen_stats(call: CallbackQuery):
@@ -124,8 +306,6 @@ async def screen_stats(call: CallbackQuery):
         f"✅ Верифицировано: {s['verified']} · 🚫 в бане: {s['banned']} · 🧪 тестеров: {s['testers']}\n\n"
         f"⭐ Собрано Stars: <b>{fmt_num(s['stars_total'])}</b> за {s['purchases']} покупок (за сутки {fmt_num(s['stars_day'])})\n"
         f"↩️ Возвращено: {fmt_num(s['refunded'])}\n"
-        f"💰 Эмиссия {config.CURRENCY_NAME}: {fmt_num(s['risestars_emission'])}\n"
-        f"💎 Эмиссия Gram: {fmt_num(s['gram_emission'], 2)}\n\n"
         f"🏷 NFT-юзернеймов: {s['nft_usernames']} · 📞 номеров продано: {s['numbers_sold']}\n"
         f"⚠️ SCAM на проверке: {s['scam_pending']}\n"
         f"🛒 Маркет: активных {s['market_active']} · продано {s['market_sold']} на {fmt_num(s['market_volume'])} RiseStars\n"
@@ -140,7 +320,7 @@ async def screen_users(call: CallbackQuery, page: int, search: str = ""):
     text = f"👥 <b>Игроки</b> ({total})" + (f"\n🔎 Поиск: <code>{esc(search)}</code>" if search else "") + "\n\n"
     buttons = []
     for u in rows:
-        text += f"• {user_line(u)} · ⭐{fmt_num(u['risestars'])}\n"
+        text += f"• {user_line(u)}\n"
         buttons.append([btn(f"{db.shown_username(u)} · {u['tg_id']}", f"adm:u:{u['tg_id']}")])
     if not rows:
         text += "Никого не найдено."
@@ -161,7 +341,7 @@ async def screen_user(event, uid: int, note: str = ""):
         f"{config.BRAND} ID: <code>{u['rise_id']}</code>\n"
         f"Номер: <code>{esc(u['phone'])}</code>\n"
         f"Активный юзернейм: {esc(u.get('active_username') or '—')}\n\n"
-        f"⭐ {config.CURRENCY_NAME}: <b>{fmt_num(u['risestars'])}</b> · 💎 <b>{fmt_num(u['gram_balance'], 2)}</b>\n"
+        f"{await client_wallet_line(u)}\n"
         f"🏷 NFT/номера: {nfts}\n"
         f"💳 Потратил: {fmt_num(spent)} ⭐ · 🎮 игр: {st['played']}\n"
         f"📅 Регистрация: {esc((u.get('created_at') or '')[:16])}\n"
@@ -170,10 +350,12 @@ async def screen_user(event, uid: int, note: str = ""):
     if note:
         text = f"{note}\n\n" + text
     ban_label = "✅ Разбанить" if u["banned"] else "🔨 Забанить"
-    ver_label = "❎ Снять верификацию RiseGram" if u["verified"] else "✅ Выдать верификацию RiseGram"
+    rise_label = "❎ Снять RiseGram" if u.get("verified_risegram") else "☑️ Выдать RiseGram"
+    major_label = "❎ Снять Major" if u.get("verified_major") else "💠 Выдать Major"
     markup = kb(
-        [btn("⭐ RiseStars ±", f"adm:g:{uid}:stars", style="success"), btn("💎 Gram ±", f"adm:g:{uid}:gram", style="success")],
-        [btn(ban_label, f"adm:uban:{uid}", style="success" if u["banned"] else "danger"), btn(ver_label, f"adm:uver:{uid}")],
+        [btn("⭐ RiseStars ±", f"adm:g:{uid}:stars"), btn("💎 Gram ±", f"adm:g:{uid}:gram")],
+        [btn(ban_label, f"adm:uban:{uid}", style="success" if u["banned"] else "danger")],
+        [btn(rise_label, f"adm:uverrise:{uid}:{0 if u.get('verified_risegram') else 1}"), btn(major_label, f"adm:uvermajor:{uid}:{0 if u.get('verified_major') else 1}")],
         [btn("📞 Сменить номер", f"adm:unum:{uid}"), btn("🏷 Выдать юзернейм", f"adm:uun:{uid}")],
         [btn("📞 Выдать +888", f"adm:uph:{uid}"), btn("🗂 NFT/номера", f"adm:nfts:{uid}")],
         [btn("🔑 Выдать код входа", f"adm:ucode:{uid}"), btn("✉️ Написать", f"adm:umsg:{uid}")],
@@ -215,7 +397,9 @@ async def screen_nfts(event, uid: int, note: str = ""):
     for it in items[:15]:
         label = f"@{it['value']}" if it["item_type"] == "username" else db.fmt_number(it["value"])
         text += f"• {esc(label)} ({'юзернейм' if it['item_type'] == 'username' else 'номер'}, {it['price_stars']} ⭐)\n"
-        rows.append([btn(f"🗑 {label}"[:60], f"adm:nftdel:{it['id']}:{uid}", style="danger")])
+        # Anonymous numbers are identity/login assets and cannot be deleted from bot admin UI.
+        if it["item_type"] != "number":
+            rows.append([btn(f"🗑 {label}"[:60], f"adm:nftdel:{it['id']}:{uid}", style="danger")])
     if not items:
         text += "Пусто."
     rows.append([btn("↩️ К игроку", f"adm:u:{uid}")])
@@ -231,10 +415,12 @@ async def fresh_phone(uid: int) -> str:
     return ""
 
 
-async def remove_nft(item_id: int) -> str:
+async def remove_nft(item_id: int, *, force: bool = False) -> str:
     it = await db.get_nft(item_id)
     if not it:
         return "Уже удалено."
+    if it["item_type"] == "number" and not force:
+        return "Анонимные номера нельзя удалять: они связаны с входом и привязкой аккаунта."
     uid = it["tg_id"]
     await db.delete_nft(item_id)
     u = await db.get_user(uid)
@@ -242,7 +428,7 @@ async def remove_nft(item_id: int) -> str:
         await db.set_active_username(uid, None)
     if it["item_type"] == "number" and u and u.get("phone_digits") == it["value"]:
         await fresh_phone(uid)
-        return "Номер удалён, игроку выдан новый."
+        return "Номер отозван, игроку выдан новый."
     return "Удалено."
 
 
@@ -252,27 +438,31 @@ async def revoke_goods(p: dict) -> str:
     uid = p["tg_id"]
     try:
         if kind == "rs":
-            amount = int(a[0]) * config.RISESTARS_PER_STAR
-            u = await db.get_user(int(a[1]))
-            if u:
-                new = max(0.0, u["risestars"] - amount)
-                await db.set_balance(u["tg_id"], "risestars", new)
-            return f"списано до {fmt_num(amount)} RiseStars"
+            async with economy.transaction() as conn:
+                receipt = await (await conn.execute("SELECT movements FROM risegram_bot_receipts WHERE key=%s",
+                                                    ("invoice:" + p["charge_id"],))).fetchone()
+                if not receipt:
+                    return "историческая покупка, проверьте исходное начисление вручную"
+                movements = [(uid, cur, -amount) for uid, cur, amount in receipt["movements"]]
+                await economy.post(conn, "invoice-refund:"+p["charge_id"], movements, "Возврат покупки")
+            return "начисление RiseStars отменено"
         if kind == "vm" and a[0] == "a":
-            await db.set_verified(uid, False)
+            await db.set_verification(uid, "major", False)
             return "снят Мажор"
         if kind == "vm":
             await db.execute("DELETE FROM verified_entities WHERE target=?", (a[1],))
             return "снят Мажор с канала"
         if kind == "nu":
             row = await db.fetchone("SELECT id FROM user_nft_inventory WHERE item_type='username' AND value=?", (a[0],))
-            return await remove_nft(row["id"]) if row else "юзернейм уже удалён"
+            return await remove_nft(row["id"], force=True) if row else "юзернейм уже удалён"
         if kind == "nm":
             row = await db.fetchone("SELECT id FROM user_nft_inventory WHERE item_type='number' AND value=?", (a[1],))
-            return await remove_nft(row["id"]) if row else "номер уже удалён"
+            return await remove_nft(row["id"], force=True) if row else "номер уже удалён"
         if kind == "sc":
             await db.execute("UPDATE scam_requests SET status='refunded' WHERE id=? AND status IN ('pending','approved')", (int(a[1]),))
             return "метка SCAM снята"
+    except economy.WalletError as exc:
+        return f"требуется ручная проверка списания: {exc}"
     except (IndexError, ValueError):
         pass
     return "откат вручную не требуется"
@@ -280,7 +470,10 @@ async def revoke_goods(p: dict) -> str:
 
 async def refund_stars(bot: Bot, uid: int, charge: str) -> tuple[bool, str]:
     try:
-        await bot.refund_star_payment(user_id=uid, telegram_payment_charge_id=charge)
+        chat = await db.telegram_chat_id(uid)
+        if chat is None:
+            return False, "Нет связи с плательщиком Telegram"
+        await bot.refund_star_payment(user_id=chat, telegram_payment_charge_id=charge)
         return True, "ok"
     except Exception as e:  # noqa: BLE001 — Telegram возвращает разные ошибки
         log.warning("refund failed: %s", e)
@@ -390,7 +583,7 @@ async def screen_buy(call: CallbackQuery, pid: int):
 
 async def screen_testers(call: CallbackQuery):
     t = await db.list_testers()
-    text = "🧪 <b>Тестеры</b>\n\n"
+    text = "🧪 <b>Тестеры</b>\n\nКаждый тестер имеет полный доступ к /admin и ко всем операциям панели\n\n"
     rows = []
     for x in t[:15]:
         text += f"• @{esc(x['username'] or '—')} · <code>{x['tg_id']}</code>\n"
@@ -398,6 +591,21 @@ async def screen_testers(call: CallbackQuery):
     if not t:
         text += "Пока никого."
     rows.append([btn("➕ Добавить тестера", "adm:tadd", style="success")])
+    rows.append(home_row())
+    await show(call, text, kb(*rows))
+
+
+async def screen_admins(call: CallbackQuery):
+    admins = await db.list_admins()
+    text = "🛡 <b>Администраторы RiseGram</b>\n\nАдминистраторы и тестеры могут пользоваться полной панелью командой /admin\n\n"
+    rows = []
+    if not admins:
+        text += "Дополнительных администраторов пока нет.\n"
+    for item in admins[:30]:
+        name = item.get("username") or item.get("name") or str(item["tg_id"])
+        text += f"• {esc(name)} · <code>{item['tg_id']}</code>\n"
+        rows.append([btn(f"➖ {name}"[:60], f"adm:arm:{item['tg_id']}", style="danger")])
+    rows.append([btn("➕ Добавить администратора", "adm:aadd", style="success")])
     rows.append(home_row())
     await show(call, text, kb(*rows))
 
@@ -449,22 +657,78 @@ def parse_amount(text: str) -> float | None:
     return v if math.isfinite(v) and abs(v) <= 1e12 else None
 
 
-async def apply_balance(bot: Bot, uid: int, cur: str, delta: float) -> str:
+async def apply_balance(bot, uid, cur, delta, key):
     col = "risestars" if cur == "stars" else "gram_balance"
-    sym = "⭐" if cur == "stars" else "💎"
-    u = await db.get_user(uid)
-    if not u:
-        return "❌ Игрок не найден."
+    try:
+        balance = await db.add_balance(uid,col,delta,key=key,title="Операция администратора")
+    except economy.WalletError as exc:
+        return str(exc)
+    await audit(f"Баланс {uid}: {delta:+g} {cur}")
+    await safe_send(bot,uid,f"Изменение баланса: {delta:+g} {cur}.")
+    return f"Готово. Баланс: {fmt_num(balance)} {cur}."
+
+
+async def native_account_request(path, fields):
+    if not config.MTPROTO_ADMIN_API_TOKEN or not config.MTPROTO_ADMIN_API_URL:
+        raise ValueError("native account service unavailable")
+    async with ClientSession(headers={"Authorization": "Bearer " + config.MTPROTO_ADMIN_API_TOKEN},
+                             timeout=ClientTimeout(total=12)) as session:
+        async with session.post(config.MTPROTO_ADMIN_API_URL.rstrip("/") + "/v1/accounts/" + path,
+                                json=fields) as response:
+            response.raise_for_status()
+            return await response.json()
+
+
+async def deletion_preview(event, state, raw):
+    if not re.fullmatch(r"\+?[0-9 ()-]{7,32}", raw) or not 7 <= len(db.digits_of(raw)) <= 15:
+        return await event.answer("Введите полный номер RiseGram, включая код страны.")
+    phone = db.digits_of(raw)
+    local = await db.fetchone("SELECT tg_id,name FROM users WHERE phone_digits=?", (phone,))
+    if local and local["tg_id"] == config.OWNER_ID:
+        return await event.answer("Удаление аккаунта владельца запрещено.")
+    try:
+        peer = await native_account_request("resolve-by-phone", {"phone": phone})
+        native_id = int(peer["user_id"]) if peer["found"] else 0
+    except (ClientError, TimeoutError, KeyError, TypeError, ValueError):
+        return await event.answer("Не удалось проверить номер на сервере. Попробуйте ещё раз.")
+    if not native_id and not local:
+        return await event.answer("Аккаунт с таким номером не найден.")
+    key = secrets.token_hex(12)
+    await state.set_state(Adm.delete_confirm)
+    await state.set_data(dict(key=key, phone=phone, native_id=native_id, local_id=local["tg_id"] if local else 0))
+    target = esc(local["name"]) if local else f"ID {native_id}"
+    await show(event, f"Удалить аккаунт {target} с номером <code>+{phone}</code>? Сессии будут завершены. Восстановить аккаунт нельзя.",
+               kb([btn("Удалить аккаунт", "adm:delconfirm:" + key, style="danger")], cancel_row()))
+
+
+async def confirm_account_deletion(call, state, key):
+    target = await state.get_data()
+    if not key or key != target.get("key") or await state.get_state() != Adm.delete_confirm.state:
+        return await call.answer("Подтверждение устарело. Выберите номер заново.", show_alert=True)
+    uid, peer, phone = target["local_id"], target["native_id"], target["phone"]
     if uid == config.OWNER_ID:
-        return "♾ У владельца бесконечные балансы, менять их не нужно."
-    if delta < 0 and -delta > u[col]:
-        await db.set_balance(uid, col, 0)
-        new = 0.0
-    else:
-        new = await db.add_balance(uid, col, delta)
-    await audit(f"Баланс {db.shown_username(u)} ({uid}): {delta:+g} {col} → {new}")
-    await safe_send(bot, uid, f"🛠 Администрация изменила ваш баланс: <b>{delta:+g} {sym}</b>.")
-    return f"✅ {esc(db.shown_username(u))}: <b>{delta:+g} {sym}</b>, теперь {fmt_num(new, 2)}"
+        return await call.answer("Удаление аккаунта владельца запрещено.", show_alert=True)
+    try:
+        current = await db.fetchone("SELECT tg_id FROM users WHERE phone_digits=?", (phone,))
+        resolved = await native_account_request("resolve-by-phone", {"phone": phone})
+        actual_peer = int(resolved["user_id"]) if resolved["found"] else 0
+        if (current and current["tg_id"] != uid) or (actual_peer and actual_peer != peer):
+            await state.clear()
+            return await call.answer("У номера изменился владелец. Повторите поиск.", show_alert=True)
+        if peer:
+            result = await native_account_request("delete", {
+                "user_id": peer, "command_id": "delete-" + key,
+                "actor": f"risegram-admin-{call.from_user.id}", "reason": "Confirmed account removal",
+            })
+            if result.get("status") != "completed":
+                raise ValueError("deletion pending")
+        if uid and current:
+            await db.delete_user(uid, expected_phone=phone)
+    except (ClientError, TimeoutError, ValueError, KeyError, TypeError):
+        return await call.answer("Удаление не подтверждено. Повторите проверку этой кнопкой.", show_alert=True)
+    await state.clear()
+    await audit(f"Удаление аккаунта подтверждено: admin={call.from_user.id}, peer={peer}, account={uid}")
+    await show(call, "Аккаунт удалён.", kb(home_row()))
 
 
 @admin_router.message(StateFilter(Adm.input), F.text)
@@ -473,7 +737,7 @@ async def on_input(message: Message, state: FSMContext, user: dict):
     act, text, bot = data.get("act"), (message.text or "").strip(), message.bot
     if text.startswith("/"):  # команда отменяет ввод
         await state.clear()
-        if text.lstrip("/").split("@")[0] == config.ADMIN_COMMAND:
+        if text.lstrip("/").split("@")[0] in (config.ADMIN_COMMAND, config.OWNER_COMMAND):
             await home_screen(message, user)
         return
 
@@ -485,6 +749,8 @@ async def on_input(message: Message, state: FSMContext, user: dict):
         await message.answer(note, reply_markup=kb(cancel_row()))
 
     # ── поиск и выбор игрока ──
+    if act == "delete_phone":
+        return await deletion_preview(message, state, text)
     if act == "usearch":
         await state.clear()
         total = await db.count_users(text)
@@ -494,7 +760,7 @@ async def on_input(message: Message, state: FSMContext, user: dict):
         out += "\n".join(f"• {user_line(u)}" for u in rows_db) or "Ничего не найдено."
         await message.answer(out, reply_markup=kb(*rows, home_row()))
         return
-    if act in ("grant_target", "inv_target", "ban_target"):
+    if act in ("grant_target", "inv_target", "ban_target", "admin_add"):
         t = await parse_target(text)
         if not t:
             return await again("❌ Игрок не найден. Ещё раз (@юзернейм, ID или номер):")
@@ -512,6 +778,20 @@ async def on_input(message: Message, state: FSMContext, user: dict):
             await message.answer(
                 f"✅ {user_line(t)}: {'разбанен' if t['banned'] else 'забанен'}.", reply_markup=kb([btn("👤 Карточка", f"adm:u:{t['tg_id']}")], home_row())
             )
+        elif act == "admin_add":
+            if int(t["tg_id"]) == int(config.OWNER_ID):
+                return await done("Владелец уже имеет максимальные права.")
+            created = await db.add_admin(t["tg_id"], t.get("username"), int(user["tg_id"]))
+            if not created:
+                return await done("Этот пользователь уже администратор.")
+            await audit(f"Администратор добавлен: {db.shown_username(t)} ({t['tg_id']})")
+            target_chat = await db.telegram_chat_id(t["tg_id"])
+            if target_chat:
+                await safe_send(bot, target_chat, "🛡 Вам выданы права администратора RiseGram. Откройте личный чат с ботом и используйте /admin.")
+            return await done(
+                f"✅ {esc(db.shown_username(t))} добавлен в администраторы. Команда: /admin",
+                kb([btn("🛡 К администраторам", "adm:admins")], home_row()),
+            )
         else:
             await ask_usernames(message, state, t)
         return
@@ -521,7 +801,7 @@ async def on_input(message: Message, state: FSMContext, user: dict):
         v = parse_amount(text)
         if v is None or v == 0:
             return await again("❌ Введите число, например <code>1000</code> или <code>-500</code>:")
-        note = await apply_balance(bot, data["uid"], data["cur"], v)
+        note = await apply_balance(bot, data["uid"], data["cur"], v, f"admin:{message.chat.id}:{message.message_id}")
         return await done(note, kb([btn("👤 Карточка", f"adm:u:{data['uid']}")], home_row()))
 
     # ── действия над игроком ──
@@ -601,6 +881,54 @@ async def on_input(message: Message, state: FSMContext, user: dict):
         ok = await safe_send(bot, data["uid"], f"✉️ <b>Сообщение от администрации</b>\n\n{esc(text)}")
         await audit(f"Сообщение игроку {data['uid']}")
         return await done("✅ Отправлено." if ok else "❌ Не доставлено (игрок заблокировал бота).", kb([btn("👤 Карточка", f"adm:u:{data['uid']}")], home_row()))
+    if act in ("localgift_qty", "localgift_price", "localgift_time"):
+        return await gift_admin.on_input(message, state, data)
+
+    # ── выпуск лимитированных Telegram-подарков ──
+    if act == "gift_stock":
+        if not text.isdigit() or not 1 <= int(text) <= 1_000_000:
+            return await again("❌ Тираж должен быть целым числом от 1 до 1 000 000:")
+        quantity = int(text)
+        await state.update_data(act="gift_price", quantity=quantity)
+        return await again(
+            f"💰 Цена одного экземпляра {esc(data.get('gift_emoji', '🎁'))} "
+            f"<b>{esc(data.get('gift_name', 'подарка'))}</b> в RiseStars:"
+        )
+    if act == "gift_price":
+        price = parse_amount(text)
+        if price is None or price <= 0:
+            return await again("❌ Цена должна быть положительным числом RiseStars:")
+        try:
+            telegram_cost = (
+                int(data.get("telegram_stars") or 0) + int(data.get("upgrade_stars") or 0)
+            ) * config.RISESTARS_PER_STAR
+            if price < telegram_cost:
+                return await again(
+                    f"❌ Цена не может быть ниже стоимости NFT-подарка и апгрейда: "
+                    f"{fmt_num(telegram_cost)} RiseStars. Введите цену не ниже этого значения:"
+                )
+            drop_id = await db.create_gift_drop(
+                str(data["gift_id"]), str(data["gift_name"]), str(data["gift_emoji"]),
+                int(data.get("telegram_stars") or 0), price, int(data["quantity"]),
+                upgrade_stars=int(data.get("upgrade_stars") or 0),
+                pay_for_upgrade=bool(data.get("pay_for_upgrade")),
+            )
+        except Exception as exc:  # noqa: BLE001
+            log.exception("failed to create gift drop")
+            return await done(f"❌ Не удалось создать дроп: {esc(str(exc)[:250])}")
+        await audit(
+            f"Дроп подарка #{drop_id}: {data['gift_name']} ×{data['quantity']} "
+            f"за {price:g} RiseStars"
+        )
+        return await done(
+            f"✅ Дроп #{drop_id} опубликован\n\n"
+            f"{esc(data['gift_emoji'])} <b>{esc(data['gift_name'])}</b>\n"
+            f"Тираж: <b>{data['quantity']}</b>\n"
+            f"Цена: <b>{fmt_num(price)} RiseStars</b> за штуку\n"
+            f"Telegram: <b>{int(data.get('telegram_stars') or 0)} ⭐</b> с баланса бота за отправку каждого подарка",
+            kb([btn("🎁 К дропам", "adm:gifts")], home_row()),
+        )
+
     # ── задания ──
     if act == "t_title":
         if not 3 <= len(text) <= 60:
@@ -673,13 +1001,17 @@ async def run_broadcast(bot: Bot, text: str):
     ids = await db.all_user_ids()
     ok = fail = 0
     for uid in ids:
+        chat_id = await db.telegram_chat_id(uid)
+        if chat_id is None:
+            fail += 1
+            continue
         try:
-            await bot.send_message(uid, f"📣 {esc(text)}")
+            await bot.send_message(chat_id, f"📣 {esc(text)}")
             ok += 1
         except TelegramRetryAfter as e:
             await asyncio.sleep(e.retry_after)
             try:
-                await bot.send_message(uid, f"📣 {esc(text)}")
+                await bot.send_message(chat_id, f"📣 {esc(text)}")
                 ok += 1
             except Exception:  # noqa: BLE001
                 fail += 1
@@ -734,6 +1066,31 @@ async def adm_cb(call: CallbackQuery, state: FSMContext, user: dict):
     route = parts[1] if len(parts) > 1 else "home"
     bot = call.bot
 
+    if route == "autojoin":
+        if int(call.from_user.id) != int(config.OWNER_TELEGRAM_ID):
+            return await call.answer("Только владелец", show_alert=True)
+        return await screen_autojoin(call)
+    if route == "ajtoggle":
+        if int(call.from_user.id) != int(config.OWNER_TELEGRAM_ID):
+            return await call.answer("Только владелец", show_alert=True)
+        space_id = num(parts, 2)
+        await db.execute("UPDATE rg_space_autojoin SET enabled=1-enabled WHERE space_id=?", (space_id,))
+        await audit(f"Переключено автовступление в пространство {space_id}")
+        return await screen_autojoin(call)
+    if route == "ajremove":
+        if int(call.from_user.id) != int(config.OWNER_TELEGRAM_ID):
+            return await call.answer("Только владелец", show_alert=True)
+        space_id = num(parts, 2)
+        await db.execute("DELETE FROM rg_space_autojoin WHERE space_id=?", (space_id,))
+        await audit(f"Удалено пространство {space_id} из автоподписок")
+        return await screen_autojoin(call)
+    if route == "delphone":
+        return await ask(call, state, "delete_phone", "Введите номер удаляемого аккаунта RiseGram с кодом страны.")
+    if route == "delconfirm":
+        return await confirm_account_deletion(call, state, parts[2] if len(parts) == 3 else "")
+    if route == "gifts":
+        return await call.answer("Операции с балансом доступны в приложении RiseGram.", show_alert=True)
+
     if route == "castgo":
         data = await state.get_data()
         await state.clear()
@@ -747,6 +1104,9 @@ async def adm_cb(call: CallbackQuery, state: FSMContext, user: dict):
         await show(call, "📣 Рассылка запущена. Отчёт придёт сюда, когда закончится.", kb(home_row()))
         return
 
+    if route in ("localgifts", "localgift"):
+        return await gift_admin.on_callback(call, state, parts)
+
     await state.clear()
 
     if route == "noop":
@@ -755,6 +1115,31 @@ async def adm_cb(call: CallbackQuery, state: FSMContext, user: dict):
         return await home_screen(call, user)
     if route == "stats":
         return await screen_stats(call)
+    if route == "gifts":
+        if len(parts) > 2 and parts[2] == "pick":
+            gift_id = parts[3] if len(parts) > 3 else ""
+            try:
+                catalog = await available_telegram_gifts(bot)
+            except Exception:
+                log.exception("Telegram getAvailableGifts failed while selecting a gift")
+                return await call.answer("Не удалось получить каталог Telegram.", show_alert=True)
+            gift = next((item for item in catalog if item["id"] == gift_id and item["can_upgrade"]), None)
+            if not gift:
+                return await call.answer("NFT-подарок больше недоступен для отправки ботом.", show_alert=True)
+            return await ask(
+                call, state, "gift_stock",
+                f"💎 <b>{esc(gift['emoji'])} {esc(gift['name'])}</b>\n"
+                f"Подарок: {gift['stars']} ⭐ + апгрейд NFT: {gift['upgrade_stars']} ⭐ "
+                "с баланса бота\n\n"
+                "Введите количество экземпляров в тираже (1–1 000 000):",
+                "adm:gifts",
+                gift_id=gift["id"], gift_name=gift["name"], gift_emoji=gift["emoji"],
+                telegram_stars=gift["stars"], upgrade_stars=gift["upgrade_stars"],
+                pay_for_upgrade=True,
+            )
+        if len(parts) > 2 and parts[2] == "page":
+            return await screen_gifts(call, num(parts, 3))
+        return await screen_gifts(call)
     if route == "maint":
         new = "0" if await db.get_meta("maintenance") == "1" else "1"
         await db.set_meta("maintenance", new)
@@ -762,13 +1147,19 @@ async def adm_cb(call: CallbackQuery, state: FSMContext, user: dict):
         return await home_screen(call, user)
 
     # ── игроки ──
+    if route in ("verifyrise", "verifymajor"):
+        kind = "RiseGram" if route == "verifyrise" else "Major"
+        return await show(call,
+            f"☑️ <b>Верификация {kind}</b>\n\nВыбери пользователя или найди его по ID / @username, затем нажми «Выдать {kind}» в карточке.",
+            kb([btn("👥 Выбрать пользователя", "adm:users:0", style="primary")],
+               [btn("🔎 Найти пользователя", "adm:usearch")], home_row()))
     if route == "users":
         return await screen_users(call, num(parts, 2))
     if route == "usearch":
         return await ask(call, state, "usearch", "🔎 Введите часть имени, @юзернейм или ID:", "adm:users:0")
     if route == "u":
         return await screen_user(call, num(parts, 2))
-    if route in ("uban", "uver", "udel", "udelok", "ucode", "unum", "uun", "uph", "umsg"):
+    if route in ("uban", "uver", "uverrise", "uvermajor", "udel", "udelok", "ucode", "unum", "uun", "uph", "umsg"):
         uid = num(parts, 2)
         u = await db.get_user(uid)
         if not u:
@@ -780,28 +1171,25 @@ async def adm_cb(call: CallbackQuery, state: FSMContext, user: dict):
             await db.set_banned(uid, not u["banned"])
             await audit(f"{'Разбан' if u['banned'] else 'Бан'}: {db.shown_username(u)} ({uid})")
             return await screen_user(call, uid, "✅ Готово.")
-        if route == "uver":
-            await db.set_verified(uid, not u["verified"])
-            await audit(f"Верификация RiseGram {'снята' if u['verified'] else 'выдана'}: {uid}")
-            return await screen_user(call, uid, "✅ Готово.")
+        if route in ("uverrise", "uvermajor"):
+            kind = "risegram" if route == "uverrise" else "major"
+            if len(parts) != 4 or parts[3] not in ("0", "1"):
+                return await screen_user(call, uid, "Карточка обновлена. Выберите действие.")
+            enabled = parts[3] == "1"
+            await db.set_verification(uid, kind, enabled)
+            sync = await sync_mtproto_verification(uid, force=True)
+            label = "RiseGram" if kind == "risegram" else "Major"
+            await audit(f"Верификация {label} {'выдана' if enabled else 'снята'}: {uid}")
+            note = f"{label}: {'выдана' if enabled else 'снята'}."
+            if not sync.get("synced"):
+                note += " Сервер клиента пока не подтвердил синхронизацию."
+            return await screen_user(call, uid, note)
         if route == "ucode":
             code = await db.issue_auth_code(uid)
             await audit(f"Выдан код входа игроку {uid}")
             return await screen_user(call, uid, f"🔑 Код для {esc(u['phone'])}: <code>{code}</code> (действует {config.AUTH_CODE_TTL_SECONDS // 60} мин)")
-        if route == "udel":
-            if uid == config.OWNER_ID:
-                return await call.answer("Владельца удалить нельзя.", show_alert=True)
-            return await show(
-                call,
-                f"🗑 Удалить {user_line(u)} со всеми данными? Это необратимо.",
-                kb([btn("🗑 Да, удалить", f"adm:udelok:{uid}", style="danger")], [btn("✖️ Нет", back)]),
-            )
-        if route == "udelok":
-            if uid == config.OWNER_ID:
-                return await call.answer("Владельца удалить нельзя.", show_alert=True)
-            await db.delete_user(uid)
-            await audit(f"Удалён игрок {db.shown_username(u)} ({uid})")
-            return await show(call, "🗑 Игрок удалён.", kb([btn("👥 Юзеры", "adm:users:0")], home_row()))
+        if route in ("udel", "udelok"):
+            return await deletion_preview(call, state, u["phone"])
         if route == "uph":
             return await ask(
                 call, state, "uph",
@@ -917,6 +1305,20 @@ async def adm_cb(call: CallbackQuery, state: FSMContext, user: dict):
         return await ask(call, state, "cast_text", "📣 <b>Рассылка</b>\n\nВведите текст сообщения для всех игроков:")
     if route == "testers":
         return await screen_testers(call)
+    if route in ("admins", "aadd", "arm"):
+        if int(user["tg_id"]) != int(config.OWNER_ID):
+            return await call.answer("Управление администраторами доступно только владельцу.", show_alert=True)
+        if route == "admins":
+            return await screen_admins(call)
+        if route == "aadd":
+            return await ask(call, state, "admin_add", "🛡 Введите @юзернейм, RiseGram ID или номер пользователя, которого нужно сделать администратором:", "adm:admins")
+        target_id = num(parts, 2)
+        if target_id == int(config.OWNER_ID):
+            return await call.answer("Владельца нельзя удалить из администраторов.", show_alert=True)
+        removed = await db.remove_admin(target_id)
+        if removed:
+            await audit(f"Администратор удалён: {target_id}")
+        return await screen_admins(call)
     if route == "tadd":
         return await ask(call, state, "tester_add", "🧪 Введите @юзернейм или ID тестера:", "adm:testers")
     if route == "trm":
@@ -931,3 +1333,130 @@ async def adm_cb(call: CallbackQuery, state: FSMContext, user: dict):
         return await screen_logs(call, num(parts, 2))
 
     await call.answer("Неизвестное действие.")
+
+
+@admin_router.message(Command("reply"))
+async def cmd_support_reply(message: Message):
+    if int(message.from_user.id) != int(config.OWNER_TELEGRAM_ID):
+        return await message.answer("❌ Только владелец может отвечать на обращения")
+    parts = (message.text or "").split(maxsplit=2)
+    if len(parts) != 3 or not parts[1].isdigit() or not parts[2].strip():
+        return await message.answer("Формат: /reply ID текст ответа")
+    ticket = await db.get_support_ticket(int(parts[1]))
+    if not ticket:
+        return await message.answer("Обращение не найдено")
+    if ticket["status"] != "open":
+        return await message.answer("На это обращение уже ответили")
+    delivered = await safe_send(message.bot, int(ticket["tg_id"]),
+        f"🆘 <b>Ответ поддержки RiseGram · #{ticket['id']}</b>\n\n{esc(parts[2])}")
+    if not delivered:
+        return await message.answer("Не удалось доставить ответ — тикет остаётся открытым")
+    await db.close_support_ticket(ticket["id"])
+    await audit(f"Ответ на тикет #{ticket['id']}")
+    await message.answer(f"✅ Ответ на обращение #{ticket['id']} доставлен")
+
+
+@admin_router.message(Command("markfake", "markscam", "unmarkfake", "unmarkscam"))
+async def cmd_risk_mark(message: Message):
+    if int(message.from_user.id) != int(config.OWNER_TELEGRAM_ID):
+        return await message.answer("❌ Метки может выдавать только владелец")
+    parts = (message.text or "").split(maxsplit=2)
+    cmd = parts[0].split("@")[0].lstrip("/").lower()
+    label = "FAKE" if cmd.endswith("fake") else "SCAM"
+    if len(parts) < 2 or not re.fullmatch(r"@[A-Za-z][A-Za-z0-9_]{3,31}", parts[1]):
+        return await message.answer("Формат: /markfake @username причина или /unmarkfake @username (аналогично для scam)")
+    if cmd.startswith("unmark"):
+        count = await db.remove_risk_label(parts[1], label)
+        await audit(f"Метка {label} снята с {parts[1]}")
+        return await message.answer("✅ Метка снята" if count else "ℹ️ Метка не найдена")
+    if len(parts) < 3 or len(parts[2].strip()) < 8:
+        return await message.answer("Укажите конкретную причину длиной от 8 символов")
+    await db.set_risk_label(parts[1], label, int(config.OWNER_ID), parts[2])
+    await audit(f"Метка {label} установлена для {parts[1]}")
+    await message.answer(f"✅ Метка {label} назначена для {esc(parts[1])} внутри RiseGram")
+
+
+@admin_router.message(Command("tickets"))
+async def cmd_support_tickets(message: Message):
+    if int(message.from_user.id) != int(config.OWNER_TELEGRAM_ID):
+        return await message.answer("❌ Только владелец может просматривать обращения")
+    rows = await db.fetchall("SELECT id,tg_id,message,created_at FROM support_tickets WHERE status='open' ORDER BY id DESC LIMIT 15")
+    if not rows:
+        return await message.answer("🆘 Открытых обращений нет")
+    chunks = ["🆘 <b>Открытые обращения RiseGram</b>"]
+    for ticket in rows:
+        preview = ticket["message"][:180]
+        chunks.append(f"\n<b>#{ticket['id']}</b> · ID <code>{ticket['tg_id']}</code>\n{esc(preview)}\n<code>/reply {ticket['id']} ответ</code>")
+    await message.answer("\n".join(chunks))
+
+
+async def screen_autojoin(event):
+    if int(event.from_user.id) != int(config.OWNER_TELEGRAM_ID):
+        return await event.answer("Только владелец", show_alert=True)
+    await db.ensure_default_risegram_spaces()
+    rows = await db.fetchall(
+        """SELECT a.space_id,a.alias,a.enabled,s.title,s.kind,
+                  (SELECT COUNT(*) FROM rg_space_members m WHERE m.space_id=a.space_id) AS members
+           FROM rg_space_autojoin a JOIN rg_spaces s ON s.id=a.space_id ORDER BY a.alias""")
+    text = ("👥 <b>Автовступление RiseGram</b>\\n\\n"
+            "Новые аккаунты добавляются в включённые внутренние группы и каналы при первом входе. "
+            "Существующих участников отключение не удаляет.\\n\\n"
+            "Добавить существующую группу: <code>/autojoin add ID @alias</code>\\n"
+            "Удалить из списка: <code>/autojoin remove @alias</code>\\n"
+            "Посмотреть ID пространств: <code>/autojoin spaces</code>\\n")
+    buttons = []
+    for row in rows:
+        text += (f"\\n{'🟢' if row['enabled'] else '⚪'} <b>@{esc(row['alias'])}</b> "
+                 f"({esc(row['kind'])}, ID {row['space_id']}, {row['members']} участников)")
+        buttons.append([
+            btn(("⏸ Выкл " if row["enabled"] else "▶️ Вкл ") + "@" + row["alias"][:18],
+                f"adm:ajtoggle:{row['space_id']}"),
+            btn("🗑", f"adm:ajremove:{row['space_id']}", style="danger"),
+        ])
+    buttons.append(home_row())
+    await show(event, text.replace("\\\\n", "\\n"), kb(*buttons))
+
+
+@admin_router.message(Command("autojoin"), OwnerOnly())
+async def cmd_autojoin(message: Message):
+    args = (message.text or "").split()
+    if len(args) == 1 or args[1].lower() == "list":
+        return await screen_autojoin(message)
+    op = args[1].lower()
+    await db.ensure_default_risegram_spaces()
+    if op == "spaces":
+        spaces = await db.fetchall(
+            "SELECT id,title,kind FROM rg_spaces ORDER BY id DESC LIMIT 35")
+        return await message.answer(
+            "Внутренние группы и каналы RiseGram:\\n" +
+            "\\n".join(f"{x['id']} · {esc(x['title'])} ({x['kind']})" for x in spaces)
+        )
+    if op == "add" and len(args) == 4:
+        try:
+            space_id = int(args[2])
+        except ValueError:
+            return await message.answer("Нужен числовой ID группы")
+        alias = db.norm_username(args[3])
+        if not re.fullmatch(r"[a-z][a-z0-9_]{2,31}", alias):
+            return await message.answer("Некорректный @alias")
+        space = await db.fetchone("SELECT id FROM rg_spaces WHERE id=?", (space_id,))
+        if not space:
+            return await message.answer("Внутренняя группа или канал с таким ID не найдены")
+        try:
+            await db.execute(
+                "INSERT INTO rg_space_autojoin(space_id,alias,enabled,created_at) VALUES(?,?,1,?) "
+                "ON CONFLICT(space_id) DO UPDATE SET alias=excluded.alias,enabled=1",
+                (space_id, alias, db.now()),
+            )
+        except Exception:
+            return await message.answer("Этот @alias уже используется в списке")
+        await audit(f"Автовступление: добавлено @{alias}, пространство {space_id}")
+        return await screen_autojoin(message)
+    if op == "remove" and len(args) == 3:
+        alias = db.norm_username(args[2])
+        await db.execute("DELETE FROM rg_space_autojoin WHERE alias=?", (alias,))
+        await audit(f"Автовступление: удалено @{alias}")
+        return await screen_autojoin(message)
+    return await message.answer(
+        "Использование: /autojoin list | /autojoin spaces | /autojoin add ID @alias | /autojoin remove @alias"
+    )

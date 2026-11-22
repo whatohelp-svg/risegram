@@ -95,10 +95,17 @@ async def show(event: Message | CallbackQuery, text: str, markup: InlineKeyboard
     return await event.answer(text, reply_markup=markup)
 
 
-async def safe_send(bot, chat_id: int, text: str, markup: InlineKeyboardMarkup | None = None) -> bool:
+async def safe_send(bot, user_id: int, text: str, markup: InlineKeyboardMarkup | None = None) -> bool:
+    # All application modules pass an internal RiseGram account key here.
+    # Telegram chat IDs exist only in telegram_links and are delivery metadata.
     try:
+        import database as db
+        chat_id = await db.telegram_chat_id(user_id)
+        if chat_id is None:
+            log.info("no Telegram delivery link for RiseGram user %s", user_id)
+            return False
         await bot.send_message(chat_id, text, reply_markup=markup)
         return True
     except (TelegramForbiddenError, TelegramBadRequest) as e:
-        log.info("cannot send to %s: %s", chat_id, e)
+        log.info("cannot send to RiseGram user %s: %s", user_id, e)
         return False

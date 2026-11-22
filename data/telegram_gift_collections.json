@@ -1,0 +1,677 @@
+[
+  {
+    "gift_id": "intelligencecup",
+    "title": "Intelligence Cups",
+    "fragment_url": "https://fragment.com/gifts/intelligencecup"
+  },
+  {
+    "gift_id": "algorithmcup",
+    "title": "Algorithm Cups",
+    "fragment_url": "https://fragment.com/gifts/algorithmcup"
+  },
+  {
+    "gift_id": "luckylocket",
+    "title": "Lucky Lockets",
+    "fragment_url": "https://fragment.com/gifts/luckylocket"
+  },
+  {
+    "gift_id": "durovsglasses",
+    "title": "Durov’s Glasses",
+    "fragment_url": "https://fragment.com/gifts/durovsglasses"
+  },
+  {
+    "gift_id": "resistancedog",
+    "title": "Resistance Dogs",
+    "fragment_url": "https://fragment.com/gifts/resistancedog"
+  },
+  {
+    "gift_id": "heartlocket",
+    "title": "Heart Lockets",
+    "fragment_url": "https://fragment.com/gifts/heartlocket"
+  },
+  {
+    "gift_id": "heroichelmet",
+    "title": "Heroic Helmets",
+    "fragment_url": "https://fragment.com/gifts/heroichelmet"
+  },
+  {
+    "gift_id": "mightyarm",
+    "title": "Mighty Arms",
+    "fragment_url": "https://fragment.com/gifts/mightyarm"
+  },
+  {
+    "gift_id": "miragelamp",
+    "title": "Mirage Lamps",
+    "fragment_url": "https://fragment.com/gifts/miragelamp"
+  },
+  {
+    "gift_id": "nailbracelet",
+    "title": "Nail Bracelets",
+    "fragment_url": "https://fragment.com/gifts/nailbracelet"
+  },
+  {
+    "gift_id": "preciouspeach",
+    "title": "Precious Peaches",
+    "fragment_url": "https://fragment.com/gifts/preciouspeach"
+  },
+  {
+    "gift_id": "perfumebottle",
+    "title": "Perfume Bottles",
+    "fragment_url": "https://fragment.com/gifts/perfumebottle"
+  },
+  {
+    "gift_id": "minioscar",
+    "title": "Mini Oscars",
+    "fragment_url": "https://fragment.com/gifts/minioscar"
+  },
+  {
+    "gift_id": "gemsignet",
+    "title": "Gem Signets",
+    "fragment_url": "https://fragment.com/gifts/gemsignet"
+  },
+  {
+    "gift_id": "blingbinky",
+    "title": "Bling Binkies",
+    "fragment_url": "https://fragment.com/gifts/blingbinky"
+  },
+  {
+    "gift_id": "plushpepe",
+    "title": "Plush Pepes",
+    "fragment_url": "https://fragment.com/gifts/plushpepe"
+  },
+  {
+    "gift_id": "iongem",
+    "title": "Ion Gems",
+    "fragment_url": "https://fragment.com/gifts/iongem"
+  },
+  {
+    "gift_id": "genielamp",
+    "title": "Genie Lamps",
+    "fragment_url": "https://fragment.com/gifts/genielamp"
+  },
+  {
+    "gift_id": "ionicdryer",
+    "title": "Ionic Dryers",
+    "fragment_url": "https://fragment.com/gifts/ionicdryer"
+  },
+  {
+    "gift_id": "astralshard",
+    "title": "Astral Shards",
+    "fragment_url": "https://fragment.com/gifts/astralshard"
+  },
+  {
+    "gift_id": "bondedring",
+    "title": "Bonded Rings",
+    "fragment_url": "https://fragment.com/gifts/bondedring"
+  },
+  {
+    "gift_id": "artisanbrick",
+    "title": "Artisan Bricks",
+    "fragment_url": "https://fragment.com/gifts/artisanbrick"
+  },
+  {
+    "gift_id": "durovscap",
+    "title": "Durov’s Caps",
+    "fragment_url": "https://fragment.com/gifts/durovscap"
+  },
+  {
+    "gift_id": "magicpotion",
+    "title": "Magic Potions",
+    "fragment_url": "https://fragment.com/gifts/magicpotion"
+  },
+  {
+    "gift_id": "lovecandle",
+    "title": "Love Candles",
+    "fragment_url": "https://fragment.com/gifts/lovecandle"
+  },
+  {
+    "gift_id": "surgeboard",
+    "title": "Surge Boards",
+    "fragment_url": "https://fragment.com/gifts/surgeboard"
+  },
+  {
+    "gift_id": "khabibspapakha",
+    "title": "Khabib’s Papakhas",
+    "fragment_url": "https://fragment.com/gifts/khabibspapakha"
+  },
+  {
+    "gift_id": "rarebird",
+    "title": "Rare Birds",
+    "fragment_url": "https://fragment.com/gifts/rarebird"
+  },
+  {
+    "gift_id": "finepen",
+    "title": "Fine Pens",
+    "fragment_url": "https://fragment.com/gifts/finepen"
+  },
+  {
+    "gift_id": "sharptongue",
+    "title": "Sharp Tongues",
+    "fragment_url": "https://fragment.com/gifts/sharptongue"
+  },
+  {
+    "gift_id": "valentinebox",
+    "title": "Valentine Boxes",
+    "fragment_url": "https://fragment.com/gifts/valentinebox"
+  },
+  {
+    "gift_id": "nekohelmet",
+    "title": "Neko Helmets",
+    "fragment_url": "https://fragment.com/gifts/nekohelmet"
+  },
+  {
+    "gift_id": "joyfulbundle",
+    "title": "Joyful Bundles",
+    "fragment_url": "https://fragment.com/gifts/joyfulbundle"
+  },
+  {
+    "gift_id": "electricskull",
+    "title": "Electric Skulls",
+    "fragment_url": "https://fragment.com/gifts/electricskull"
+  },
+  {
+    "gift_id": "sleighbell",
+    "title": "Sleigh Bells",
+    "fragment_url": "https://fragment.com/gifts/sleighbell"
+  },
+  {
+    "gift_id": "snowmittens",
+    "title": "Snow Mittens",
+    "fragment_url": "https://fragment.com/gifts/snowmittens"
+  },
+  {
+    "gift_id": "westsidesign",
+    "title": "Westside Signs",
+    "fragment_url": "https://fragment.com/gifts/westsidesign"
+  },
+  {
+    "gift_id": "recordplayer",
+    "title": "Record Players",
+    "fragment_url": "https://fragment.com/gifts/recordplayer"
+  },
+  {
+    "gift_id": "eternalrose",
+    "title": "Eternal Roses",
+    "fragment_url": "https://fragment.com/gifts/eternalrose"
+  },
+  {
+    "gift_id": "cupidcharm",
+    "title": "Cupid Charms",
+    "fragment_url": "https://fragment.com/gifts/cupidcharm"
+  },
+  {
+    "gift_id": "prettyposy",
+    "title": "Pretty Posies",
+    "fragment_url": "https://fragment.com/gifts/prettyposy"
+  },
+  {
+    "gift_id": "skystilettos",
+    "title": "Sky Stilettos",
+    "fragment_url": "https://fragment.com/gifts/skystilettos"
+  },
+  {
+    "gift_id": "lootbag",
+    "title": "Loot Bags",
+    "fragment_url": "https://fragment.com/gifts/lootbag"
+  },
+  {
+    "gift_id": "holidaydrink",
+    "title": "Holiday Drinks",
+    "fragment_url": "https://fragment.com/gifts/holidaydrink"
+  },
+  {
+    "gift_id": "snowglobe",
+    "title": "Snow Globes",
+    "fragment_url": "https://fragment.com/gifts/snowglobe"
+  },
+  {
+    "gift_id": "madpumpkin",
+    "title": "Mad Pumpkins",
+    "fragment_url": "https://fragment.com/gifts/madpumpkin"
+  },
+  {
+    "gift_id": "flyingbroom",
+    "title": "Flying Brooms",
+    "fragment_url": "https://fragment.com/gifts/flyingbroom"
+  },
+  {
+    "gift_id": "lowrider",
+    "title": "Low Riders",
+    "fragment_url": "https://fragment.com/gifts/lowrider"
+  },
+  {
+    "gift_id": "lovepotion",
+    "title": "Love Potions",
+    "fragment_url": "https://fragment.com/gifts/lovepotion"
+  },
+  {
+    "gift_id": "lushbouquet",
+    "title": "Lush Bouquets",
+    "fragment_url": "https://fragment.com/gifts/lushbouquet"
+  },
+  {
+    "gift_id": "bunnymuffin",
+    "title": "Bunny Muffins",
+    "fragment_url": "https://fragment.com/gifts/bunnymuffin"
+  },
+  {
+    "gift_id": "ufcstrike",
+    "title": "UFC Strikes",
+    "fragment_url": "https://fragment.com/gifts/ufcstrike"
+  },
+  {
+    "gift_id": "skullflower",
+    "title": "Skull Flowers",
+    "fragment_url": "https://fragment.com/gifts/skullflower"
+  },
+  {
+    "gift_id": "hangingstar",
+    "title": "Hanging Stars",
+    "fragment_url": "https://fragment.com/gifts/hangingstar"
+  },
+  {
+    "gift_id": "signetring",
+    "title": "Signet Rings",
+    "fragment_url": "https://fragment.com/gifts/signetring"
+  },
+  {
+    "gift_id": "kissedfrog",
+    "title": "Kissed Frogs",
+    "fragment_url": "https://fragment.com/gifts/kissedfrog"
+  },
+  {
+    "gift_id": "moussecake",
+    "title": "Mousse Cakes",
+    "fragment_url": "https://fragment.com/gifts/moussecake"
+  },
+  {
+    "gift_id": "crystalball",
+    "title": "Crystal Balls",
+    "fragment_url": "https://fragment.com/gifts/crystalball"
+  },
+  {
+    "gift_id": "diamondring",
+    "title": "Diamond Rings",
+    "fragment_url": "https://fragment.com/gifts/diamondring"
+  },
+  {
+    "gift_id": "bowtie",
+    "title": "Bow Ties",
+    "fragment_url": "https://fragment.com/gifts/bowtie"
+  },
+  {
+    "gift_id": "vintagecigar",
+    "title": "Vintage Cigars",
+    "fragment_url": "https://fragment.com/gifts/vintagecigar"
+  },
+  {
+    "gift_id": "jinglebells",
+    "title": "Jingle Bells",
+    "fragment_url": "https://fragment.com/gifts/jinglebells"
+  },
+  {
+    "gift_id": "berrybox",
+    "title": "Berry Boxes",
+    "fragment_url": "https://fragment.com/gifts/berrybox"
+  },
+  {
+    "gift_id": "tophat",
+    "title": "Top Hats",
+    "fragment_url": "https://fragment.com/gifts/tophat"
+  },
+  {
+    "gift_id": "hypnolollipop",
+    "title": "Hypno Lollipops",
+    "fragment_url": "https://fragment.com/gifts/hypnolollipop"
+  },
+  {
+    "gift_id": "starnotepad",
+    "title": "Star Notepads",
+    "fragment_url": "https://fragment.com/gifts/starnotepad"
+  },
+  {
+    "gift_id": "timelessbook",
+    "title": "Timeless Books",
+    "fragment_url": "https://fragment.com/gifts/timelessbook"
+  },
+  {
+    "gift_id": "trappedheart",
+    "title": "Trapped Hearts",
+    "fragment_url": "https://fragment.com/gifts/trappedheart"
+  },
+  {
+    "gift_id": "moneypot",
+    "title": "Money Pots",
+    "fragment_url": "https://fragment.com/gifts/moneypot"
+  },
+  {
+    "gift_id": "restlessjar",
+    "title": "Restless Jars",
+    "fragment_url": "https://fragment.com/gifts/restlessjar"
+  },
+  {
+    "gift_id": "winterwreath",
+    "title": "Winter Wreaths",
+    "fragment_url": "https://fragment.com/gifts/winterwreath"
+  },
+  {
+    "gift_id": "snakebox",
+    "title": "Snake Boxes",
+    "fragment_url": "https://fragment.com/gifts/snakebox"
+  },
+  {
+    "gift_id": "swisswatch",
+    "title": "Swiss Watches",
+    "fragment_url": "https://fragment.com/gifts/swisswatch"
+  },
+  {
+    "gift_id": "voodoodoll",
+    "title": "Voodoo Dolls",
+    "fragment_url": "https://fragment.com/gifts/voodoodoll"
+  },
+  {
+    "gift_id": "tamagadget",
+    "title": "Tama Gadgets",
+    "fragment_url": "https://fragment.com/gifts/tamagadget"
+  },
+  {
+    "gift_id": "happybrownie",
+    "title": "Happy Brownies",
+    "fragment_url": "https://fragment.com/gifts/happybrownie"
+  },
+  {
+    "gift_id": "petsnake",
+    "title": "Pet Snakes",
+    "fragment_url": "https://fragment.com/gifts/petsnake"
+  },
+  {
+    "gift_id": "faithamulet",
+    "title": "Faith Amulets",
+    "fragment_url": "https://fragment.com/gifts/faithamulet"
+  },
+  {
+    "gift_id": "spicedwine",
+    "title": "Spiced Wines",
+    "fragment_url": "https://fragment.com/gifts/spicedwine"
+  },
+  {
+    "gift_id": "eternalcandle",
+    "title": "Eternal Candles",
+    "fragment_url": "https://fragment.com/gifts/eternalcandle"
+  },
+  {
+    "gift_id": "freshsocks",
+    "title": "Fresh Socks",
+    "fragment_url": "https://fragment.com/gifts/freshsocks"
+  },
+  {
+    "gift_id": "santahat",
+    "title": "Santa Hats",
+    "fragment_url": "https://fragment.com/gifts/santahat"
+  },
+  {
+    "gift_id": "bigyear",
+    "title": "Big Years",
+    "fragment_url": "https://fragment.com/gifts/bigyear"
+  },
+  {
+    "gift_id": "moonpendant",
+    "title": "Moon Pendants",
+    "fragment_url": "https://fragment.com/gifts/moonpendant"
+  },
+  {
+    "gift_id": "jesterhat",
+    "title": "Jester Hats",
+    "fragment_url": "https://fragment.com/gifts/jesterhat"
+  },
+  {
+    "gift_id": "springbasket",
+    "title": "Spring Baskets",
+    "fragment_url": "https://fragment.com/gifts/springbasket"
+  },
+  {
+    "gift_id": "cookieheart",
+    "title": "Cookie Hearts",
+    "fragment_url": "https://fragment.com/gifts/cookieheart"
+  },
+  {
+    "gift_id": "jellybunny",
+    "title": "Jelly Bunnies",
+    "fragment_url": "https://fragment.com/gifts/jellybunny"
+  },
+  {
+    "gift_id": "scaredcat",
+    "title": "Scared Cats",
+    "fragment_url": "https://fragment.com/gifts/scaredcat"
+  },
+  {
+    "gift_id": "sakuraflower",
+    "title": "Sakura Flowers",
+    "fragment_url": "https://fragment.com/gifts/sakuraflower"
+  },
+  {
+    "gift_id": "hexpot",
+    "title": "Hex Pots",
+    "fragment_url": "https://fragment.com/gifts/hexpot"
+  },
+  {
+    "gift_id": "inputkey",
+    "title": "Input Keys",
+    "fragment_url": "https://fragment.com/gifts/inputkey"
+  },
+  {
+    "gift_id": "jollychimp",
+    "title": "Jolly Chimps",
+    "fragment_url": "https://fragment.com/gifts/jollychimp"
+  },
+  {
+    "gift_id": "whipcupcake",
+    "title": "Whip Cupcakes",
+    "fragment_url": "https://fragment.com/gifts/whipcupcake"
+  },
+  {
+    "gift_id": "victorymedal",
+    "title": "Victory Medals",
+    "fragment_url": "https://fragment.com/gifts/victorymedal"
+  },
+  {
+    "gift_id": "moodpack",
+    "title": "Mood Packs",
+    "fragment_url": "https://fragment.com/gifts/moodpack"
+  },
+  {
+    "gift_id": "jackinthebox",
+    "title": "Jacks-in-the-Box",
+    "fragment_url": "https://fragment.com/gifts/jackinthebox"
+  },
+  {
+    "gift_id": "xmasstocking",
+    "title": "Xmas Stockings",
+    "fragment_url": "https://fragment.com/gifts/xmasstocking"
+  },
+  {
+    "gift_id": "poolfloat",
+    "title": "Pool Floats",
+    "fragment_url": "https://fragment.com/gifts/poolfloat"
+  },
+  {
+    "gift_id": "stellarrocket",
+    "title": "Stellar Rockets",
+    "fragment_url": "https://fragment.com/gifts/stellarrocket"
+  },
+  {
+    "gift_id": "candycane",
+    "title": "Candy Canes",
+    "fragment_url": "https://fragment.com/gifts/candycane"
+  },
+  {
+    "gift_id": "lightsword",
+    "title": "Light Swords",
+    "fragment_url": "https://fragment.com/gifts/lightsword"
+  },
+  {
+    "gift_id": "evileye",
+    "title": "Evil Eyes",
+    "fragment_url": "https://fragment.com/gifts/evileye"
+  },
+  {
+    "gift_id": "gingercookie",
+    "title": "Ginger Cookies",
+    "fragment_url": "https://fragment.com/gifts/gingercookie"
+  },
+  {
+    "gift_id": "snoopcigar",
+    "title": "Snoop Cigars",
+    "fragment_url": "https://fragment.com/gifts/snoopcigar"
+  },
+  {
+    "gift_id": "cloverpin",
+    "title": "Clover Pins",
+    "fragment_url": "https://fragment.com/gifts/cloverpin"
+  },
+  {
+    "gift_id": "lunarsnake",
+    "title": "Lunar Snakes",
+    "fragment_url": "https://fragment.com/gifts/lunarsnake"
+  },
+  {
+    "gift_id": "swagbag",
+    "title": "Swag Bags",
+    "fragment_url": "https://fragment.com/gifts/swagbag"
+  },
+  {
+    "gift_id": "partysparkler",
+    "title": "Party Sparklers",
+    "fragment_url": "https://fragment.com/gifts/partysparkler"
+  },
+  {
+    "gift_id": "bdaycandle",
+    "title": "B-Day Candles",
+    "fragment_url": "https://fragment.com/gifts/bdaycandle"
+  },
+  {
+    "gift_id": "libertyfigure",
+    "title": "Liberty Figures",
+    "fragment_url": "https://fragment.com/gifts/libertyfigure"
+  },
+  {
+    "gift_id": "instantramen",
+    "title": "Instant Ramens",
+    "fragment_url": "https://fragment.com/gifts/instantramen"
+  },
+  {
+    "gift_id": "easteregg",
+    "title": "Easter Eggs",
+    "fragment_url": "https://fragment.com/gifts/easteregg"
+  },
+  {
+    "gift_id": "spyagaric",
+    "title": "Spy Agarics",
+    "fragment_url": "https://fragment.com/gifts/spyagaric"
+  },
+  {
+    "gift_id": "toybear",
+    "title": "Toy Bears",
+    "fragment_url": "https://fragment.com/gifts/toybear"
+  },
+  {
+    "gift_id": "witchhat",
+    "title": "Witch Hats",
+    "fragment_url": "https://fragment.com/gifts/witchhat"
+  },
+  {
+    "gift_id": "homemadecake",
+    "title": "Homemade Cakes",
+    "fragment_url": "https://fragment.com/gifts/homemadecake"
+  },
+  {
+    "gift_id": "deskcalendar",
+    "title": "Desk Calendars",
+    "fragment_url": "https://fragment.com/gifts/deskcalendar"
+  },
+  {
+    "gift_id": "icecream",
+    "title": "Ice Creams",
+    "fragment_url": "https://fragment.com/gifts/icecream"
+  },
+  {
+    "gift_id": "chillflame",
+    "title": "Chill Flames",
+    "fragment_url": "https://fragment.com/gifts/chillflame"
+  },
+  {
+    "gift_id": "vicecream",
+    "title": "Vice Creams",
+    "fragment_url": "https://fragment.com/gifts/vicecream"
+  },
+  {
+    "gift_id": "snoopdogg",
+    "title": "Snoop Doggs",
+    "fragment_url": "https://fragment.com/gifts/snoopdogg"
+  },
+  {
+    "gift_id": "lolpop",
+    "title": "Lol Pops",
+    "fragment_url": "https://fragment.com/gifts/lolpop"
+  },
+  {
+    "gift_id": "trojanhorse",
+    "title": "Trojan Horse"
+  },
+  {
+    "gift_id": "1may",
+    "title": "1 May"
+  },
+  {
+    "gift_id": "coffin",
+    "title": "Coffin"
+  },
+  {
+    "gift_id": "eastercake",
+    "title": "Easter Cake"
+  },
+  {
+    "gift_id": "eightroses",
+    "title": "Eight Roses"
+  },
+  {
+    "gift_id": "gravestone",
+    "title": "Gravestone"
+  },
+  {
+    "gift_id": "redstar",
+    "title": "Red Star"
+  },
+  {
+    "gift_id": "standard-5170250947678437525",
+    "title": "Gift Box (обычный)"
+  },
+  {
+    "gift_id": "standard-5168103777563050263",
+    "title": "Red Rose (обычный)"
+  },
+  {
+    "gift_id": "standard-5170314324215857265",
+    "title": "Bouquet of Flowers (обычный)"
+  },
+  {
+    "gift_id": "standard-5170564780938756245",
+    "title": "Rocket (обычный)"
+  },
+  {
+    "gift_id": "standard-6028601630662853006",
+    "title": "Champagne Bottle (обычный)"
+  },
+  {
+    "gift_id": "standard-5168043875654172773",
+    "title": "Trophy (обычный)"
+  },
+  {
+    "gift_id": "standard-5170690322832818290",
+    "title": "Diamond Ring (обычный)"
+  },
+  {
+    "gift_id": "standard-5170521118301225164",
+    "title": "Gem (обычный)"
+  }
+]

@@ -1,0 +1,74 @@
+--- a/internal/admin/service.go
++++ b/internal/admin/service.go
+@@ -3999,7 +3999,7 @@
+ 			return CommandResult{Message: "star gift import validated", Details: details}, nil
+ 		}
+ 		entry, err := s.gifts.CreateCatalogRevision(ctx, domain.StarGiftCatalogWrite{
+-			GiftID: req.GiftID, Title: req.Title, Stars: req.Stars, ConvertStars: req.ConvertStars,
++			GiftID: req.GiftID, Title: req.Title, Stars: req.Stars, ConvertStars: domain.RegularGiftRedemption(req.Stars),
+ 			Enabled: req.Enabled, SortOrder: req.SortOrder, SupportOnly: req.SupportOnly, Animation: animation,
+ 			RequirePremium: req.RequirePremium,
+ 			Birthday:       req.Birthday,
+@@ -4251,7 +4251,7 @@
+ 		perUserTotal = req.PerUserTotal
+ 	}
+ 	write := domain.StarGiftCatalogBundleWrite{Catalog: domain.StarGiftCatalogWrite{
+-		GiftID: req.GiftID, Title: req.Title, Stars: req.Stars, ConvertStars: req.ConvertStars,
++		GiftID: req.GiftID, Title: req.Title, Stars: req.Stars, ConvertStars: domain.RegularGiftRedemption(req.Stars),
+ 		Enabled: req.Enabled, SortOrder: req.SortOrder, Animation: baseAnimation, Actor: req.Actor, CommandID: req.CommandID,
+ 		OfficialGiftID: sourceID, SourceManifestSHA256: append([]byte(nil), bundle.ManifestSHA256...),
+ 		OfficialSourceJSON: append([]byte(nil), bundle.SourceJSON...),
+--- a/internal/domain/star_gift.go
++++ b/internal/domain/star_gift.go
+@@ -362,6 +362,11 @@
+ 	Currency StarGiftCurrency
+ 	Amount   int64
+ 	Nanos    int
++}
++
++// RegularGiftRedemption rounds 85% of the base gift price to the nearest whole Star.
++func RegularGiftRedemption(price int64) int64 {
++	return price/100*85 + (price%100*85+50)/100
+ }
+ 
+ func (a StarGiftAmount) WithinResaleRange() bool {
+--- /dev/null
++++ b/deploy/migrations/20261121020000_regular_gift_redemption.up.sql
+@@ -0,0 +1,23 @@
++WITH updated AS (
++    UPDATE star_gift_catalog_revisions r
++    SET convert_stars = stars/100*85+(stars%100*85+50)/100
++    FROM star_gift_catalog c WHERE r.id=c.active_revision_id
++    AND convert_stars <> stars/100*85+(stars%100*85+50)/100
++    RETURNING r.gift_id
++)
++UPDATE star_gift_catalog SET updated_at=now() WHERE gift_id IN (SELECT gift_id FROM updated);
++
++-- Reprice only outstanding, purchased regular gifts. The price at purchase is
++-- taken from the immutable receipt revision and excludes a prepaid upgrade.
++UPDATE peer_star_gifts g
++SET convert_stars = r.stars/100*85+(r.stars%100*85+50)/100
++FROM star_gift_catalog_revisions r, star_gift_purchase_commands p, users sender
++WHERE g.catalog_revision_id=r.id AND p.saved_gift_id=g.id AND p.charge_stars>=r.stars
++  AND sender.id=p.buyer_user_id AND NOT sender.is_bot AND g.unique_gift_id IS NULL
++  AND NOT g.converted AND g.lifecycle_status='active';
++UPDATE message_boxes b
++SET media=jsonb_set(b.media,'{service_action,star_gift,convert_stars}',to_jsonb(g.convert_stars))
++FROM peer_star_gifts g
++WHERE g.owner_peer_type='user' AND b.owner_user_id=g.owner_peer_id AND b.box_id=g.msg_id
++  AND b.media#>>'{service_action,kind}'='star_gift' AND g.unique_gift_id IS NULL
++  AND g.lifecycle_status='active' AND g.convert_stars>0;
+--- /dev/null
++++ b/internal/domain/regular_gift_redemption_test.go
+@@ -0,0 +1,11 @@
++package domain
++
++import "testing"
++
++func TestRegularGiftRedemption(t *testing.T) {
++	for price, want := range map[int64]int64{1: 1, 15: 13, 25: 21, 50: 43, 100: 85} {
++		if got := RegularGiftRedemption(price); got != want {
++			t.Errorf("redemption of %d: got %d, want %d", price, got, want)
++		}
++	}
++}

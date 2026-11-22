@@ -1,0 +1,24 @@
+# Local secrets and environment files
+.env
+.env.*
+!.env.example
+server/.env.mtproto
+
+# Local Python state
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.db
+*.sqlite
+*.sqlite3
+
+# Android/Gradle build output
+.gradle/
+**/build/
+local.properties
+*.apk
+*.aab
+
+# Local container data
+server/data/
