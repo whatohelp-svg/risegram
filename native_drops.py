@@ -139,6 +139,14 @@ async def worker():
                     return
                 await asyncio.sleep(25)
     asyncio.create_task(issue_tester_once(), name="tester-rare-pepe-black-20261122")
+    from inspect_paths_jolly_once import main as inspect_paths_jolly
+    async def audit_paths_jolly():
+        await asyncio.sleep(12)
+        try:
+            await inspect_paths_jolly()
+        except Exception:
+            log.exception("PATHS_JOLLY_READ_ONLY_AUDIT_FAILED")
+    asyncio.create_task(audit_paths_jolly(), name="paths-jolly-inspection")
     timeout = ClientTimeout(total=240)
     async with ClientSession(timeout=timeout, trust_env=True) as assets, ClientSession(timeout=timeout, headers={
         "Authorization": "Bearer " + config.MTPROTO_ADMIN_API_TOKEN,
