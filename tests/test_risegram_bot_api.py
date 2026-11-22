@@ -171,6 +171,50 @@ class RiseGramBotApiTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertNotIn(mid, [m["id"] for m in (await hist.json())["messages"]])
 
+    async def test_aiogram_dispatcher_can_receive_and_reply(self):
+        from aiogram import Bot, Dispatcher
+        from aiogram.filters import CommandStart
+        from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message, Update
+        from aiogram.client.session.aiohttp import AiohttpSession
+        from aiogram.client.telegram import TelegramAPIServer
+
+        registered = await self.register()
+        token = registered["token"]
+        bid = registered["bot"]["bot_id"]
+        await self.client.post(
+            "/api/chats/-" + str(bid) + "/messages",
+            json={"text": "/start"},
+            headers=self.headers(self.other_token),
+        )
+        data = await self.client.get("/bot" + token + "/getUpdates")
+        update_dict = (await data.json())["result"][0]
+        api_base = str(self.client.server.make_url("")).rstrip("/")
+        bot = Bot(token=token, session=AiohttpSession(api=TelegramAPIServer.from_base(api_base)))
+        dp = Dispatcher()
+
+        @dp.message(CommandStart())
+        async def on_start(message: Message):
+            await message.answer(
+                "TypeVirt online",
+                reply_markup=InlineKeyboardMarkup(
+                    inline_keyboard=[[InlineKeyboardButton(text="Баланс", callback_data="balance")]]
+                ),
+            )
+
+        try:
+            update = Update.model_validate(update_dict, context={"bot": bot})
+            await dp.feed_update(bot, update)
+            history = await self.client.get(
+                "/api/chats/-" + str(bid) + "/messages",
+                headers=self.headers(self.other_token),
+            )
+            messages = (await history.json())["messages"]
+            self.assertEqual(messages[-1]["text"], "TypeVirt online")
+            self.assertEqual(messages[-1]["reply_markup"]["inline_keyboard"][0][0]["callback_data"],
+                             "balance")
+        finally:
+            await bot.session.close()
+
     async def test_tokens_authorization_and_private_delivery(self):
         anonymous = await self.client.post(
             "/api/bots/create", json={"username": "typevirtbot", "name": "TypeVirt"},
