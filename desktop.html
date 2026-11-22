@@ -131,7 +131,52 @@ function renderChats(rows,el){el.replaceChildren();if(!rows.length){el.textConte
 async function chats(){try{const r=await api("/api/chats");const v=JSON.stringify(r.chats);if(v!==lastList){lastList=v;renderChats(r.chats,$("chatlist"))}}catch(e){error(e)}}
 let searchDelay;$("search").oninput=()=>{clearTimeout(searchDelay);let q=$("search").value.trim();if(q.length<2){$("searchResults").replaceChildren();return}searchDelay=setTimeout(async()=>{try{let r=await api("/api/users/search?q="+encodeURIComponent(q));renderChats(r.users,$("searchResults"))}catch(e){error(e)}},400)};
 async function openChat(u){peer=u;view("chats");$("chatTitle").textContent=u.name||"Пользователь";$("chatSub").textContent=u.is_bot?("Бот RiseGram · @"+u.username):("ID "+u.rise_id+ (u.username?" · @"+u.username:""));$("composer").hidden=false;await messages()}
-async function messages(){if(!peer)return;try{const r=await api("/api/chats/"+peer.rise_id+"/messages");$("messages").replaceChildren();r.messages.forEach(m=>{const div=document.createElement("div");div.className="bubble"+(m.from_me?" mine":"");div.textContent=m.text||"[Медиа]";$("messages").append(div);if(peer.is_bot&&m.reply_markup&&Array.isArray(m.reply_markup.inline_keyboard)){for(const buttons of m.reply_markup.inline_keyboard){const bar=document.createElement("div");bar.className="row";for(const item of buttons){if(!item.callback_data)continue;const btn=document.createElement("button");btn.type="button";btn.textContent=item.text||"Действие";btn.onclick=async()=>{btn.disabled=true;try{await api("/api/bots/"+peer.bot_id+"/callback",{method:"POST",body:JSON.stringify({message_id:m.id,data:item.callback_data})});setTimeout(messages,450)}catch(e){error(e)}finally{btn.disabled=false}};bar.append(btn)}$("messages").append(bar)}}});$("messages").scrollTop=$("messages").scrollHeight}catch(e){error(e)}}
+async function messages(){
+ if(!peer)return;
+ try{
+  const selected=peer;
+  const r=await api("/api/chats/"+selected.rise_id+"/messages");
+  if(peer!==selected)return;
+  $("messages").replaceChildren();
+  const appendKeyboard=(rows,click)=>{
+   for(const items of rows){
+    const bar=document.createElement("div");bar.className="row";
+    for(const item of items){
+     const btn=document.createElement("button");btn.type="button";btn.textContent=item.text||"Действие";
+     btn.onclick=()=>click(item,btn);
+     bar.append(btn);
+    }
+    $("messages").append(bar);
+   }
+  };
+  for(const m of r.messages){
+   const div=document.createElement("div");div.className="bubble"+(m.from_me?" mine":"");
+   div.textContent=m.text||"[Медиа]";$("messages").append(div);
+   if(selected.is_bot&&m.reply_markup&&Array.isArray(m.reply_markup.inline_keyboard)){
+    appendKeyboard(m.reply_markup.inline_keyboard,async(item,btn)=>{
+     if(item.url){window.open(item.url,"_blank","noopener,noreferrer");return}
+     if(!item.callback_data)return;
+     btn.disabled=true;
+     try{
+      await api("/api/bots/"+selected.bot_id+"/callback",{method:"POST",
+       body:JSON.stringify({message_id:m.id,data:item.callback_data})});
+      setTimeout(messages,550);
+     }catch(e){error(e)}finally{btn.disabled=false}
+    });
+   }
+  }
+  if(selected.is_bot){
+   const withKeyboard=[...r.messages].reverse().find(m=>m.reply_markup&&Array.isArray(m.reply_markup.keyboard));
+   if(withKeyboard)appendKeyboard(withKeyboard.reply_markup.keyboard,async(item,btn)=>{
+    if(!item.text)return;
+    btn.disabled=true;
+    try{await api("/api/chats/"+selected.rise_id+"/messages",{method:"POST",body:JSON.stringify({text:item.text})});await messages()}
+    catch(e){error(e)}finally{btn.disabled=false}
+   });
+  }
+  $("messages").scrollTop=$("messages").scrollHeight;
+ }catch(e){error(e)}
+}
 $("composer").onsubmit=async e=>{e.preventDefault();const message=$("msg").value.trim();if(!message||!peer)return;try{await api("/api/chats/"+peer.rise_id+"/messages",{method:"POST",body:JSON.stringify({text:message})});$("msg").value="";await messages();await chats()}catch(e){error(e)}};
 async function loadMusic(){if(!me)return;try{music=(await api("/api/profiles/"+me.rise_id+"/music")).music;musicDisplay()}catch(e){error(e)}}
 function musicDisplay(){const title=music?music.title:null;$("currentMusic").textContent=title||"Музыка пока не добавлена";$("profileMusicPill").textContent=title?"🎵 "+title:"🎵 Добавить музыку"}
