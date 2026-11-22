@@ -18,6 +18,7 @@ from datetime import datetime, timezone
 from aiohttp import web
 
 import database as db
+import config
 
 BOT_ID_OFFSET = 900_000_000
 BOT_MAX_MESSAGES = 100
@@ -169,6 +170,9 @@ async def create_bot(request: web.Request):
         return _err("Username must end with bot and be 8-34 characters")
     if not 1 <= len(name) <= 80:
         return _err("Name must be 1-80 characters")
+    # Reserve the first-party TypeVirt identity for RiseGram's configured owner.
+    if username == "typevirtbot" and int(user["tg_id"]) != int(config.OWNER_ID):
+        return _err("This username is reserved for the RiseGram owner", 403)
     # Avoid stealing an ordinary RiseGram username.
     taken = await db.scalar(
         """SELECT COUNT(*) FROM users WHERE lower(username)=?
