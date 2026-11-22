@@ -17,7 +17,7 @@ class RiseGramBotApiTests(unittest.IsolatedAsyncioTestCase):
         self.old_db = db.DB_PATH
         db.DB_PATH = os.path.join(self.tmp.name, "bot.db")
         await db.init_db()
-        self.owner = await db.get_or_create_user(450001, "Owner", "owner450001")
+        self.owner = await db.get_user(__import__("config").OWNER_ID)
         self.other = await db.get_or_create_user(450002, "Other", "other450002")
         self.owner_token = await db.create_session(self.owner["tg_id"])
         self.other_token = await db.create_session(self.other["tg_id"])
@@ -176,6 +176,11 @@ class RiseGramBotApiTests(unittest.IsolatedAsyncioTestCase):
             "/api/bots/create", json={"username": "typevirtbot", "name": "TypeVirt"},
         )
         self.assertEqual(anonymous.status, 401)
+        reserved = await self.client.post(
+            "/api/bots/create", json={"username": "typevirtbot", "name": "Fake TypeVirt"},
+            headers=self.headers(self.other_token),
+        )
+        self.assertEqual(reserved.status, 403)
         registered = await self.register()
         token = registered["token"]
         denied = await self.client.post(
