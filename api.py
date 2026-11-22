@@ -26,6 +26,7 @@ from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError, Teleg
 
 import config
 import database as db
+import risegram_bot_api as bot_api
 import gift_drops as local_gifts
 from gift_catalog import available_telegram_gifts
 from media_api import create_media_handlers, public_media
@@ -227,7 +228,7 @@ async def h_user_search(request: web.Request):
            ORDER BY CASE WHEN CAST(rise_id AS TEXT)=? THEN 0 ELSE 1 END, name LIMIT 25""",
         (user["tg_id"], q, like, like, like, q),
     )
-    return web.json_response({"ok": True, "users": [public_user(x) for x in rows]})
+    return web.json_response({"ok": True, "users": [public_user(x) for x in rows] + await bot_api.search_bots(q)})
 
 
 async def h_chats(request: web.Request):
@@ -257,6 +258,8 @@ async def h_chats(request: web.Request):
         peer = {k: row.get(k) for k in ("user_id","rise_id","name","username","phone","verified","risestars","gram_balance","active_username")}
         chats.append({"user": public_user(peer), "last_message": row["last_message"],
                       "last_at": row["last_at"], "unread": int(row["unread"] or 0)})
+    chats.extend(await bot_api.list_chats(int(user["tg_id"])))
+    chats.sort(key=lambda item: item.get("last_at") or "", reverse=True)
     return web.json_response({"ok": True, "chats": chats})
 
 
@@ -268,6 +271,8 @@ async def h_messages(request: web.Request):
         peer_id = int(request.match_info["rise_id"])
     except ValueError:
         return web.json_response({"ok": False, "error": "bad_rise_id"}, status=400)
+    if peer_id < 0:
+        return await bot_api.client_messages(request, user, -peer_id)
     peer = await db.fetchone("SELECT * FROM users WHERE rise_id=? AND banned=0", (peer_id,))
     if not peer or peer["tg_id"] == user["tg_id"]:
         return web.json_response({"ok": False, "error": "user_not_found"}, status=404)
@@ -312,6 +317,8 @@ async def h_send_message(request: web.Request):
         peer_id = int(request.match_info["rise_id"])
     except ValueError:
         return web.json_response({"ok": False, "error": "bad_rise_id"}, status=400)
+    if peer_id < 0:
+        return await bot_api.client_send(request, user, -peer_id)
     data = await _json(request)
     body = str(data.get("text") or "").strip()
     media_ids = data.get("media_ids", [])
