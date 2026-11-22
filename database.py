@@ -357,7 +357,11 @@ SCHEMA = [
         invite_code TEXT NOT NULL UNIQUE,
         created_at TEXT NOT NULL
     )""",
-    """CREATE TABLE IF NOT EXISTS rg_space_autojoin_enrolled (\n        user_id INTEGER PRIMARY KEY,\n        enrolled_at TEXT NOT NULL\n    )""",\n    """CREATE TABLE IF NOT EXISTS rg_space_autojoin (
+    """CREATE TABLE IF NOT EXISTS rg_space_autojoin_enrolled (
+        user_id INTEGER PRIMARY KEY,
+        enrolled_at TEXT NOT NULL
+    )""",
+    """CREATE TABLE IF NOT EXISTS rg_space_autojoin (
         space_id INTEGER PRIMARY KEY,
         alias TEXT NOT NULL UNIQUE COLLATE NOCASE,
         enabled INTEGER NOT NULL DEFAULT 1,
