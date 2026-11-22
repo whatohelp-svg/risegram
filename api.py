@@ -168,6 +168,7 @@ async def core_verify(phone: str, code: str, *, native=False) -> tuple[int, dict
     user = await db.verify_auth_code(phone, code)
     if not user:
         return 401, {"ok": False, "error": "invalid_code"}
+    await db.join_default_risegram_spaces(int(user["tg_id"]))
     token = await db.create_session(user["tg_id"], native=native)
     return 200, {"ok": True, "token": token, "user": await self_profile(user)}
 
