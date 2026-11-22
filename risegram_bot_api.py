@@ -6,6 +6,7 @@ supports a subset of the Telegram Bot API compatible with aiogram polling.
 from __future__ import annotations
 
 import asyncio
+from collections import defaultdict, deque
 import hashlib
 import html
 import json
@@ -24,6 +25,22 @@ BOT_ID_OFFSET = 900_000_000
 BOT_MAX_MESSAGES = 100
 MAX_TEXT = 4000
 BOT_USERNAME_RE = re.compile(r"[a-z][a-z0-9_]{4,27}bot\Z")
+# Limit unsolicited floods after a user has opened a bot dialogue.
+_SEND_TIMESTAMPS = defaultdict(deque)
+SEND_PER_USER_PER_MINUTE = 40
+
+
+def _allow_send(bot_id: int, user_id: int) -> bool:
+    key = (bot_id, user_id)
+    bucket = _SEND_TIMESTAMPS[key]
+    now = time.monotonic()
+    while bucket and bucket[0] < now - 60:
+        bucket.popleft()
+    if len(bucket) >= SEND_PER_USER_PER_MINUTE:
+        return False
+    bucket.append(now)
+    return True
+
 _TAGS = re.compile(r"<[^>]*>")
 
 
@@ -420,6 +437,8 @@ async def _send_message(bot, data):
         markup = _markup(data.get("reply_markup"))
     except ValueError as exc:
         return _err(str(exc))
+    if not _allow_send(int(bot["id"]), int(user["tg_id"])):
+        return _err("Too many bot messages to this user", 429)
     body = _display(body.strip(), data.get("parse_mode") or "")
     now = db.now()
     async with db.connect() as conn:
