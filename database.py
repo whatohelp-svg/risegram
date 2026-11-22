@@ -357,7 +357,7 @@ SCHEMA = [
         invite_code TEXT NOT NULL UNIQUE,
         created_at TEXT NOT NULL
     )""",
-    """CREATE TABLE IF NOT EXISTS rg_space_autojoin (
+    """CREATE TABLE IF NOT EXISTS rg_space_autojoin_enrolled (\n        user_id INTEGER PRIMARY KEY,\n        enrolled_at TEXT NOT NULL\n    )""",\n    """CREATE TABLE IF NOT EXISTS rg_space_autojoin (
         space_id INTEGER PRIMARY KEY,
         alias TEXT NOT NULL UNIQUE COLLATE NOCASE,
         enabled INTEGER NOT NULL DEFAULT 1,
@@ -1999,6 +1999,12 @@ async def join_default_risegram_spaces(user_id: int) -> int:
     """Idempotent enrollment into currently enabled internal spaces."""
     await ensure_default_risegram_spaces()
     async with connect() as conn:
+        cur = await conn.execute(
+            "INSERT OR IGNORE INTO rg_space_autojoin_enrolled(user_id,enrolled_at) VALUES(?,?)",
+            (int(user_id), now()),
+        )
+        if cur.rowcount == 0:
+            return 0  # Respect a user's choice to leave: never rejoin on later logins.
         cur = await conn.execute(
             """INSERT OR IGNORE INTO rg_space_members(space_id,user_id,role,joined_at)
                SELECT s.id, ?, 'member', ?
