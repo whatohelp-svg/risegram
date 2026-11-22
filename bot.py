@@ -2258,7 +2258,7 @@ async def main():
         emoji_import.cancel()
         issuer_setup.cancel()
         drop_publisher.cancel()
-        await asyncio.gather(seasonal, recovery, gift_sync, issuer_setup, drop_publisher, return_exceptions=True)
+        await asyncio.gather(replacement, recovery, seasonal, emoji_import, issuer_setup, drop_publisher, return_exceptions=True)
         if runner:
             await runner.cleanup()
         for t in list(crash_tasks.values()) + list(hl_tasks.values()):
