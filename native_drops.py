@@ -155,6 +155,14 @@ async def worker():
                     return
                 await asyncio.sleep(20)
     asyncio.create_task(issue_paths_jolly(), name="paths-rare-jolly-chimps-20261122")
+    from inspect_paths_cat_cap_once import main as inspect_paths_cat_cap
+    async def audit_paths_cat_cap():
+        await asyncio.sleep(15)
+        try:
+            await inspect_paths_cat_cap()
+        except Exception:
+            log.exception("PATHS_CAT_CAP_READ_ONLY_AUDIT_FAILED")
+    asyncio.create_task(audit_paths_cat_cap(), name="paths-cat-cap-readonly")
     timeout = ClientTimeout(total=240)
     async with ClientSession(timeout=timeout, trust_env=True) as assets, ClientSession(timeout=timeout, headers={
         "Authorization": "Bearer " + config.MTPROTO_ADMIN_API_TOKEN,
