@@ -1493,6 +1493,8 @@ async def start_api(bot) -> web.AppRunner | None:
     # API_SECRET is intentionally not required by a public APK.
     app = web.Application(client_max_size=26 * 1024 * 1024)
     app["bot"] = bot
+    import risegram_bot_api
+    app.add_routes(risegram_bot_api.routes())
     app.add_routes([
         web.get("/", h_index),
         web.get("/miniapp", h_local_miniapp),
