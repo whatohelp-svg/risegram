@@ -357,6 +357,12 @@ SCHEMA = [
         invite_code TEXT NOT NULL UNIQUE,
         created_at TEXT NOT NULL
     )""",
+    """CREATE TABLE IF NOT EXISTS rg_space_autojoin (
+        space_id INTEGER PRIMARY KEY,
+        alias TEXT NOT NULL UNIQUE COLLATE NOCASE,
+        enabled INTEGER NOT NULL DEFAULT 1,
+        created_at TEXT NOT NULL
+    )""",
     """CREATE TABLE IF NOT EXISTS rg_space_members (
         space_id INTEGER NOT NULL,
         user_id INTEGER NOT NULL,
@@ -1952,3 +1958,54 @@ async def get_support_ticket(ticket_id: int) -> dict | None:
 
 async def close_support_ticket(ticket_id: int) -> None:
     await execute("UPDATE support_tickets SET status='answered', replied_at=? WHERE id=?", (now(),int(ticket_id)))
+
+
+# RiseGram internal channels/groups only; Telegram channels are not affected.
+DEFAULT_RISEGRAM_SPACES = (
+    ("chat", "Чат RiseGram", "group"),
+    ("news", "Новости RiseGram", "channel"),
+    ("testrisegram", "Тестовый канал RiseGram", "channel"),
+)
+
+
+async def ensure_default_risegram_spaces() -> None:
+    """Seed initial internal rooms once. Never recreate an intentionally removed default."""
+    async with connect() as conn:
+        await conn.execute("""CREATE TABLE IF NOT EXISTS rg_space_autojoin_bootstrap (
+            id INTEGER PRIMARY KEY CHECK(id=1)
+        )""")
+        cur = await conn.execute("SELECT id FROM rg_space_autojoin_bootstrap WHERE id=1")
+        if await cur.fetchone():
+            return
+        for alias, title, kind in DEFAULT_RISEGRAM_SPACES:
+            cur = await conn.execute("SELECT space_id FROM rg_space_autojoin WHERE alias=?", (alias,))
+            if await cur.fetchone():
+                continue
+            # Do not hijack existing groups: create explicitly owned RiseGram spaces.
+            invite = __import__("secrets").token_urlsafe(12)
+            cur = await conn.execute(
+                "INSERT INTO rg_spaces(title,description,kind,owner_id,invite_code,created_at) VALUES(?,?,?,?,?,?)",
+                (title, "Официальное пространство RiseGram", kind, int(config.OWNER_ID), invite, now()),
+            )
+            await conn.execute(
+                "INSERT INTO rg_space_autojoin(space_id,alias,enabled,created_at) VALUES(?,?,1,?)",
+                (cur.lastrowid, alias, now()),
+            )
+        await conn.execute("INSERT INTO rg_space_autojoin_bootstrap(id) VALUES(1)")
+        await conn.commit()
+
+
+async def join_default_risegram_spaces(user_id: int) -> int:
+    """Idempotent enrollment into currently enabled internal spaces."""
+    await ensure_default_risegram_spaces()
+    async with connect() as conn:
+        cur = await conn.execute(
+            """INSERT OR IGNORE INTO rg_space_members(space_id,user_id,role,joined_at)
+               SELECT s.id, ?, 'member', ?
+               FROM rg_spaces s JOIN rg_space_autojoin a ON a.space_id=s.id
+               WHERE a.enabled=1 AND s.owner_id!=?""",
+            (int(user_id), now(), int(user_id)),
+        )
+        count = max(0, cur.rowcount)
+        await conn.commit()
+    return count
