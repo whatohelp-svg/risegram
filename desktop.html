@@ -82,7 +82,12 @@ input[type=file]{font-size:13px}.fine{font-size:12px;color:#9eb6ca}
 <div class="hero"><span class="orb"></span><span class="orb"></span><span class="orb"></span><span class="orb"></span>
 <span class="avatar" id="bigavatar">R</span><strong id="myName">RiseGram</strong><span class="sub" id="myTag">—</span><button class="music-pill" id="profileMusicPill">🎵 Добавить музыку</button></div>
 <div class="cards"><div class="panel"><h2>Аккаунт</h2><div id="myDetails"></div></div><div class="panel"><h2>Статусы</h2><div id="myBadges">—</div></div></div>
-<div class="tabs"><button class="on" data-ptab="publications">Публикации</button><button data-ptab="gifts">Подарки</button><button data-ptab="groups">Группы</button></div><div class="panel" id="profileTabContent">Публикаций пока нет</div>
+<div class="tabs"><button class="on" data-ptab="publications">Публикации</button><button data-ptab="gifts">Подарки</button><button data-ptab="groups">Группы</button></div><div class="panel" id="profileTabContent">Публикаций пока нет</div><div class="panel" style="margin-top:16px"><h2>🤖 Боты RiseGram</h2><p class="muted">Создавайте собственных ботов с отдельными токенами RiseGram</p>
+<form id="createBotForm"><label for="newBotName">Название бота</label><input id="newBotName" maxlength="80" placeholder="TypeVirt" required>
+<label for="newBotUsername">Юзернейм (заканчивается на bot)</label><input id="newBotUsername" maxlength="34" placeholder="typevirtbot" required>
+<button type="submit" class="primary">Создать бота</button></form>
+<div id="botList" class="muted" style="margin-top:14px"></div>
+<p id="botToken" class="fine" style="overflow-wrap:anywhere"></p></div>
 </section>
 <section id="music" class="view"><h1>🎵 Музыка профиля</h1><p class="muted">Загрузи свой трек — он будет доступен другим пользователям RiseGram в профиле</p>
 <div class="panel"><h2>Сейчас в профиле</h2><div id="currentMusic" class="muted">Трек не выбран</div><audio id="player" controls hidden></audio><div class="row"><button id="playMusic">▶ Прослушать</button><button id="removeMusic">Удалить музыку</button></div></div>
@@ -108,8 +113,8 @@ return data;
 }
 function error(e){notice("Ошибка: "+(e&&e.message||e))}
 function showLogin(){document.getElementById("login").hidden=false;$("app").hidden=true}
-function view(name){document.querySelectorAll(".view").forEach(v=>v.classList.toggle("active",v.id===name));document.querySelectorAll("[data-view]").forEach(v=>v.classList.toggle("active",v.dataset.view===name));location.hash=name;if(name==="wallet")wallet();if(name==="music")loadMusic();if(name==="chats")chats()}
-async function start(){if(!token)return showLogin();try{const r=await api("/api/me");me=r.user;$("login").hidden=true;$("app").hidden=false;fillProfile();await chats();view(["wallet","profile","music","chats"].includes(location.hash.slice(1))?location.hash.slice(1):"chats")}catch(e){token="";localStorage.removeItem("risegram-desktop-token");showLogin();$("loginNotice").textContent="Сессия истекла — войдите снова"}}
+function view(name){document.querySelectorAll(".view").forEach(v=>v.classList.toggle("active",v.id===name));document.querySelectorAll("[data-view]").forEach(v=>v.classList.toggle("active",v.dataset.view===name));location.hash=name;if(name==="wallet")wallet();if(name==="music")loadMusic();if(name==="chats")chats();if(name==="profile")loadBots()}
+async function start(){if(!token)return showLogin();try{const r=await api("/api/me");me=r.user;$("login").hidden=true;$("app").hidden=false;fillProfile();await chats();view(["wallet","profile","music","chats"].includes(location.hash.slice(1))?location.hash.slice(1):"chats");await openBotDeepLink()}catch(e){token="";localStorage.removeItem("risegram-desktop-token");showLogin();$("loginNotice").textContent="Сессия истекла — войдите снова"}}
 $("sendCode").addEventListener("click",async()=>{const p=$("phone").value.trim();if(!p)return $("loginNotice").textContent="Укажите номер";$("sendCode").disabled=true;try{const r=await fetch("/api/auth/request",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({phone:p})});const j=await r.json();if(!r.ok)throw Error(j.error||"Не удалось отправить код");$("codeZone").hidden=false;$("loginNotice").textContent="Код отправлен в @risegrambot";$("code").focus()}catch(e){$("loginNotice").textContent=e.message}finally{$("sendCode").disabled=false}});
 $("loginForm").addEventListener("submit",async e=>{e.preventDefault();try{const r=await fetch("/api/auth/verify",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({phone:$("phone").value.trim(),code:$("code").value.trim()})});const j=await r.json();if(!r.ok)throw Error(j.error||"Неправильный код");token=j.token;localStorage.setItem("risegram-desktop-token",token);await start()}catch(err){$("loginNotice").textContent=err.message}});
 $("logout").onclick=()=>{token="";localStorage.removeItem("risegram-desktop-token");showLogin()};
@@ -124,9 +129,70 @@ $("stars").textContent=me.risestars===null?"—":Number(me.risestars).toLocaleSt
 async function wallet(){try{me=(await api("/api/me")).user;fillProfile();let r=await api("/api/purchases");$("purchases").textContent=JSON.stringify(r.purchases||r.items||[]).slice(0,330)||"Покупок пока нет"}catch(e){error(e)}}
 function renderChats(rows,el){el.replaceChildren();if(!rows.length){el.textContent="Пока нет диалогов";return}for(const row of rows){const u=row.user||row;const b=document.createElement("button");b.className="chat";const av=document.createElement("span");av.className="avatar";av.textContent=initial(u.name);const txt=document.createElement("span");txt.className="chattext";const strong=document.createElement("strong");strong.textContent=u.name||"Пользователь";const small=document.createElement("small");small.textContent=row.last_message||("@"+(u.username||u.rise_id));txt.append(strong,small);b.append(av,txt);b.onclick=()=>openChat(u);el.append(b)}}
 async function chats(){try{const r=await api("/api/chats");const v=JSON.stringify(r.chats);if(v!==lastList){lastList=v;renderChats(r.chats,$("chatlist"))}}catch(e){error(e)}}
+async function openBotDeepLink(){
+ const params=new URLSearchParams(location.search);
+ const botName=(params.get("bot")||"").replace(/^@/,"");
+ if(!/^[a-zA-Z][a-zA-Z0-9_]{4,34}$/.test(botName))return;
+ try{
+  const found=await api("/api/users/search?q="+encodeURIComponent(botName));
+  const bot=(found.users||[]).find(u=>u.is_bot&&u.username.toLowerCase()===botName.toLowerCase());
+  if(!bot)return;
+  await openChat(bot);
+  const arg=params.get("start")||"";
+  if(/^[a-zA-Z0-9_-]{1,100}$/.test(arg))$("msg").value="/start "+arg;
+  else $("msg").value="/start";
+  $("msg").focus();
+  history.replaceState(null,"",location.pathname+location.hash);
+ }catch(e){error(e)}
+}
 let searchDelay;$("search").oninput=()=>{clearTimeout(searchDelay);let q=$("search").value.trim();if(q.length<2){$("searchResults").replaceChildren();return}searchDelay=setTimeout(async()=>{try{let r=await api("/api/users/search?q="+encodeURIComponent(q));renderChats(r.users,$("searchResults"))}catch(e){error(e)}},400)};
-async function openChat(u){peer=u;view("chats");$("chatTitle").textContent=u.name||"Пользователь";$("chatSub").textContent="ID "+u.rise_id+ (u.username?" · @"+u.username:"");$("composer").hidden=false;await messages()}
-async function messages(){if(!peer)return;try{const r=await api("/api/chats/"+peer.rise_id+"/messages");$("messages").replaceChildren();r.messages.forEach(m=>{const div=document.createElement("div");div.className="bubble"+(m.from_me?" mine":"");div.textContent=m.text||"[Медиа]";$("messages").append(div)});$("messages").scrollTop=$("messages").scrollHeight}catch(e){error(e)}}
+async function openChat(u){peer=u;view("chats");$("chatTitle").textContent=u.name||"Пользователь";$("chatSub").textContent=u.is_bot?("Бот RiseGram · @"+u.username):("ID "+u.rise_id+ (u.username?" · @"+u.username:""));$("composer").hidden=false;await messages()}
+async function messages(){
+ if(!peer)return;
+ try{
+  const selected=peer;
+  const r=await api("/api/chats/"+selected.rise_id+"/messages");
+  if(peer!==selected)return;
+  $("messages").replaceChildren();
+  const appendKeyboard=(rows,click)=>{
+   for(const items of rows){
+    const bar=document.createElement("div");bar.className="row";
+    for(const item of items){
+     const btn=document.createElement("button");btn.type="button";btn.textContent=item.text||"Действие";
+     btn.onclick=()=>click(item,btn);
+     bar.append(btn);
+    }
+    $("messages").append(bar);
+   }
+  };
+  for(const m of r.messages){
+   const div=document.createElement("div");div.className="bubble"+(m.from_me?" mine":"");
+   div.textContent=m.text||"[Медиа]";$("messages").append(div);
+   if(selected.is_bot&&m.reply_markup&&Array.isArray(m.reply_markup.inline_keyboard)){
+    appendKeyboard(m.reply_markup.inline_keyboard,async(item,btn)=>{
+     if(item.url){window.open(item.url,"_blank","noopener,noreferrer");return}
+     if(!item.callback_data)return;
+     btn.disabled=true;
+     try{
+      await api("/api/bots/"+selected.bot_id+"/callback",{method:"POST",
+       body:JSON.stringify({message_id:m.id,data:item.callback_data})});
+      setTimeout(messages,550);
+     }catch(e){error(e)}finally{btn.disabled=false}
+    });
+   }
+  }
+  if(selected.is_bot){
+   const withKeyboard=[...r.messages].reverse().find(m=>m.reply_markup&&Array.isArray(m.reply_markup.keyboard));
+   if(withKeyboard)appendKeyboard(withKeyboard.reply_markup.keyboard,async(item,btn)=>{
+    if(!item.text)return;
+    btn.disabled=true;
+    try{await api("/api/chats/"+selected.rise_id+"/messages",{method:"POST",body:JSON.stringify({text:item.text})});await messages()}
+    catch(e){error(e)}finally{btn.disabled=false}
+   });
+  }
+  $("messages").scrollTop=$("messages").scrollHeight;
+ }catch(e){error(e)}
+}
 $("composer").onsubmit=async e=>{e.preventDefault();const message=$("msg").value.trim();if(!message||!peer)return;try{await api("/api/chats/"+peer.rise_id+"/messages",{method:"POST",body:JSON.stringify({text:message})});$("msg").value="";await messages();await chats()}catch(e){error(e)}};
 async function loadMusic(){if(!me)return;try{music=(await api("/api/profiles/"+me.rise_id+"/music")).music;musicDisplay()}catch(e){error(e)}}
 function musicDisplay(){const title=music?music.title:null;$("currentMusic").textContent=title||"Музыка пока не добавлена";$("profileMusicPill").textContent=title?"🎵 "+title:"🎵 Добавить музыку"}
@@ -135,7 +201,9 @@ $("playMusic").onclick=async()=>{if(!music)return notice("Сначала доб�
 $("musicForm").onsubmit=async e=>{e.preventDefault();const file=$("songfile").files[0],title=$("songtitle").value.trim();if(!file||!title)return;if(file.size>25*1024*1024)return notice("Максимум 25 МБ");const btn=$("musicForm").querySelector("button[type=submit]");btn.disabled=true;try{const form=new FormData();form.append("file",file,file.name);const uploaded=await api("/api/media",{method:"POST",body:form});const result=await api("/api/profile/music",{method:"POST",body:JSON.stringify({media_id:uploaded.media.id,title})});music=result.music;musicDisplay();$("songfile").value="";clearPlayer();notice("Музыка добавлена в профиль")}catch(e){error(e)}finally{btn.disabled=false}};
 $("removeMusic").onclick=async()=>{if(!music)return;try{await api("/api/profile/music",{method:"DELETE"});clearPlayer();music=null;musicDisplay();notice("Музыка удалена")}catch(e){error(e)}};
 document.querySelectorAll("[data-ptab]").forEach(b=>b.onclick=async()=>{document.querySelectorAll("[data-ptab]").forEach(x=>x.classList.toggle("on",x===b));const kind=b.dataset.ptab;if(kind==="gifts"){try{const r=await api("/api/inventory");$("profileTabContent").textContent=JSON.stringify(r.items||r.inventory||[]).slice(0,800)||"Подарков пока нет"}catch(e){$("profileTabContent").textContent="Инвентарь недоступен"}}else $("profileTabContent").textContent=kind==="groups"?"Группы доступны в приложении RiseGram":"Публикаций пока нет"});
-setInterval(()=>{if(!document.hidden&&token&&peer&&$("chats").classList.contains("active"))messages();if(!document.hidden&&token)chats()},14000);
+async function loadBots(){try{const r=await api("/api/bots/mine");const list=$("botList");list.replaceChildren();if(!r.bots.length){list.textContent="Пока нет ботов";return}for(const bot of r.bots){const row=document.createElement("div");row.className="row";row.style.marginBottom="9px";const name=document.createElement("span");name.textContent=bot.name+" · @"+bot.username;const rotate=document.createElement("button");rotate.type="button";rotate.textContent="Новый токен";rotate.onclick=async()=>{if(!confirm("Старый токен перестанет работать. Продолжить?"))return;try{const d=await api("/api/bots/"+bot.bot_id+"/rotate-token",{method:"POST"});$("botToken").textContent="Новый токен @"+bot.username+": "+d.token+" · Сохраните его, повторно посмотреть нельзя"}catch(e){error(e)}};row.append(name,rotate);list.append(row)}}catch(e){error(e)}}
+$("createBotForm").onsubmit=async e=>{e.preventDefault();const username=$("newBotUsername").value.trim().replace(/^@/,"");const name=$("newBotName").value.trim();try{const r=await api("/api/bots/create",{method:"POST",body:JSON.stringify({username,name})});$("botToken").textContent="Токен @"+r.bot.username+": "+r.token+" · Сохраните его, повторно посмотреть нельзя";$("newBotName").value="";$("newBotUsername").value="";await loadBots()}catch(e){error(e)}};
+setInterval(()=>{if(!document.hidden&&token&&peer&&$("chats").classList.contains("active"))messages();if(!document.hidden&&token)chats()},5000);
 start();
 })();
 </script>

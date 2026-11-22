@@ -357,6 +357,51 @@ SCHEMA = [
         invite_code TEXT NOT NULL UNIQUE,
         created_at TEXT NOT NULL
     )""",
+    """CREATE TABLE IF NOT EXISTS rg_bot_accounts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        owner_id INTEGER NOT NULL,
+        username TEXT NOT NULL UNIQUE COLLATE NOCASE,
+        display_name TEXT NOT NULL,
+        token_hash TEXT NOT NULL UNIQUE,
+        created_at TEXT NOT NULL,
+        enabled INTEGER NOT NULL DEFAULT 1
+    )""",
+    """CREATE TABLE IF NOT EXISTS rg_bot_updates (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        bot_id INTEGER NOT NULL,
+        payload TEXT NOT NULL,
+        created_at TEXT NOT NULL
+    )""",
+    """CREATE TABLE IF NOT EXISTS rg_bot_conversations (
+        bot_id INTEGER NOT NULL,
+        user_id INTEGER NOT NULL,
+        created_at TEXT NOT NULL,
+        last_at TEXT NOT NULL,
+        PRIMARY KEY(bot_id, user_id)
+    )""",
+    """CREATE TABLE IF NOT EXISTS rg_bot_messages (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        bot_id INTEGER NOT NULL,
+        user_id INTEGER NOT NULL,
+        from_bot INTEGER NOT NULL,
+        body TEXT NOT NULL,
+        reply_markup TEXT,
+        created_at TEXT NOT NULL,
+        edited_at TEXT
+    )""",
+    """CREATE INDEX IF NOT EXISTS idx_rg_bot_messages_chat
+       ON rg_bot_messages(bot_id, user_id, id)""",
+    """CREATE TABLE IF NOT EXISTS rg_bot_callback_queries (
+        id TEXT PRIMARY KEY,
+        bot_id INTEGER NOT NULL,
+        user_id INTEGER NOT NULL,
+        answered INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL
+    )""",
+    """CREATE TABLE IF NOT EXISTS rg_bot_update_cursors (
+        bot_id INTEGER PRIMARY KEY,
+        last_update_id INTEGER NOT NULL DEFAULT 0
+    )""",
     """CREATE TABLE IF NOT EXISTS rg_space_autojoin_enrolled (
         user_id INTEGER PRIMARY KEY,
         enrolled_at TEXT NOT NULL
