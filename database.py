@@ -391,6 +391,13 @@ SCHEMA = [
     )""",
     """CREATE INDEX IF NOT EXISTS idx_rg_bot_messages_chat
        ON rg_bot_messages(bot_id, user_id, id)""",
+    """CREATE TABLE IF NOT EXISTS rg_bot_callback_queries (
+        id TEXT PRIMARY KEY,
+        bot_id INTEGER NOT NULL,
+        user_id INTEGER NOT NULL,
+        answered INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL
+    )""",
     """CREATE TABLE IF NOT EXISTS rg_bot_update_cursors (
         bot_id INTEGER PRIMARY KEY,
         last_update_id INTEGER NOT NULL DEFAULT 0
