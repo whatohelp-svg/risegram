@@ -1495,6 +1495,14 @@ async def h_desktop(request: web.Request):
     })
 
 
+async def h_retired_web(request: web.Request):
+    return web.json_response(
+        {"ok": False, "error": "RiseGram web client is discontinued; use the native Android app"},
+        status=410,
+        headers={"Cache-Control": "no-store"},
+    )
+
+
 async def start_api(bot) -> web.AppRunner | None:
     # Public auth endpoints are protected by per-phone cooldown and one-time codes.
     # API_SECRET is intentionally not required by a public APK.
@@ -1503,9 +1511,11 @@ async def start_api(bot) -> web.AppRunner | None:
     import risegram_bot_api
     app.add_routes(risegram_bot_api.routes())
     app.add_routes([
-        web.get("/", h_index),
+        # Public web and Electron clients retired: keep JSON APIs and the
+        # bot miniapp only, as they are still used by the native ecosystem.
+        web.get("/", h_retired_web),
         web.get("/miniapp", h_local_miniapp),
-        web.get("/desktop", h_desktop),
+        web.get("/desktop", h_retired_web),
         web.get("/api/profiles/{rise_id}/music", h_profile_music_get),
         web.get("/api/profiles/{rise_id}/music/audio", h_profile_music_audio),
         web.post("/api/profile/music", h_profile_music_save),
