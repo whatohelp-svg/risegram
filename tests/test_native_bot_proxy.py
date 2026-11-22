@@ -70,7 +70,7 @@ class NativeBotGatewayTests(unittest.IsolatedAsyncioTestCase):
                 )
                 self.assertEqual(response.status, 200)
                 result = (await response.json())["result"]
-                self.assertIn("hello" if name == "form" else "Привет", result["payload"])
+                self.assertIn("hello" if name == "form" else "Привет",\n                              result["payload"] if name == "form" else json.loads(result["payload"])["text"])
 
     async def test_file_download_and_bad_tokens(self):
         r = await self.client.get(
