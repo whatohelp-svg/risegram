@@ -130,6 +130,47 @@ class RiseGramBotApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(edited.status, 200)
         self.assertEqual((await edited.json())["result"]["text"], "Баланс: 100")
 
+    async def test_dice_reply_keyboard_and_bot_owned_deletion(self):
+        bot = await self.register()
+        token = bot["token"]
+        bid = bot["bot"]["bot_id"]
+        await self.client.post(
+            "/api/chats/-" + str(bid) + "/messages",
+            json={"text": "/start"}, headers=self.headers(self.other_token),
+        )
+        keyboard = {"keyboard": [[{"text": "📋 Меню"}, {"text": "👤 Профиль"}]],
+                    "resize_keyboard": True, "is_persistent": True}
+        reply = await self.client.post(
+            "/bot" + token + "/sendMessage",
+            data={"chat_id": str(self.other["rise_id"]), "text": "Select",
+                  "reply_markup": json.dumps(keyboard, ensure_ascii=False)},
+        )
+        self.assertEqual(reply.status, 200)
+        mid = (await reply.json())["result"]["message_id"]
+        hist = await self.client.get(
+            "/api/chats/-" + str(bid) + "/messages",
+            headers=self.headers(self.other_token),
+        )
+        self.assertEqual((await hist.json())["messages"][-1]["reply_markup"]["keyboard"][0][0]["text"],
+                         "📋 Меню")
+        dice = await self.client.post(
+            "/bot" + token + "/sendDice",
+            json={"chat_id": self.other["rise_id"], "emoji": "🎲"},
+        )
+        self.assertEqual(dice.status, 200)
+        self.assertIn((await dice.json())["result"]["dice"]["value"], range(1, 7))
+        deleted = await self.client.post(
+            "/bot" + token + "/deleteMessage",
+            json={"chat_id": self.other["rise_id"], "message_id": mid},
+        )
+        self.assertEqual(deleted.status, 200)
+        self.assertTrue((await deleted.json())["result"])
+        hist = await self.client.get(
+            "/api/chats/-" + str(bid) + "/messages",
+            headers=self.headers(self.other_token),
+        )
+        self.assertNotIn(mid, [m["id"] for m in (await hist.json())["messages"]])
+
     async def test_tokens_authorization_and_private_delivery(self):
         anonymous = await self.client.post(
             "/api/bots/create", json={"username": "typevirtbot", "name": "TypeVirt"},
