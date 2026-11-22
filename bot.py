@@ -209,6 +209,7 @@ def main_kb():
         [btn("📱 Открыть приложение", web_app=local_miniapp_url(), style="primary")] if local_miniapp_url() else [webapp_button("primary")],
         [btn("🕒 Мои покупки", "menu:purchases"), btn("ℹ️ Как это работает", "menu:help")],
         [btn("🆘 Поддержка", "menu:support")],
+        [btn("📢 Канал RiseGram", url="https://t.me/testrisegram")],
         [btn("⚙️ Настройки", "menu:settings"), btn("✨ Ещё", "menu:more")],
     )
 
