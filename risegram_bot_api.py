@@ -96,28 +96,8 @@ async def handle(request: web.Request):
         )
         return _reply([{"update_id": row["id"], **json.loads(row["payload"])} for row in rows])
     if method == "sendMessage":
-        try:
-            rise_id = int(data.get("chat_id", 0))
-        except (ValueError, TypeError):
-            return _err("Invalid chat_id")
-        text = str(data.get("text", ""))
-        if not 1 <= len(text) <= 4000:
-            return _err("Message text must be 1-4000 characters")
-        target = await db.fetchone("SELECT tg_id,rise_id,name FROM users WHERE rise_id=? AND banned=0",
-                                   (rise_id,))
-        if not target:
-            return _err("Chat not found", 404)
-        # Bot messages have their own inbox rather than impersonating a human user.
-        await db.execute(
-            "INSERT INTO rg_bot_updates(bot_id,payload,created_at) VALUES(?,?,?)",
-            (bot["id"], json.dumps({"outgoing_message": {
-                "chat_id": rise_id, "text": text
-            }}, ensure_ascii=False), db.now()),
-        )
-        return _reply({"message_id": 0, "date": 0,
-                       "chat": {"id": rise_id, "type": "private"},
-                       "text": text, "from": {"id": bot["id"], "is_bot": True,
-                                              "first_name": bot["display_name"]}})
+        # No bot-to-user delivery exists yet; do not acknowledge a phantom message.
+        return _err("sendMessage not available until RiseGram bot inbox integration", 501)
     return _err("Unsupported Bot API method: " + method, 404)
 
 
