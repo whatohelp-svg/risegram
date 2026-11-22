@@ -27,6 +27,7 @@ from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError, Teleg
 import config
 import database as db
 import risegram_bot_api as bot_api
+import native_bot_proxy
 import gift_drops as local_gifts
 from gift_catalog import available_telegram_gifts
 from media_api import create_media_handlers, public_media
@@ -1508,8 +1509,11 @@ async def start_api(bot) -> web.AppRunner | None:
     # API_SECRET is intentionally not required by a public APK.
     app = web.Application(client_max_size=26 * 1024 * 1024)
     app["bot"] = bot
-    import risegram_bot_api
-    app.add_routes(risegram_bot_api.routes())
+    # Route the public Bot API to the native MTProto identity store used by Android.
+    # The legacy SQLite bot registry remains for data migration, not public bot tokens.
+    app.on_startup.append(native_bot_proxy.install)
+    app.on_cleanup.append(native_bot_proxy.cleanup)
+    app.add_routes(native_bot_proxy.routes())
     app.add_routes([
         # Public web and Electron clients retired: keep JSON APIs and the
         # bot miniapp only, as they are still used by the native ecosystem.
