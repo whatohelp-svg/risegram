@@ -96,24 +96,36 @@ def _markup(value):
             raise ValueError("Invalid reply_markup JSON")
     if not isinstance(value, dict):
         raise ValueError("Invalid reply_markup")
-    # Only inline callback buttons are rendered by RiseGram Desktop today.
-    rows = value.get("inline_keyboard")
+    if len(json.dumps(value, ensure_ascii=False)) > 12000:
+        raise ValueError("Keyboard too large")
+
+    if value.get("remove_keyboard") or value.get("force_reply"):
+        return None
+    is_inline = "inline_keyboard" in value
+    rows = value.get("inline_keyboard") if is_inline else value.get("keyboard")
     if not isinstance(rows, list) or len(rows) > 20:
-        raise ValueError("Only inline keyboards are supported")
+        raise ValueError("Unsupported reply_markup")
     for row in rows:
         if not isinstance(row, list) or len(row) > 8:
             raise ValueError("Keyboard row too large")
         for button in row:
             if not isinstance(button, dict) or not 1 <= len(str(button.get("text", ""))) <= 100:
                 raise ValueError("Invalid button")
-            if "callback_data" not in button:
-                raise ValueError("Only callback_data buttons are currently supported")
-            cb = button["callback_data"]
-            if not isinstance(cb, str) or not 1 <= len(cb.encode("utf-8")) <= 64:
-                raise ValueError("Invalid callback_data")
-    if len(json.dumps(value, ensure_ascii=False)) > 12000:
-        raise ValueError("Keyboard too large")
-    return {"inline_keyboard": rows}
+            if is_inline:
+                cb = button.get("callback_data")
+                url = button.get("url")
+                if cb is not None:
+                    if not isinstance(cb, str) or not 1 <= len(cb.encode("utf-8")) <= 64:
+                        raise ValueError("Invalid callback_data")
+                elif url is not None:
+                    if not isinstance(url, str) or not url.startswith("https://") or len(url) > 2048:
+                        raise ValueError("Unsupported button URL")
+                else:
+                    raise ValueError("Only callback and HTTPS URL buttons supported")
+            elif button.keys() != {"text"}:
+                # Reject unsupported contact/location requests rather than pretending.
+                raise ValueError("Only text reply keyboard buttons supported")
+    return {"inline_keyboard" if is_inline else "keyboard": rows}
 
 
 def _client_message(row):
