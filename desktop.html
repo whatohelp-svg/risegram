@@ -114,7 +114,7 @@ return data;
 function error(e){notice("Ошибка: "+(e&&e.message||e))}
 function showLogin(){document.getElementById("login").hidden=false;$("app").hidden=true}
 function view(name){document.querySelectorAll(".view").forEach(v=>v.classList.toggle("active",v.id===name));document.querySelectorAll("[data-view]").forEach(v=>v.classList.toggle("active",v.dataset.view===name));location.hash=name;if(name==="wallet")wallet();if(name==="music")loadMusic();if(name==="chats")chats();if(name==="profile")loadBots()}
-async function start(){if(!token)return showLogin();try{const r=await api("/api/me");me=r.user;$("login").hidden=true;$("app").hidden=false;fillProfile();await chats();view(["wallet","profile","music","chats"].includes(location.hash.slice(1))?location.hash.slice(1):"chats")}catch(e){token="";localStorage.removeItem("risegram-desktop-token");showLogin();$("loginNotice").textContent="Сессия истекла — войдите снова"}}
+async function start(){if(!token)return showLogin();try{const r=await api("/api/me");me=r.user;$("login").hidden=true;$("app").hidden=false;fillProfile();await chats();view(["wallet","profile","music","chats"].includes(location.hash.slice(1))?location.hash.slice(1):"chats");await openBotDeepLink()}catch(e){token="";localStorage.removeItem("risegram-desktop-token");showLogin();$("loginNotice").textContent="Сессия истекла — войдите снова"}}
 $("sendCode").addEventListener("click",async()=>{const p=$("phone").value.trim();if(!p)return $("loginNotice").textContent="Укажите номер";$("sendCode").disabled=true;try{const r=await fetch("/api/auth/request",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({phone:p})});const j=await r.json();if(!r.ok)throw Error(j.error||"Не удалось отправить код");$("codeZone").hidden=false;$("loginNotice").textContent="Код отправлен в @risegrambot";$("code").focus()}catch(e){$("loginNotice").textContent=e.message}finally{$("sendCode").disabled=false}});
 $("loginForm").addEventListener("submit",async e=>{e.preventDefault();try{const r=await fetch("/api/auth/verify",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({phone:$("phone").value.trim(),code:$("code").value.trim()})});const j=await r.json();if(!r.ok)throw Error(j.error||"Неправильный код");token=j.token;localStorage.setItem("risegram-desktop-token",token);await start()}catch(err){$("loginNotice").textContent=err.message}});
 $("logout").onclick=()=>{token="";localStorage.removeItem("risegram-desktop-token");showLogin()};
@@ -129,6 +129,22 @@ $("stars").textContent=me.risestars===null?"—":Number(me.risestars).toLocaleSt
 async function wallet(){try{me=(await api("/api/me")).user;fillProfile();let r=await api("/api/purchases");$("purchases").textContent=JSON.stringify(r.purchases||r.items||[]).slice(0,330)||"Покупок пока нет"}catch(e){error(e)}}
 function renderChats(rows,el){el.replaceChildren();if(!rows.length){el.textContent="Пока нет диалогов";return}for(const row of rows){const u=row.user||row;const b=document.createElement("button");b.className="chat";const av=document.createElement("span");av.className="avatar";av.textContent=initial(u.name);const txt=document.createElement("span");txt.className="chattext";const strong=document.createElement("strong");strong.textContent=u.name||"Пользователь";const small=document.createElement("small");small.textContent=row.last_message||("@"+(u.username||u.rise_id));txt.append(strong,small);b.append(av,txt);b.onclick=()=>openChat(u);el.append(b)}}
 async function chats(){try{const r=await api("/api/chats");const v=JSON.stringify(r.chats);if(v!==lastList){lastList=v;renderChats(r.chats,$("chatlist"))}}catch(e){error(e)}}
+async function openBotDeepLink(){
+ const params=new URLSearchParams(location.search);
+ const botName=(params.get("bot")||"").replace(/^@/,"");
+ if(!/^[a-zA-Z][a-zA-Z0-9_]{4,34}$/.test(botName))return;
+ try{
+  const found=await api("/api/users/search?q="+encodeURIComponent(botName));
+  const bot=(found.users||[]).find(u=>u.is_bot&&u.username.toLowerCase()===botName.toLowerCase());
+  if(!bot)return;
+  await openChat(bot);
+  const arg=params.get("start")||"";
+  if(/^[a-zA-Z0-9_-]{1,100}$/.test(arg))$("msg").value="/start "+arg;
+  else $("msg").value="/start";
+  $("msg").focus();
+  history.replaceState(null,"",location.pathname+location.hash);
+ }catch(e){error(e)}
+}
 let searchDelay;$("search").oninput=()=>{clearTimeout(searchDelay);let q=$("search").value.trim();if(q.length<2){$("searchResults").replaceChildren();return}searchDelay=setTimeout(async()=>{try{let r=await api("/api/users/search?q="+encodeURIComponent(q));renderChats(r.users,$("searchResults"))}catch(e){error(e)}},400)};
 async function openChat(u){peer=u;view("chats");$("chatTitle").textContent=u.name||"Пользователь";$("chatSub").textContent=u.is_bot?("Бот RiseGram · @"+u.username):("ID "+u.rise_id+ (u.username?" · @"+u.username:""));$("composer").hidden=false;await messages()}
 async function messages(){
