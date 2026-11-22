@@ -357,6 +357,25 @@ SCHEMA = [
         invite_code TEXT NOT NULL UNIQUE,
         created_at TEXT NOT NULL
     )""",
+    """CREATE TABLE IF NOT EXISTS rg_bot_accounts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        owner_id INTEGER NOT NULL,
+        username TEXT NOT NULL UNIQUE COLLATE NOCASE,
+        display_name TEXT NOT NULL,
+        token_hash TEXT NOT NULL UNIQUE,
+        created_at TEXT NOT NULL,
+        enabled INTEGER NOT NULL DEFAULT 1
+    )""",
+    """CREATE TABLE IF NOT EXISTS rg_bot_updates (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        bot_id INTEGER NOT NULL,
+        payload TEXT NOT NULL,
+        created_at TEXT NOT NULL
+    )""",
+    """CREATE TABLE IF NOT EXISTS rg_bot_update_cursors (
+        bot_id INTEGER PRIMARY KEY,
+        last_update_id INTEGER NOT NULL DEFAULT 0
+    )""",
     """CREATE TABLE IF NOT EXISTS rg_space_autojoin_enrolled (
         user_id INTEGER PRIMARY KEY,
         enrolled_at TEXT NOT NULL
