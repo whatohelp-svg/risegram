@@ -50,7 +50,7 @@ async def main():
                 if response.status!=200 or result.get("status")!="completed":
                     raise RuntimeError(f"Gift admin API rejected: HTTP {response.status} - {str(result.get('error') or result.get('message') or result.get('code'))[:180]}")
                 return result
-        dry = await grant(dict(payload,dry_run=True))
+        dry = await grant(dict(payload,command_id=COMMAND_ID+"-dry",dry_run=True))
         if not dry.get("dry_run"):
             raise RuntimeError("Gift dry-run did not confirm dry_run=true")
         print("PEPE_DRY_RUN_OK",json.dumps({"gift_id":GIFT_ID,"owner_id":OWNER_ID,"model":"Aqua Plush","backdrop":"Azure Blue"}),flush=True)
