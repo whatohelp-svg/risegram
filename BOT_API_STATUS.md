@@ -1,13 +1,32 @@
-# RiseGram Bot API — prototype
+# RiseGram Bot API — tested private-chat MVP
 
-This is not yet a working port of Telegram Bot API or aiogram
+This branch implements independent RiseGram bot accounts and a subset of Telegram-compatible Bot API endpoints designed for aiogram long polling. No Telegram BotFather token is accepted.
 
-Current endpoints:
-- POST /api/bots/create — authenticated RiseGram session, JSON username and name, returns an independent rg_ token
-- POST /bot<TOKEN>/getMe — basic bot identity
-- POST /bot<TOKEN>/getUpdates — empty update queue until inbound routing is implemented
-- POST /bot<TOKEN>/sendMessage — HTTP 501, deliberately not pretending to deliver messages
+## Users and bot owners
 
-Hello-There cannot run on this API yet. Its aiogram handlers, inline keyboards, callbacks and chat moderation require inbound event delivery and real bot messages. Do not replace TELEGRAM_BOT_TOKEN and deploy yet.
+- RiseGram Desktop Profile → RiseGram Bots lets any signed-in RiseGram user register bots (up to 20 per owner), inspect their bots, and rotate tokens.
+- Bot usernames must end in `bot`. The name `@typevirtbot` is reserved for the configured RiseGram owner.
+- Tokens look like `900000001:<secret>` so aiogram accepts them, but they authenticate against **RiseGram**, never Telegram.
+- Bots appear in desktop search and private conversations (client internally uses negative bot-specific IDs).
+- Users must initiate conversation with a bot before that bot can message them.
 
-Telegram BotFather tokens are not supported. Do not commit secrets. This branch is for development and tests only.
+## Implemented Bot API endpoints
+
+- `GET /bot<TOKEN>/getMe`
+- `POST /bot<TOKEN>/getUpdates` with offset, limit, and bounded long polling
+- `POST /bot<TOKEN>/sendMessage` with plain text, basic HTML stripping, inline callback/HTTPS URL buttons, and text reply keyboards
+- `POST /bot<TOKEN>/editMessageText`, `editMessageReplyMarkup`, `deleteMessage`, `sendDice`
+- `POST /bot<TOKEN>/answerCallbackQuery`, `deleteWebhook`, `getWebhookInfo`
+
+Authentication: `Authorization: Bearer <RISEGRAM_USER_SESSION>` for the bot owner endpoints `/api/bots/create`, `/api/bots/mine`, `/api/bots/<id>/rotate-token`.
+
+The client callback endpoint validates the callback against a button in a message belonging to that conversation.
+
+## Known limitations
+
+- **Not yet** complete Telegram Bot API compatibility. No group/channel bot membership, moderation, file/video/voice sending, Telegram webhooks, Telegram user/chat mentions, commands config, chat actions, replies/forwards or full message entity rendering.
+- Android native MTProto bot support is not implemented by the web backend. The working chat interface here is **RiseGram Desktop**.
+- TypeVirt source is separately adapted in `whatohelp-svg/Hello-There`, but requires a registered bot token and a separately deployed runtime. Its group-specific handlers still cannot work.
+- The source of the unofficial Iris clone `Virus667/iris` is not available in that repository (README and LICENSE only). There is nothing there to execute or port.
+
+Do not publish a token in a git repository or distribute it in client code. Use a secret manager/ Railway environment variables and persistent bot database storage.
