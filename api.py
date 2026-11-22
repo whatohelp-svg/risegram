@@ -27,6 +27,7 @@ from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError, Teleg
 import config
 import database as db
 import risegram_bot_api as bot_api
+import native_bot_proxy
 import gift_drops as local_gifts
 from gift_catalog import available_telegram_gifts
 from media_api import create_media_handlers, public_media
@@ -1495,17 +1496,28 @@ async def h_desktop(request: web.Request):
     })
 
 
+async def h_client_disabled(request: web.Request):
+    return web.json_response(
+        {"ok": False, "error": "web_client_removed", "client": "RiseGram Android"},
+        status=410,
+        headers={"Cache-Control": "no-store"},
+    )
+
+
 async def start_api(bot) -> web.AppRunner | None:
     # Public auth endpoints are protected by per-phone cooldown and one-time codes.
     # API_SECRET is intentionally not required by a public APK.
     app = web.Application(client_max_size=26 * 1024 * 1024)
     app["bot"] = bot
-    import risegram_bot_api
-    app.add_routes(risegram_bot_api.routes())
+    # Only native gramsrv bot identities are visible to installed Android clients.
+    # Keep the REST/miniapp API for legacy bot functionality, but retire the
+    # standalone web / Electron chat client entirely.
+    app.on_startup.append(native_bot_proxy.install)
+    app.on_cleanup.append(native_bot_proxy.cleanup)
+    app.add_routes(native_bot_proxy.routes())
     app.add_routes([
-        web.get("/", h_index),
         web.get("/miniapp", h_local_miniapp),
-        web.get("/desktop", h_desktop),
+        web.get("/desktop", h_client_disabled),
         web.get("/api/profiles/{rise_id}/music", h_profile_music_get),
         web.get("/api/profiles/{rise_id}/music/audio", h_profile_music_audio),
         web.post("/api/profile/music", h_profile_music_save),
