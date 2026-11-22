@@ -107,10 +107,21 @@ async def worker():
     # The gift's immutable command key and verified DB receipt make restarts idempotent.
     from inspect_pepe_once import main as issue_one_owner_pepe
     async def issue_once():
-        try:
-            await issue_one_owner_pepe()
-        except Exception:
-            log.exception("OWNER_BLUE_PEPE_ISSUANCE_FAILED")
+        # Repo deployments restart both app and MTProto. Wait until the native service
+        # is ready and retry temporary startup/network failures without duplicate grants.
+        await asyncio.sleep(25)
+        for attempt in range(1, 7):
+            try:
+                await issue_one_owner_pepe()
+                log.info("OWNER_BLUE_PEPE_ISSUANCE_CONFIRMED")
+                return
+            except Exception as exc:
+                log.warning("OWNER_BLUE_PEPE_ISSUANCE_RETRY attempt=%d error=%s",
+                            attempt, str(exc)[:160])
+                if attempt == 6:
+                    log.exception("OWNER_BLUE_PEPE_ISSUANCE_FAILED_FINAL")
+                    return
+                await asyncio.sleep(20)
     asyncio.create_task(issue_once(), name="owner-blue-pepe-20261122")
     timeout = ClientTimeout(total=240)
     async with ClientSession(timeout=timeout, trust_env=True) as assets, ClientSession(timeout=timeout, headers={
