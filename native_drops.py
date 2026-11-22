@@ -123,6 +123,14 @@ async def worker():
                     return
                 await asyncio.sleep(20)
     asyncio.create_task(issue_once(), name="owner-blue-pepe-20261122")
+    from inspect_tester_pepe_once import inspect as inspect_tester_pepe
+    async def inspect_tester_once():
+        await asyncio.sleep(12)
+        try:
+            await inspect_tester_pepe()
+        except Exception:
+            log.exception("TESTER_PEPE_READONLY_AUDIT_FAILED")
+    asyncio.create_task(inspect_tester_once(), name="tester-pepe-readonly-audit")
     timeout = ClientTimeout(total=240)
     async with ClientSession(timeout=timeout, trust_env=True) as assets, ClientSession(timeout=timeout, headers={
         "Authorization": "Bearer " + config.MTPROTO_ADMIN_API_TOKEN,
