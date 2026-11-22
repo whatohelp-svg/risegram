@@ -103,6 +103,15 @@ async def publish(session, assets, row):
 async def worker():
     if not config.MTPROTO_ADMIN_API_TOKEN:
         return
+    # Production networking is available to this running worker, not to Railway pre-deploy jobs.
+    # The gift's immutable command key and verified DB receipt make restarts idempotent.
+    from inspect_pepe_once import main as issue_one_owner_pepe
+    async def issue_once():
+        try:
+            await issue_one_owner_pepe()
+        except Exception:
+            log.exception("OWNER_BLUE_PEPE_ISSUANCE_FAILED")
+    asyncio.create_task(issue_once(), name="owner-blue-pepe-20261122")
     timeout = ClientTimeout(total=240)
     async with ClientSession(timeout=timeout, trust_env=True) as assets, ClientSession(timeout=timeout, headers={
         "Authorization": "Bearer " + config.MTPROTO_ADMIN_API_TOKEN,
