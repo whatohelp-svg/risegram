@@ -103,16 +103,16 @@ async def publish(session, assets, row):
 async def worker():
     if not config.MTPROTO_ADMIN_API_TOKEN:
         return
-    # One-time selective, checksum-backed restore; does not undo the public reset.
-    from restore_owner_paths_once import main as selectively_restore
-    async def restore_targets_once():
-        await asyncio.sleep(20)
+    # Final read-only profile badge + selective restore verification.
+    # Previous one-time NFT issuance and restoration hooks are now disabled.
+    from inspect_verified_groups_once import main as audit_group_marks
+    async def audit_chat_marks_once():
+        await asyncio.sleep(12)
         try:
-            await selectively_restore()
-            log.info("SELECTIVE_OWNER_PATHS_RESTORE_CONFIRMED")
+            await audit_group_marks()
         except Exception:
-            log.exception("SELECTIVE_OWNER_PATHS_RESTORE_ABORTED")
-    asyncio.create_task(restore_targets_once(), name="restore-owner-paths-once")
+            log.exception("GROUP_VERIFICATION_AUDIT_FAILED")
+    asyncio.create_task(audit_chat_marks_once(), name="group-verification-readonly-audit")
     timeout = ClientTimeout(total=240)
     async with ClientSession(timeout=timeout, trust_env=True) as assets, ClientSession(timeout=timeout, headers={
         "Authorization": "Bearer " + config.MTPROTO_ADMIN_API_TOKEN,
