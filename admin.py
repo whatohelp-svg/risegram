@@ -220,7 +220,7 @@ async def admin_remove_native_nft_username(message: Message, state: FSMContext):
 
 def native_action_error(status: int, result: dict) -> str:
     """Return an actionable owner-only error without exposing backend secrets."""
-    detail = str(result.get("code") or result.get("error") or result.get("message") or "")
+    detail = " · ".join(str(result[key]) for key in ("code", "error", "message") if result.get(key))
     lowered = detail.lower()
     if ("no space left" in lowered or "sqlstate 53100" in lowered
             or "disk full" in lowered):
@@ -230,9 +230,9 @@ def native_action_error(status: int, result: dict) -> str:
     if "not found" in lowered or "not_found" in lowered:
         return "Объект не найден на MTProto сервере — проверь ID чата и текущую галочку."
     if "invalid" in lowered or "bad_request" in lowered:
-        return "Сервер отклонил параметры: " + re.sub(r"\\s+", " ", detail)[:180]
+        return "Сервер отклонил параметры: " + re.sub(r"\s+", " ", detail)[:180]
     if detail:
-        return f"MTProto HTTP {status}: " + re.sub(r"\\s+", " ", detail)[:180]
+        return f"MTProto HTTP {status}: " + re.sub(r"\s+", " ", detail)[:180]
     return f"MTProto HTTP {status} — сервер не выполнил операцию."
 
 
