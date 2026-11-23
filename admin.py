@@ -1048,8 +1048,10 @@ async def on_input(message: Message, state: FSMContext, user: dict):
 
     # ── выпуск лимитированных Telegram-подарков ──
     if act == "gift_stock":
-        if not text.isdigit() or not 1 <= int(text) <= 1_000_000:
-            return await again("❌ Тираж должен быть целым числом от 1 до 1 000 000:")
+        # Match the native signed-int32 gift stock field; the former million-item
+        # limit was artificial and blocked legitimate administrator drops.
+        if not text.isdigit() or not 1 <= int(text) <= 2**31 - 1:
+            return await again("❌ Тираж должен быть целым числом от 1 до 2 147 483 647:")
         quantity = int(text)
         await state.update_data(act="gift_price", quantity=quantity)
         return await again(
