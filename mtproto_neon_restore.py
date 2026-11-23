@@ -22,7 +22,9 @@ import psycopg
 from psycopg.conninfo import conninfo_to_dict
 
 ROOT = Path("/data/risegram-db-backups")
-LABEL = "mtproto-postgres-20261123"
+LABEL = os.getenv("RISEGRAM_MT_PROTO_BACKUP_LABEL", "mtproto-postgres-20261123")
+if not re.fullmatch(r"[a-z0-9-]{1,60}", LABEL):
+    raise RuntimeError("Invalid Postgres backup label")
 
 
 def load_verified_archive():
