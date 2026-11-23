@@ -14,6 +14,7 @@ from collectible_pools import pool_material
 ASSETS = json.loads((Path(__file__).parent / "data/drop_assets.json").read_text())
 SOURCE = "https://raw.githubusercontent.com/ssamy2/TelegramGiftsAssests/1eb0666fff81b63f9002004084ff0ee3a9eed10f/"
 log = logging.getLogger("risegram.native_drops")
+_MISSING_ASSET_WARNED = set()
 
 
 async def asset(session, path):
@@ -66,6 +67,14 @@ async def refresh_private_editions(session, assets):
 
 
 async def publish(session, assets, row):
+    if row["gift_id"] not in ASSETS:
+        # Missing source artwork cannot be replaced with an unrelated NFT gift.
+        # Report it once per process; the drop remains configured but unpublished.
+        if row["gift_id"] not in _MISSING_ASSET_WARNED:
+            log.warning("Drop %s awaits exact animation asset for %s; not published",
+                        row["id"], row["gift_id"])
+            _MISSING_ASSET_WARNED.add(row["gift_id"])
+        return
     key = f"rg-app-drop-{row['id']}"
     state = json.loads(await db.get_meta(key) or "{}")
     enabled = bool(row["enabled"] and row["starts_at"] <= drops.utc_now()
