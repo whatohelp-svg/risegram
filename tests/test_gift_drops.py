@@ -46,6 +46,14 @@ class GiftDropsTest(unittest.TestCase):
         self.assertEqual(page2[-1]["id"], 1)
         self.assertEqual(len(gifts.list_admin_drops(-1)), 29)
 
+    def test_large_drop_allowed_without_old_million_cap(self):
+        drop = gifts.create_drop("plushpepe", 1_500_000_000, 2_000_000)
+        row = gifts.get_admin_drop(drop)
+        self.assertEqual(row["price_stars"], 1_500_000_000)
+        self.assertEqual(row["supply"], 2_000_000)
+        with self.assertRaises(ValueError):
+            gifts.create_drop("plushpepe", 100, 2**31)
+
     def test_atomic_idempotent_purchase(self):
         drop=gifts.create_drop("plushpepe",100,2,can_upgrade=True)
         one=gifts.purchase(1,drop,"purchase_000001")
