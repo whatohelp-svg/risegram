@@ -181,7 +181,7 @@ async def admin_remove_native_nft_username(message: Message, state: FSMContext):
             "Укажи <code>/removenft user|group|channel @владелец @NFT</code> "
             "для возврата NFT в резерв или "
             "<code>/deletenft user|group|channel @владелец @NFT</code> "
-            "для полного удаления (только владелец).\\n"
+            "для полного удаления (только владелец).\n"
             "Примеры: <code>/removenft user @paths @rare_name</code>, "
             "<code>/removenft group @mygroup @rare_name</code>, "
             "<code>/deletenft channel @mychannel @rare_name</code>"
@@ -207,11 +207,11 @@ async def admin_remove_native_nft_username(message: Message, state: FSMContext):
     )
     action = "УДАЛИТЬ НАВСЕГДА, включая историю" if permanent else "ОТОЗВАТЬ В РЕЗЕРВ"
     await show(message,
-        f"🏷 <b>Подтверждение удаления NFT-юзернейма</b>\\n\\n"
-        f"NFT: <b>@{esc(pending['name'])}</b>\\n"
-        f"Тип: <b>{esc(pending['kind'])}</b> · Peer ID: <code>{pending['peer_id']}</code>\\n"
-        f"NFT ID: <code>{esc(pending['asset_id'])}</code>\\n"
-        f"Действие: <b>{action}</b>\\n\\n"
+        f"🏷 <b>Подтверждение удаления NFT-юзернейма</b>\n\n"
+        f"NFT: <b>@{esc(pending['name'])}</b>\n"
+        f"Тип: <b>{esc(pending['kind'])}</b> · Peer ID: <code>{pending['peer_id']}</code>\n"
+        f"NFT ID: <code>{esc(pending['asset_id'])}</code>\n"
+        f"Действие: <b>{action}</b>\n\n"
         "Обычный юзернейм, аккаунт, группа, канал, номер и сессии останутся нетронутыми",
         kb([btn("✅ Подтвердить", "adm:nftconfirm", style="danger")],
            [btn("✖️ Отмена", "adm:nftcancel")]),
@@ -1391,14 +1391,14 @@ async def adm_cb(call: CallbackQuery, state: FSMContext, user: dict):
         return await screen_market(call, num(parts, 3), "🗑 Лот снят." if L else "Лот уже закрыт.")
     if route == "nftcontrol":
         return await show(call,
-            "🗑 <b>NFT-юзернеймы RiseGram — управление</b>\\n\\n"
-            "Для аккаунта: <code>/removenft user @пользователь @NFT</code>\\n"
-            "Для супергруппы: <code>/removenft group @группа @NFT</code>\\n"
-            "Для канала: <code>/removenft channel @канал @NFT</code>\\n\\n"
+            "🗑 <b>NFT-юзернеймы RiseGram — управление</b>\n\n"
+            "Для аккаунта: <code>/removenft user @пользователь @NFT</code>\n"
+            "Для супергруппы: <code>/removenft group @группа @NFT</code>\n"
+            "Для канала: <code>/removenft channel @канал @NFT</code>\n\n"
             "Команда <code>/removenft</code> снимает имя у владельца и "
-            "возвращает NFT в резерв с сохранением истории\\n\\n"
-            "Чтобы полностью удалить запись NFT и историю (только владелец):\\n"
-            "<code>/deletenft user|group|channel @владелец @NFT</code>\\n\\n"
+            "возвращает NFT в резерв с сохранением истории\n\n"
+            "Чтобы полностью удалить запись NFT и историю (только владелец):\n"
+            "<code>/deletenft user|group|channel @владелец @NFT</code>\n\n"
             "Каждое удаление требует подтверждения и проверки владельца "
             "в MTProto — аккаунты, группы, каналы и номера не удаляются",
             kb([btn("👥 Пользователи", "adm:users:0")],home_row()))
