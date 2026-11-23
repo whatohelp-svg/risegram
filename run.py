@@ -34,4 +34,13 @@ if tester_router is not None:
     bot.Dispatcher = _Dispatcher
 
 if __name__ == "__main__":
-    asyncio.run(bot.main())
+    async def run_with_backup():
+        # One-shot read-only backups run on the existing /data volume. Do not
+        # block login, chat delivery or the bot while the archive is produced.
+        import os
+        if os.getenv("RISEGRAM_BACKUP_ON_START") == "1":
+            from safe_db_backup_once import run_async
+            asyncio.create_task(run_async(), name="risegram-safe-backup")
+        await bot.main()
+
+    asyncio.run(run_with_backup())
