@@ -1242,7 +1242,10 @@ async def adm_cb(call: CallbackQuery, state: FSMContext, user: dict):
     if route in ("localgifts", "localgift"):
         return await gift_admin.on_callback(call, state, parts)
 
-    await state.clear()
+    # NFT confirmation must keep the FSM payload until after the owner approves it.
+    # Clearing it here made every valid /deletenft confirmation appear expired.
+    if route != "nftconfirm":
+        await state.clear()
 
     if route == "noop":
         return
