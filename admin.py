@@ -120,6 +120,7 @@ async def home_screen(event, user: dict):
         [btn("🎁 Дроп подарков", "adm:localgifts:0", style="success")],
         [btn("☑️ Верификация RiseGram", "adm:verifyrise", style="primary"), btn("💠 Верификация Major", "adm:verifymajor", style="primary")],
         [btn("📣 Галочки групп и каналов · выдать / снять", "adm:verifychats", style="primary")],
+        [btn("❎ Снять галочки с аккаунта", "adm:verifyrevokeuser", style="danger")],
         [btn("⚡ Тумблеры функций", "adm:feat", style="success"), btn("🔨 Банхаммер", "adm:ban", style="danger")],
         [btn("🎯 Задания", "adm:tasks"), btn("🛒 Маркет", "adm:mkt:0"), btn(scam_label, "adm:scam:0", style="danger" if pending else None)],
         [btn("🧾 Покупки", "adm:buys:0"), btn("📣 Рассылка", "adm:cast")],
@@ -133,6 +134,30 @@ async def home_screen(event, user: dict):
         rows.insert(6, [btn("🛡 Админы", "adm:admins")])
     markup = kb(*rows)
     await show(event, text, markup)
+
+
+@admin_router.message(Command("revokeuserverify"))
+async def revoke_user_verification(message: Message):
+    """Revoke one or both issuer badges from an account, without deleting the user."""
+    parts = (message.text or "").split()
+    if len(parts) != 3 or parts[2].lower() not in ("risegram", "major", "both"):
+        await message.answer("Используйте /revokeuserverify @пользователь risegram|major|both")
+        return
+    user = await db.find_user(parts[1])
+    if not user:
+        await message.answer("Аккаунт не найден. Укажите RiseGram ID или юзернейм из админки.")
+        return
+    uid = int(user["tg_id"])
+    kinds = ("risegram", "major") if parts[2].lower() == "both" else (parts[2].lower(),)
+    for kind in kinds:
+        await db.set_verification(uid, kind, False)
+    sync = await sync_mtproto_verification(uid, force=True)
+    await audit(f"Верификация {', '.join(kinds)} снята с аккаунта {uid} администратором {message.from_user.id}")
+    await message.answer(
+        f"✅ Галочки {', '.join(kinds)} сняты у {esc(db.shown_username(user))} "
+        f"(ID {uid}). Аккаунт сохранён."
+        + ("" if sync.get("synced") else "\n⚠️ Обновление клиента пока не подтверждено, повторите синхронизацию.")
+    )
 
 
 @admin_router.message(Command("grantnft", "grantverify", "revokeverify"))
@@ -1215,6 +1240,14 @@ async def adm_cb(call: CallbackQuery, state: FSMContext, user: dict):
             "четвёртым аргументом. Базовую группу надо сначала превратить в супергруппу.\n\n"
             "Снимается только выбранная галочка, сам чат не удаляется.",
             kb([btn("👥 Верификация аккаунтов", "adm:users:0")],home_row()))
+    if route == "verifyrevokeuser":
+        return await show(call,
+            "❎ <b>Снятие верификации аккаунта</b>\\n\\n"
+            "Открой карточку пользователя и нажми «Снять RiseGram» или «Снять Major».\\n"
+            "Можно снять оба статуса одной командой:\\n"
+            "<code>/revokeuserverify @пользователь both</code>\\n\\n"
+            "Аккаунт, чаты и сессия не удаляются.",
+            kb([btn("🔎 Найти аккаунт", "adm:usearch", style="primary")],home_row()))
     if route in ("verifyrise", "verifymajor"):
         kind = "RiseGram" if route == "verifyrise" else "Major"
         return await show(call,
