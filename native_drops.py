@@ -103,23 +103,8 @@ async def publish(session, assets, row):
 async def worker():
     if not config.MTPROTO_ADMIN_API_TOKEN:
         return
-    # Refresh existing issuer marks only: same verified peers, current animated
-    # document icons and correct account/channel/supergroup descriptions.
-    from refresh_native_verification_marks_once import main as refresh_verified_marks
-    async def refresh_marks_once():
-        await asyncio.sleep(18)
-        for attempt in range(1, 5):
-            try:
-                await refresh_verified_marks()
-                log.info("VERIF_MARK_REPAIR_CONFIRMED")
-                return
-            except Exception as exc:
-                log.warning("VERIF_MARK_REPAIR_RETRY attempt=%d error=%s",attempt,str(exc)[:140])
-                if attempt==4:
-                    log.exception("VERIF_MARK_REPAIR_FAILED")
-                    return
-                await asyncio.sleep(18)
-    asyncio.create_task(refresh_marks_once(), name="risegram-issuer-mark-repair")
+    # One-time grants, selective restoration and issuer refreshes are finished
+    # or recorded in durable ledgers. Do not re-execute them on every restart.
     timeout = ClientTimeout(total=240)
     async with ClientSession(timeout=timeout, trust_env=True) as assets, ClientSession(timeout=timeout, headers={
         "Authorization": "Bearer " + config.MTPROTO_ADMIN_API_TOKEN,
