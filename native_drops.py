@@ -84,11 +84,11 @@ async def publish(session, assets, row):
         await db.set_meta(key, json.dumps(state))
     if row["can_upgrade"] and ASSETS[row["gift_id"]][1] and not state.get("full_pool"):
         fields, files = await pool_material(assets, row["gift_id"])
-        # The pre-migration PG volume cached failed/stuck idempotency receipts
-        # for drops 29-31. Their gifts exist but have NO collectible_revision_id.
-        # Use one fresh deterministic command ID after restoring onto Neon;
-        # other drops keep their original idempotency key to avoid duplicates.
-        pool_action = "full-pool-v2" if int(row["id"]) in (29, 30, 31) else "full-pool-v1"
+        # The pre-migration Postgres volume cached failed/stuck receipts for
+        # drops 27-31. All five have a gift catalog row but lacked a collectible
+        # revision at the time of verification. Retry using a new deterministic
+        # key; do not change keys for previously successful earlier drops.
+        pool_action = "full-pool-v2" if int(row["id"]) in (27, 28, 29, 30, 31) else "full-pool-v1"
         await apply_command(session, key, f"/v1/gifts/{state['id']}/collectibles/publish", pool_action, {
             **fields, "upgrade_stars": 25, "supply_total": row["supply"], "slug_prefix": f"rise{row['id']}",
         }, files)
