@@ -119,6 +119,7 @@ async def home_screen(event, user: dict):
         [btn("🗑 Удалить аккаунт по номеру", "adm:delphone", style="danger")],
         [btn("🎁 Дроп подарков", "adm:localgifts:0", style="success")],
         [btn("☑️ Верификация RiseGram", "adm:verifyrise", style="primary"), btn("💠 Верификация Major", "adm:verifymajor", style="primary")],
+        [btn("📣 Галочки групп и каналов · выдать / снять", "adm:verifychats", style="primary")],
         [btn("⚡ Тумблеры функций", "adm:feat", style="success"), btn("🔨 Банхаммер", "adm:ban", style="danger")],
         [btn("🎯 Задания", "adm:tasks"), btn("🛒 Маркет", "adm:mkt:0"), btn(scam_label, "adm:scam:0", style="danger" if pending else None)],
         [btn("🧾 Покупки", "adm:buys:0"), btn("📣 Рассылка", "adm:cast")],
@@ -1198,10 +1199,26 @@ async def adm_cb(call: CallbackQuery, state: FSMContext, user: dict):
         return await home_screen(call, user)
 
     # ── игроки ──
+    if route == "verifychats":
+        return await show(call,
+            "📣 <b>Верификация каналов и групп RiseGram</b>\n\n"
+            "<b>Выдать:</b>\n"
+            "<code>/grantverify @чат official</code>\n"
+            "<code>/grantverify @чат risegram</code>\n"
+            "<code>/grantverify @чат major</code>\n\n"
+            "<b>Снять:</b>\n"
+            "<code>/revokeverify @чат official</code>\n"
+            "<code>/revokeverify @чат risegram</code>\n"
+            "<code>/revokeverify @чат major</code>\n\n"
+            "У публичных чатов тип группы или канала определяется автоматически. "
+            "Для числового ID при выдаче добавь <code>group</code> или <code>channel</code> "
+            "четвёртым аргументом. Базовую группу надо сначала превратить в супергруппу.\n\n"
+            "Снимается только выбранная галочка, сам чат не удаляется.",
+            kb([btn("👥 Верификация аккаунтов", "adm:users:0")],home_row()))
     if route in ("verifyrise", "verifymajor"):
         kind = "RiseGram" if route == "verifyrise" else "Major"
         return await show(call,
-            f"☑️ <b>Верификация {kind}</b>\n\nВыбери пользователя или найди его по ID / @username, затем нажми «Выдать {kind}» в карточке.",
+            f"☑️ <b>Верификация {kind}</b>\n\nВыбери пользователя или найди его по ID / @username, затем нажми «Выдать {kind}» или «Снять {kind}» в карточке.",
             kb([btn("👥 Выбрать пользователя", "adm:users:0", style="primary")],
                [btn("🔎 Найти пользователя", "adm:usearch")], home_row()))
     if route == "users":
