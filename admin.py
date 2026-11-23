@@ -11,6 +11,8 @@ import math
 import re
 import secrets
 
+import nft_username_admin as nftnames
+
 from aiohttp import ClientError, ClientSession, ClientTimeout
 from aiogram import Bot, F, Router
 from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError, TelegramRetryAfter
@@ -58,6 +60,7 @@ admin_router.callback_query.filter(AdminOnly(), F.message.chat.type == "private"
 class Adm(StatesGroup):
     input = State()      # универсальный ввод; действие лежит в data["act"]
     delete_confirm = State()
+    nft_confirm = State()
     cast_confirm = State()
 
 
@@ -121,6 +124,7 @@ async def home_screen(event, user: dict):
         [btn("☑️ Верификация RiseGram", "adm:verifyrise", style="primary"), btn("💠 Верификация Major", "adm:verifymajor", style="primary")],
         [btn("📣 Галочки групп и каналов · выдать / снять", "adm:verifychats", style="primary")],
         [btn("❎ Снять галочки с аккаунта", "adm:verifyrevokeuser", style="danger")],
+        [btn("🗑 NFT-юзернеймы · снять / удалить", "adm:nftcontrol", style="danger")],
         [btn("⚡ Тумблеры функций", "adm:feat", style="success"), btn("🔨 Банхаммер", "adm:ban", style="danger")],
         [btn("🎯 Задания", "adm:tasks"), btn("🛒 Маркет", "adm:mkt:0"), btn(scam_label, "adm:scam:0", style="danger" if pending else None)],
         [btn("🧾 Покупки", "adm:buys:0"), btn("📣 Рассылка", "adm:cast")],
@@ -157,6 +161,60 @@ async def revoke_user_verification(message: Message):
         f"✅ Галочки {', '.join(kinds)} сняты у {esc(db.shown_username(user))} "
         f"(ID {uid}). Аккаунт сохранён."
         + ("" if sync.get("synced") else "\n⚠️ Обновление клиента пока не подтверждено, повторите синхронизацию.")
+    )
+
+
+@admin_router.message(Command("removenft", "revokenft", "deletenft"))
+async def admin_remove_native_nft_username(message: Message, state: FSMContext):
+    """Preview before revoking or permanently deleting a *collectible* username.
+
+    Never deletes an ordinary editable username, any profile, chat or session.
+    """
+    parts = (message.text or "").split()
+    command = parts[0].split("@")[0].lower() if parts else ""
+    permanent = command == "/deletenft"
+    if permanent and message.from_user.id != config.OWNER_TELEGRAM_ID:
+        await message.answer("Полностью удалять NFT может только владелец RiseGram.")
+        return
+    if len(parts) != 4 or parts[1].lower() not in nftnames.TYPES:
+        await message.answer(
+            "Укажи <code>/removenft user|group|channel @владелец @NFT</code> "
+            "для возврата NFT в резерв или "
+            "<code>/deletenft user|group|channel @владелец @NFT</code> "
+            "для полного удаления (только владелец).\\n"
+            "Примеры: <code>/removenft user @paths @rare_name</code>, "
+            "<code>/removenft group @mygroup @rare_name</code>, "
+            "<code>/deletenft channel @mychannel @rare_name</code>"
+        )
+        return
+    try:
+        pending = await nftnames.prepare(
+            parts[1].lower(), parts[2], parts[3],
+            "delete" if permanent else "revoke",
+        )
+    except nftnames.NFTUsernameAdminError as exc:
+        await message.answer("❌ " + esc(str(exc)))
+        return
+    except Exception:
+        log.exception("NFT username removal preparation failed")
+        await message.answer("Сервер не подтвердил владельца NFT, изменений нет.")
+        return
+    await state.set_state(Adm.nft_confirm)
+    await state.update_data(
+        nft_pending=pending,
+        nft_actor=int(message.from_user.id),
+        nft_command_id=f"risegram-nft-{message.chat.id}-{message.message_id}",
+    )
+    action = "УДАЛИТЬ НАВСЕГДА, включая историю" if permanent else "ОТОЗВАТЬ В РЕЗЕРВ"
+    await show(message,
+        f"🏷 <b>Подтверждение удаления NFT-юзернейма</b>\\n\\n"
+        f"NFT: <b>@{esc(pending['name'])}</b>\\n"
+        f"Тип: <b>{esc(pending['kind'])}</b> · Peer ID: <code>{pending['peer_id']}</code>\\n"
+        f"NFT ID: <code>{esc(pending['asset_id'])}</code>\\n"
+        f"Действие: <b>{action}</b>\\n\\n"
+        "Обычный юзернейм, аккаунт, группа, канал, номер и сессии останутся нетронутыми",
+        kb([btn("✅ Подтвердить", "adm:nftconfirm", style="danger")],
+           [btn("✖️ Отмена", "adm:nftcancel")]),
     )
 
 
@@ -476,7 +534,7 @@ async def screen_nfts(event, uid: int, note: str = ""):
         text += f"• {esc(label)} ({'юзернейм' if it['item_type'] == 'username' else 'номер'}, {it['price_stars']} ⭐)\n"
         # Anonymous numbers are identity/login assets and cannot be deleted from bot admin UI.
         if it["item_type"] != "number":
-            rows.append([btn(f"🗑 {label}"[:60], f"adm:nftdel:{it['id']}:{uid}", style="danger")])
+            rows.append([btn(f"🗑 {label}"[:60], "adm:nftcontrol", style="danger")])
     if not items:
         text += "Пусто."
     rows.append([btn("↩️ К игроку", f"adm:u:{uid}")])
@@ -1331,12 +1389,56 @@ async def adm_cb(call: CallbackQuery, state: FSMContext, user: dict):
             await audit(f"Лот #{L['id']} снят админом")
             await safe_send(bot, L["seller_id"], "🛠 Администрация сняла ваш лот с маркета.")
         return await screen_market(call, num(parts, 3), "🗑 Лот снят." if L else "Лот уже закрыт.")
+    if route == "nftcontrol":
+        return await show(call,
+            "🗑 <b>NFT-юзернеймы RiseGram — управление</b>\\n\\n"
+            "Для аккаунта: <code>/removenft user @пользователь @NFT</code>\\n"
+            "Для супергруппы: <code>/removenft group @группа @NFT</code>\\n"
+            "Для канала: <code>/removenft channel @канал @NFT</code>\\n\\n"
+            "Команда <code>/removenft</code> снимает имя у владельца и "
+            "возвращает NFT в резерв с сохранением истории\\n\\n"
+            "Чтобы полностью удалить запись NFT и историю (только владелец):\\n"
+            "<code>/deletenft user|group|channel @владелец @NFT</code>\\n\\n"
+            "Каждое удаление требует подтверждения и проверки владельца "
+            "в MTProto — аккаунты, группы, каналы и номера не удаляются",
+            kb([btn("👥 Пользователи", "adm:users:0")],home_row()))
+    if route == "nftcancel":
+        await state.clear()
+        return await show(call, "Удаление NFT отменено, изменений нет", kb(home_row()))
+    if route == "nftconfirm":
+        data = await state.get_data()
+        pending = data.get("nft_pending")
+        if (await state.get_state() != Adm.nft_confirm.state
+                or not pending or int(data.get("nft_actor") or 0) != call.from_user.id):
+            return await call.answer("Подтверждение устарело. Запусти команду ещё раз.",show_alert=True)
+        if (pending.get("mode") == "delete"
+                and call.from_user.id != config.OWNER_TELEGRAM_ID):
+            return await call.answer("Удаление навсегда доступно только владельцу", show_alert=True)
+        try:
+            result = await nftnames.execute(
+                pending,
+                admin_id=int(call.from_user.id),
+                command_id=str(data["nft_command_id"]),
+            )
+        except nftnames.NFTUsernameAdminError as exc:
+            log.warning("NFT username removal rejected: %s", str(exc)[:160])
+            return await show(call, "❌ " + esc(str(exc)), kb(home_row()))
+        except Exception:
+            log.exception("Native NFT username removal failed")
+            return await show(call, "❌ Сервер не подтвердил удаление NFT. Проверь состояние перед повтором.", kb(home_row()))
+        await audit(f"NFT юзернейм @{pending['name']} {pending['mode']} от "
+                    f"{pending['kind']}:{pending['peer_id']} админом {call.from_user.id}")
+        await state.clear()
+        return await show(call, "✅ " + esc(result), kb(home_row()))
     if route == "nfts":
         return await screen_nfts(call, num(parts, 2))
     if route == "nftdel":
-        res = await remove_nft(num(parts, 2))
-        await audit(f"Удалён NFT #{num(parts, 2)} у {num(parts, 3)}: {res}")
-        return await screen_nfts(call, num(parts, 3), f"🗑 {res}")
+        # Old buttons could delete only local SQLite, leaving the real MTProto
+        # NFT in the client's profile and letting bot sync restore it again.
+        return await show(call,
+            "Старое удаление отключено. Используй меню NFT-юзернеймов, "
+            "чтобы одновременно обновить MTProto и инвентарь бота.",
+            kb([btn("🗑 Управление NFT", "adm:nftcontrol", style="primary")],home_row()))
 
     # ── тумблеры ──
     if route == "feat":
