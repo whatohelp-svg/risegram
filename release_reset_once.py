@@ -116,7 +116,20 @@ async def run_postgres():
                     row=await db.execute(f"DELETE FROM {table} WHERE {predicate}",parameters)
                     deleted[table]=row.rowcount
                 await db.execute("""
-                    UPDATE peer_star_gifts SET unique_gift_id=NULL
+                    UPDATE peer_star_gifts
+                       SET unique_gift_id=NULL,
+                           lifecycle_status='active',
+                           converted=false,
+                           unsaved=true,
+                           pinned_order=0,
+                           gift_num=0,
+                           upgrade_msg_id=0,
+                           transfer_stars=0,
+                           can_export_at=0,
+                           can_transfer_at=0,
+                           can_resell_at=0,
+                           drop_original_details_stars=0,
+                           can_craft_at=0
                      WHERE unique_gift_id = ANY(%s::bigint[])
                 """,(unique_ids,))
                 d=await db.execute("DELETE FROM unique_star_gifts WHERE id=ANY(%s::bigint[])",(unique_ids,))
