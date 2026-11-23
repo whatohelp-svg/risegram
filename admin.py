@@ -373,6 +373,40 @@ async def grant_channel_username(message: Message):
     await message.answer("✅ " + esc(success))
 
 
+@admin_router.message(Command("dbspace"), OwnerOnly())
+async def owner_database_space(message: Message):
+    """Read-only PostgreSQL table sizes for storage diagnostics; does not delete data."""
+    try:
+        async with economy.transaction() as conn:
+            size_row = await (await conn.execute(
+                "SELECT pg_database_size(current_database()) AS bytes"
+            )).fetchone()
+            rows = await (await conn.execute("""
+                SELECT n.nspname AS schema_name, c.relname AS table_name,
+                       pg_total_relation_size(c.oid) AS total_bytes
+                FROM pg_class c
+                JOIN pg_namespace n ON n.oid = c.relnamespace
+                WHERE c.relkind IN ('r', 'm')
+                  AND n.nspname NOT IN ('pg_catalog', 'information_schema')
+                  AND n.nspname NOT LIKE 'pg_toast%'
+                ORDER BY total_bytes DESC
+                LIMIT 12
+            """)).fetchall()
+        size_mb = int(size_row["bytes"]) / (1024 * 1024)
+        lines = [f"📊 <b>PostgreSQL RiseGram</b>",
+                 f"Размер базы: <b>{size_mb:.1f} МБ</b> (без WAL и файлов тома)",
+                 "Крупнейшие таблицы:"]
+        for item in rows:
+            mb = int(item["total_bytes"]) / (1024 * 1024)
+            name = f"{item['schema_name']}.{item['table_name']}"
+            lines.append(f"<code>{esc(name)}</code> — {mb:.1f} МБ")
+        lines.append("ℹ️ Только диагностика — аккаунты NFT подарки и сообщения не менялись")
+        await message.answer("\n".join(lines))
+    except Exception:
+        log.exception("Read-only PostgreSQL space diagnostics failed")
+        await message.answer("❌ Не удалось прочитать размер базы PostgreSQL — проверь её доступность")
+
+
 @admin_router.message(Command(config.ADMIN_COMMAND))
 async def cmd_admin(message: Message, state: FSMContext, user: dict):
     await state.clear()
