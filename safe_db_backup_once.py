@@ -177,10 +177,33 @@ def backup_postgres():
         temporary.unlink(missing_ok=True)
         errfile.unlink(missing_ok=True)
 
+def inspect_database_targets():
+    """Log provider classification only. Never print connection URLs or secrets."""
+    try:
+        from psycopg.conninfo import conninfo_to_dict
+        src = conninfo_to_dict(os.getenv("RISEGRAM_MT_PROTO_BACKUP_DSN", ""))
+        ledger = conninfo_to_dict(os.getenv("RISEGRAM_LEDGER_DSN", ""))
+        def provider(info):
+            hostname = str(info.get("host") or "").lower()
+            if hostname.endswith(".neon.tech"):
+                return "neon"
+            if hostname.endswith(".railway.internal") or hostname.endswith(".up.railway.app"):
+                return "railway"
+            return "other_or_unknown"
+        src_key = (str(src.get("host") or ""), str(src.get("port") or "5432"),
+                   str(src.get("dbname") or ""))
+        ledger_key = (str(ledger.get("host") or ""), str(ledger.get("port") or "5432"),
+                      str(ledger.get("dbname") or ""))
+        log.info("BACKUP_TARGETS source=%s ledger=%s same_database=%s",
+                 provider(src), provider(ledger), src_key == ledger_key)
+    except (ValueError, KeyError, TypeError):
+        log.warning("BACKUP_TARGETS not available")
+
 def run():
     try:
         ROOT.mkdir(parents=True, exist_ok=True)
         os.chmod(ROOT, 0o700)
+        inspect_database_targets()
         backup_sqlite()
         backup_postgres()
     except Exception:
