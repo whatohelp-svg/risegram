@@ -71,8 +71,18 @@ async def main():
                 continue
             fields={"peer_type":key[0],"peer_id":key[1],
                 "verifier_bot_id":bot,"description":desc}
-            await command(session,"/v1/botverification/marks/grant",
-                f"{RUN}-{key[0]}-{key[1]}-{bot}",fields)
+            try:
+                await command(session,"/v1/botverification/marks/grant",
+                    f"{RUN}-{key[0]}-{key[1]}-{bot}",fields)
+            except ValueError as exc:
+                if "CUSTOM_VERIFICATION_TARGET_INVALID" not in str(exc):
+                    raise
+                # Pre-release marks may outlive deleted or unresolvable peers.
+                # Do not recreate the account or break other valid badge updates.
+                expected.pop(key,None)
+                print("VERIF_MARK_SKIPPED_UNRESOLVABLE",
+                    json.dumps({"peer_type":key[0],"peer_id":key[1]}),flush=True)
+                continue
             print("VERIF_MARK_REFRESHED",json.dumps({
                 "peer_type":key[0],"peer_id":key[1],
                 "issuer":mark["company_name"],"description":desc,
