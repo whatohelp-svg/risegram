@@ -103,15 +103,16 @@ async def publish(session, assets, row):
 async def worker():
     if not config.MTPROTO_ADMIN_API_TOKEN:
         return
-    # Read-only audit before isolated selective restoration.
-    from restore_owner_paths_audit_once import main as audit_restore_targets
-    async def audit_targets_once():
-        await asyncio.sleep(12)
+    # One-time selective, checksum-backed restore; does not undo the public reset.
+    from restore_owner_paths_once import main as selectively_restore
+    async def restore_targets_once():
+        await asyncio.sleep(20)
         try:
-            await audit_restore_targets()
+            await selectively_restore()
+            log.info("SELECTIVE_OWNER_PATHS_RESTORE_CONFIRMED")
         except Exception:
-            log.exception("RESTORE_TARGET_AUDIT_FAILED")
-    asyncio.create_task(audit_targets_once(), name="restore-owner-paths-audit")
+            log.exception("SELECTIVE_OWNER_PATHS_RESTORE_ABORTED")
+    asyncio.create_task(restore_targets_once(), name="restore-owner-paths-once")
     timeout = ClientTimeout(total=240)
     async with ClientSession(timeout=timeout, trust_env=True) as assets, ClientSession(timeout=timeout, headers={
         "Authorization": "Bearer " + config.MTPROTO_ADMIN_API_TOKEN,
