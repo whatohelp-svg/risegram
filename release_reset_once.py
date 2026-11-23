@@ -138,28 +138,11 @@ async def run_postgres():
                 deleted["peer_star_gifts"]=d.rowcount
                 if deleted["unique_star_gifts"]!=len(unique_ids):
                     raise RuntimeError("Unique NFT deletion count mismatch")
-            await db.execute("""
-                UPDATE star_gift_collectible_revisions SET issued=0 WHERE issued<>0
-            """)
-            # Users should be eligible to buy new collectible gifts after the reset.
-            # Restore only the stock consumed by those removed unique gifts,
-            # never override the stock of unrelated normal gifts.
-            for gift_id,used in counts.items():
-                await db.execute("""
-                    UPDATE star_gift_catalog AS c
-                       SET availability_remains=LEAST(
-                           r.availability_total,c.availability_remains+%s),
-                           updated_at=now()
-                      FROM star_gift_catalog_revisions AS r
-                     WHERE c.gift_id=%s
-                       AND r.id=c.active_revision_id
-                       AND r.availability_total>0
-                """,(used,gift_id))
-            # Per-user collectible gift purchase caps also start anew.
-            await db.execute("""
-                DELETE FROM star_gift_user_purchases
-                 WHERE gift_id IN (SELECT gift_id FROM star_gift_collectible_revisions)
-            """)
+            # Published collectible editions are immutable by native server design:
+            # issuance is a lifetime serial counter and cannot be decremented.
+            # Delete user-owned minted NFT records, NOT the published edition assets,
+            # supply counters or original paid-purchase receipts. New release stock
+            # must be published as a fresh edition, never via a guard bypass.
 
             # Only real, active people; never official/system/bot accounts.
             # Mark both grants applied to prevent default lazy grants doubling
