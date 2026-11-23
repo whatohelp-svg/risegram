@@ -70,7 +70,7 @@ async def main():
                 async with conn.cursor() as cur:
                     async with cur.copy(stmt) as copy:
                         async for block in copy:
-                            sink.write(block if isinstance(block,bytes) else block.encode())
+                            sink.write(bytes(block) if not isinstance(block,str) else block.encode())
             os.replace(tmp,target)
             files.append({"file":target.name,"sha256":digest(target),"bytes":target.stat().st_size})
     total=sum(x["bytes"] for x in files)
