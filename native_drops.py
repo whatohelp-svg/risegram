@@ -110,11 +110,26 @@ async def worker():
         "Authorization": "Bearer " + config.MTPROTO_ADMIN_API_TOKEN,
     }) as session:
         while True:
+            storage_full = False
             for row in await asyncio.to_thread(drops.list_admin_drops, -1):
                 try:
                     await publish(session, assets, row)
                 except Exception as exc:
-                    log.warning("Drop %s publication pending: %s", row["id"], str(exc)[:200])
+                    detail = str(exc)
+                    if "no space left on device" in detail.lower() or "sqlstate 53100" in detail.lower():
+                        # The PostgreSQL volume is full. Retrying every drop every
+                        # 15 seconds floods the DB and cannot repair the disk.
+                        log.error(
+                            "Gift publishing paused for 60 seconds: PostgreSQL volume full "
+                            "(drop %s). Expand the existing Railway Postgres volume.",
+                            row["id"],
+                        )
+                        storage_full = True
+                        break
+                    log.warning("Drop %s publication pending: %s", row["id"], detail[:200])
+            if storage_full:
+                await asyncio.sleep(60)
+                continue
             try:
                 await refresh_private_editions(session, assets)
             except Exception as exc:
