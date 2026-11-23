@@ -109,7 +109,7 @@ async def home_screen(event, user: dict):
         f"{config.BRAND} ID: <b>{me['rise_id']}</b>\n"
         f"{await client_wallet_line(me)}\n"
         f"☑️ Статус: <b>{'Официальный владелец' if int(user['tg_id']) == int(config.OWNER_ID) else 'Администратор / тестер'}</b>\n"
-        "🏷 NFT каналу или супергруппе: <code>/grantnft @чат @имя</code>\nПроверка чата: <code>/grantverify @чат official|major|risegram</code>\n"
+        "🏷 NFT каналу или супергруппе: <code>/grantnft @чат @имя</code>\nПроверка чата: <code>/grantverify @чат official|risegram|major</code>\nСнятие галочки: <code>/revokeverify @чат official|risegram|major</code>\n"
         f"🛠 Техработы: <b>{'ВКЛ' if maint else 'выкл'}</b>"
     )
     scam_label = f"⚠️ SCAM-заявки ({pending})" if pending else "⚠️ SCAM-заявки"
@@ -134,23 +134,38 @@ async def home_screen(event, user: dict):
     await show(event, text, markup)
 
 
-@admin_router.message(Command("grantnft", "grantverify"))
+@admin_router.message(Command("grantnft", "grantverify", "revokeverify"))
 async def grant_channel_username(message: Message):
+    """Mint usernames or grant/revoke native channel and supergroup verification.
+
+    AdminOnly is enforced on the router and the chat is always a private admin
+    conversation. Basic (non-super) groups cannot be marked by native MTProto;
+    convert them to supergroups first.
+    """
     parts = (message.text or "").split()
-    verify = parts[0].split("@")[0].lower() == "/grantverify"
+    action = parts[0].split("@")[0].lower() if parts else ""
+    verification = action in ("/grantverify", "/revokeverify")
+    revoking = action == "/revokeverify"
     name_pattern = r"[A-Za-z][A-Za-z0-9_]{3,31}"
-    usage = ("Используйте /grantverify @чат official|risegram|major" if verify
-             else "Используйте /grantnft @чат @новое_имя. Вместо @чата можно указать ID.")
-    if len(parts) != 3:
+    usage = (
+        "Используйте /grantverify или /revokeverify @чат official|risegram|major"
+        " [group|channel] (тип нужен для числового ID при выдаче)"
+        if verification else "Используйте /grantnft @чат @новое_имя. Вместо @чата можно указать ID."
+    )
+    if len(parts) not in ((3, 4) if verification else (3,)):
         await message.answer(usage)
         return
     target, value = parts[1], parts[2].lower()
+    kind_hint = parts[3].lower() if len(parts) == 4 else ""
     numeric = re.fullmatch(r"(?:-100)?[1-9][0-9]{0,18}", target)
     if not numeric and not re.fullmatch("@" + name_pattern, target):
         await message.answer(usage)
         return
-    if (verify and value not in ("official", "risegram", "major")) or (
-        not verify and not re.fullmatch("@?" + name_pattern, value)
+    if kind_hint not in ("", "group", "channel"):
+        await message.answer(usage)
+        return
+    if (verification and value not in ("official", "risegram", "major")) or (
+        not verification and not re.fullmatch("@?" + name_pattern, value)
     ):
         await message.answer(usage)
         return
@@ -160,55 +175,91 @@ async def grant_channel_username(message: Message):
         return
     headers = {"Authorization": f"Bearer {config.MTPROTO_ADMIN_API_TOKEN}"}
     payload = {
-        "command_id": f"channel-grant-{message.chat.id}-{message.message_id}",
+        "command_id": f"channel-{'revoke' if revoking else 'grant'}-{message.chat.id}-{message.message_id}",
         "actor": f"risegram-admin-{message.from_user.id}",
-        "reason": "Administrator grant to a RiseGram group or channel",
+        "reason": "Administrator " + ("revocation" if revoking else "grant") + " for a RiseGram group or channel",
     }
     try:
-        async with ClientSession(timeout=ClientTimeout(total=10), headers=headers) as session:
+        async with ClientSession(timeout=ClientTimeout(total=12), headers=headers) as session:
+            channel_kind = kind_hint
             if numeric:
                 channel_id = int(target.removeprefix("-100"))
             else:
-                async with session.get(base + "/v1/channels/resolve-username",
-                                       params={"username": target[1:].lower()}) as response:
+                async with session.get(
+                    base + "/v1/channels/resolve-username",
+                    params={"username": target[1:].lower()},
+                ) as response:
                     response.raise_for_status()
                     peer = await response.json()
                 if not peer.get("found"):
                     await message.answer("Публичная группа или канал с таким именем не найдены.")
                     return
                 channel_id = int(peer["channel_id"])
+                detected = "group" if peer.get("megagroup") else "channel" if peer.get("broadcast") else ""
+                if kind_hint and detected and kind_hint != detected:
+                    await message.answer("Указанный тип не соответствует типу чата на сервере.")
+                    return
+                channel_kind = detected or kind_hint
             if not 0 < channel_id < 2**63:
                 await message.answer("Некорректный ID чата.")
                 return
-            if not verify:
+
+            entity = "Группа" if channel_kind == "group" else "Канал" if channel_kind == "channel" else "Чат"
+            if not verification:
                 endpoint = "/v1/collectible-usernames/mint"
                 name = value.lstrip("@")
-                payload.update(username=name, owner_channel_id=str(channel_id), currency="USD",
-                               amount="0", purchase_date=int(message.date.timestamp()))
+                payload.update(
+                    username=name, owner_channel_id=str(channel_id), currency="USD",
+                    amount="0", purchase_date=int(message.date.timestamp()),
+                )
                 success = f"NFT @{name} выдан чату {channel_id}."
             elif value == "official":
                 endpoint = "/v1/channels/set-verified"
-                payload.update(channel_id=channel_id, verified=True)
-                success = f"Чату {channel_id} выдана официальная галочка."
+                payload.update(channel_id=channel_id, verified=not revoking)
+                success = f"{entity} {channel_id}: официальная галочка {'снята' if revoking else 'выдана'}."
             else:
-                async with session.get(base + "/v1/botverification/verifiers",
-                                       params={"enabled_only": "true", "limit": "200"}) as response:
+                if not revoking and not channel_kind:
+                    await message.answer(
+                        "Не удалось определить тип чата. Для ID укажите group или channel "
+                        "четвёртым аргументом, для публичного чата проверьте обновление MTProto."
+                    )
+                    return
+                async with session.get(
+                    base + "/v1/botverification/verifiers",
+                    params={"enabled_only": "false" if revoking else "true", "limit": "200"},
+                ) as response:
                     response.raise_for_status()
                     verifiers = (await response.json())["rows"]
-                matches = [v for v in verifiers if v["Enabled"] and v["CompanyName"].strip().lower() == value]
+                matches = [
+                    v for v in verifiers
+                    if v["CompanyName"].strip().lower() == value and (revoking or v["Enabled"])
+                ]
                 if len(matches) != 1:
-                    await message.answer(f"Для {value} не настроен однозначный активный верификатор.")
+                    await message.answer(f"Для {value} не настроен однозначный верификатор.")
                     return
-                endpoint = "/v1/botverification/marks/grant"
-                payload.update(peer_type="channel", peer_id=channel_id, verifier_bot_id=int(matches[0]["BotID"]))
-                success = f"Чату {channel_id} выдана верификация {value}."
+                endpoint = f"/v1/botverification/marks/{'revoke' if revoking else 'grant'}"
+                payload.update(
+                    peer_type="channel", peer_id=channel_id,
+                    verifier_bot_id=int(matches[0]["BotID"]),
+                )
+                if not revoking:
+                    company = "официальной компанией «RiseGram»" if value == "risegram" else "организацией «Major»"
+                    payload["description"] = (
+                        f"{entity} верифицирована {company}." if channel_kind == "group"
+                        else f"{entity} верифицирован {company}."
+                    )
+                success = f"{entity} {channel_id}: верификация {value} {'снята' if revoking else 'выдана'}."
             async with session.post(base + endpoint, json=payload) as response:
                 response.raise_for_status()
-                completed = (await response.json()).get("status") == "completed"
+                result = await response.json(content_type=None)
+                completed = result.get("status") == "completed"
     except (ClientError, TimeoutError, ValueError, KeyError):
-        await message.answer("Сервер не подтвердил выдачу. Проверьте чат и статус в профиле.")
+        log.exception("Native group/channel verification change failed")
+        await message.answer("Сервер не подтвердил действие. Проверьте чат и статус в профиле.")
         return
-    await message.answer(success if completed else "Сервер не подтвердил выдачу.")
+    if completed:
+        await audit(f"{success} Администратор: {message.from_user.id}")
+    await message.answer(success if completed else "Сервер не подтвердил действие.")
 
 
 @admin_router.message(Command(config.ADMIN_COMMAND))
