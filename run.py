@@ -38,9 +38,31 @@ if __name__ == "__main__":
         # One-shot read-only backups run on the existing /data volume. Do not
         # block login, chat delivery or the bot while the archive is produced.
         import os
+        import sys
         if os.getenv("RISEGRAM_BACKUP_ON_START") == "1":
             from safe_db_backup_once import run_async
             asyncio.create_task(run_async(), name="risegram-safe-backup")
+
+        async def neon_restore_once():
+            # Restores ONLY into a verified empty Neon database. Never touches
+            # MTProto production DSN. The tool itself enforces an empty target
+            # and single-transaction pg_restore.
+            log.info("NEON_RESTORE_JOB_START")
+            proc = await asyncio.create_subprocess_exec(
+                sys.executable, "/app/mtproto_neon_restore.py",
+                "--restore-to-new-empty-neon",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            out, err = await proc.communicate()
+            for line in out.decode(errors="replace").splitlines():
+                log.info("%s", line[:240])
+            for line in err.decode(errors="replace").splitlines():
+                log.error("%s", line[:240])
+            log.info("NEON_RESTORE_JOB_EXIT code=%s", proc.returncode)
+
+        if os.getenv("RISEGRAM_NEON_RESTORE_ON_START") == "1":
+            asyncio.create_task(neon_restore_once(), name="risegram-neon-restore")
         await bot.main()
 
     asyncio.run(run_with_backup())
