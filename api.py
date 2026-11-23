@@ -1019,13 +1019,30 @@ async def sync_mtproto_verification(user_id: int, force: bool = False) -> dict:
                 old = await db.get_meta(mark_key)
                 if bot_id or old:
                     from issuer_marks import command
-                    operation = "grant" if bot_id else "revoke"
-                    mark = {"verifier_bot_id": int(bot_id or old), "peer_type": "user", "peer_id": native_peer}
-                    if bot_id and user.get("verified_major") and user.get("verified_risegram"):
-                        mark["description"] = "Аккаунт верифицирован организациями «RiseGram» и «Major»."
-                    await command(session, f"/v1/botverification/marks/{operation}",
-                                  f"rg-user-mark-{native_peer}-{time.time_ns()}", mark)
-                    await db.set_meta(mark_key, bot_id or "")
+                    # Revoking or changing an issuer must remove the *old* mark
+                    # before granting a new one. Otherwise a stale Major mark
+                    # may remain when RiseGram is selected (or vice versa).
+                    if old and str(old) != str(bot_id or ""):
+                        await command(session, "/v1/botverification/marks/revoke",
+                                      f"rg-user-mark-revoke-{native_peer}-{time.time_ns()}", {
+                                          "verifier_bot_id": int(old),
+                                          "peer_type": "user", "peer_id": native_peer,
+                                      })
+                        await db.set_meta(mark_key, "")
+                    if bot_id:
+                        if user.get("verified_major") and user.get("verified_risegram"):
+                            description = "Аккаунт верифицирован организациями «RiseGram» и «Major»."
+                        elif user.get("verified_major"):
+                            description = "Аккаунт верифицирован организацией «Major»."
+                        else:
+                            description = "Аккаунт верифицирован официальной компанией «RiseGram»."
+                        await command(session, "/v1/botverification/marks/grant",
+                                      f"rg-user-mark-grant-{native_peer}-{time.time_ns()}", {
+                                          "verifier_bot_id": int(bot_id),
+                                          "peer_type": "user", "peer_id": native_peer,
+                                          "description": description,
+                                      })
+                        await db.set_meta(mark_key, str(bot_id))
             _verification_sync_state[int(user_id)] = fingerprint
             _verification_sync_last[int(user_id)] = time.monotonic()
             return {"configured": True, "synced": True}
