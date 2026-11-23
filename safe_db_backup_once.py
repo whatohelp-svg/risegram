@@ -10,6 +10,8 @@ import shutil
 import sqlite3
 import subprocess
 import time
+import re
+import psycopg
 
 log = logging.getLogger("risegram.backup")
 ROOT = Path("/data/risegram-db-backups")
@@ -91,6 +93,22 @@ def backup_postgres():
         return
     if shutil.disk_usage(ROOT).free < MIN_FREE + 20971520:
         log.error("BACKUP_SKIP backup volume full")
+        return
+    # Log only the major versions, not host, user, database name or credentials.
+    try:
+        with psycopg.connect(dsn, connect_timeout=8) as conn:
+            server_major = int(conn.execute("SHOW server_version_num").fetchone()[0]) // 10000
+    except psycopg.Error as exc:
+        log.error("BACKUP_FAILED source read check %s", type(exc).__name__)
+        return
+    tool = subprocess.run([pg_dump, "--version"], text=True,
+                          capture_output=True, timeout=10)
+    matches = re.search(r"(\\d+)\\.", tool.stdout)
+    client_major = int(matches.group(1)) if matches else 0
+    log.info("BACKUP_SOURCE_VERSION server=%s pg_dump=%s", server_major, client_major)
+    if server_major > client_major:
+        log.error("BACKUP_BLOCKED incompatible pg_dump version: client=%s source=%s",
+                  client_major, server_major)
         return
     temporary = ROOT / (label + ".partial")
     target = ROOT / (label + ".dump")
