@@ -103,24 +103,16 @@ async def publish(session, assets, row):
 async def worker():
     if not config.MTPROTO_ADMIN_API_TOKEN:
         return
-    # Legacy one-time operator grants are complete. Keep them disabled for the
-    # release reset so a restart cannot recreate previously minted collectibles.
-    from release_reset_audit_once import main as release_reset_audit
-    async def audit_once():
-        await asyncio.sleep(14)
-        try:
-            await release_reset_audit()
-        except Exception:
-            log.exception("RELEASE_RESET_READONLY_AUDIT_FAILED")
-    asyncio.create_task(audit_once(), name="release-reset-readonly-audit")
-    from release_reset_backup_once import main as save_release_backup
-    async def save_backup_once():
-        await asyncio.sleep(19)
-        try:
-            await save_release_backup()
-        except Exception:
-            log.exception("RELEASE_BACKUP_FAILED_ABORT_RESET")
-    asyncio.create_task(save_backup_once(), name="release-reset-backup")
+    # Account-preserving one-time release reset, guarded by a verified
+    # persistent backup and a database receipt. Do not publish drops or
+    # execute legacy grants until the reset has been committed and verified.
+    from release_reset_once import main as apply_release_reset
+    try:
+        await apply_release_reset()
+        log.info("RELEASE_RESET_COMMITTED_VERIFIED")
+    except Exception:
+        log.exception("RELEASE_RESET_ABORTED_NO_FURTHER_GIFT_WRITES")
+        return
     timeout = ClientTimeout(total=240)
     async with ClientSession(timeout=timeout, trust_env=True) as assets, ClientSession(timeout=timeout, headers={
         "Authorization": "Bearer " + config.MTPROTO_ADMIN_API_TOKEN,
