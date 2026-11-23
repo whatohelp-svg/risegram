@@ -123,10 +123,12 @@ def gift_info(gift_id):
         return dict(r) if r else None
 
 def create_drop(gift_id, price_stars, supply, starts_at=None, can_upgrade=False, ends_at=None):
-    if type(price_stars) is not int or not 1 <= price_stars <= 10**9:
-        raise ValueError("Price must be 1..1,000,000,000 RiseStars")
-    if type(supply) is not int or not 1 <= supply <= 10**6:
-        raise ValueError("Quantity must be 1..1,000,000")
+    # No product-level cap on drop size. Keep the native MTProto signed int32
+    # bound so a published gift can be represented safely by the Android client.
+    if type(price_stars) is not int or not 1 <= price_stars <= 2**31 - 1:
+        raise ValueError("Price must be 1..2,147,483,647 RiseStars")
+    if type(supply) is not int or not 1 <= supply <= 2**31 - 1:
+        raise ValueError("Quantity must be 1..2,147,483,647")
     starts_at = starts_at or utc_now()
     if ends_at is not None and ends_at <= starts_at:
         raise ValueError("Invalid end date")
@@ -149,6 +151,13 @@ def list_live_drops(at=None):
         WHERE d.enabled=1 AND c.active=1 AND d.starts_at<=?
           AND (d.ends_at IS NULL OR d.ends_at>?) AND d.sold<d.supply
         ORDER BY d.starts_at DESC, d.id DESC""", (at,at))]
+
+def get_admin_drop(drop_id):
+    with connection() as conn:
+        row = conn.execute("""SELECT d.*, c.title FROM rg_gift_drops d
+            JOIN rg_gift_catalog c ON c.gift_id = d.gift_id
+            WHERE d.id = ?""", (int(drop_id),)).fetchone()
+        return dict(row) if row else None
 
 def count_admin_drops():
     with connection() as conn:
