@@ -1807,7 +1807,7 @@ async def ensure_owner() -> None:
             (config.OWNER_TELEGRAM_ID, oid, now()),
         )
         await db.execute(
-            "UPDATE users SET verified=1, rise_id=?, username=? WHERE tg_id=?",
+            "UPDATE users SET verified=CASE WHEN verified_risegram=1 OR verified_major=1 THEN 1 ELSE 0 END, rise_id=?, username=? WHERE tg_id=?",
             (owner_rise_id, config.OWNER_USERNAME, oid),
         )
         await db.execute(
