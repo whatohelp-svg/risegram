@@ -14,8 +14,8 @@ import gift_drops as gifts
 from ui import btn, esc, kb, show
 
 ALMATY = timezone(timedelta(hours=5))
-PAGE = 50
-DROP_PAGE = 20
+PAGE = 12
+DROP_PAGE = 8
 
 async def screen(event, page=0):
     rows, count = await asyncio.to_thread(gifts.catalog, max(0, page), PAGE)
@@ -26,13 +26,13 @@ async def screen(event, page=0):
     start=page*PAGE
     text=(f"🎁 <b>Telegram NFT — каталог RiseGram</b>\n"
           f"Коллекций: <b>{count}</b> · страница {page+1}/{pages}\n\n"
-          "Нажми номер подарка. 5 столбцов × 10 строк.\n\n")
+          "Выбери подарок. 4 столбца × 3 строки.\n\n")
     text+="\n".join(f"<code>{start+i+1:03}</code> {esc(r['title'])}" for i,r in enumerate(rows))
     grid=[]
-    for i in range(0,len(rows),5):
+    for i in range(0,len(rows),4):
         grid.append([btn(f"{start+j+1:03}",f"adm:localgift:pick:{rows[j]['gift_id']}",
                          style=("primary","success","danger")[(start+j)%3])
-                     for j in range(i,min(i+5,len(rows)))])
+                     for j in range(i,min(i+4,len(rows)))])
     nav=[]
     if page>0: nav.append(btn("‹",f"adm:localgifts:{page-1}",style="primary"))
     nav.append(btn(f"{page+1}/{pages}","adm:noop"))
@@ -52,22 +52,41 @@ async def my_drops(event, page=0):
             f"Всего создано: <b>{count}</b> · страница {page+1}/{pages}\n\n")
     if not items:
         text += "Пока дропов нет."
-    rows = []
+    buttons = []
     for g in items:
-        enabled = bool(g["enabled"])
         text += (f"#{g['id']} {esc(g['title'])} · {g['sold']}/{g['supply']} · "
-                 f"{g['price_stars']} RiseStars · {'🟢' if enabled else '🔴'}\n")
-        rows.append([btn(f"{'🔴 Остановить' if enabled else '🟢 Возобновить'} #{g['id']}",
-                         f"adm:localgift:toggle:{g['id']}:{page}",
-                         style="danger" if enabled else "success")])
+                 f"{g['price_stars']} ⭐ · {'🟢' if g['enabled'] else '🔴'}\n")
+        buttons.append(btn(f"#{g['id']}", f"adm:localgift:detail:{g['id']}:{page}"))
+    rows = [buttons[i:i+4] for i in range(0, len(buttons), 4)]
     nav = []
     if page > 0:
         nav.append(btn("‹ Назад", f"adm:localgift:list:{page-1}", style="primary"))
     nav.append(btn(f"{page+1}/{pages}", "adm:noop"))
     if page + 1 < pages:
         nav.append(btn("Далее ›", f"adm:localgift:list:{page+1}", style="primary"))
-    await show(event, text, kb(*rows, nav, [btn("🎁 Каталог — все коллекции", "adm:localgifts:0")],
+    await show(event, text, kb(*rows, nav,
+                               [btn("🎁 Каталог", "adm:localgifts:0")],
                                [btn("↩️ Админка", "adm:home")]))
+
+
+async def drop_detail(event, drop_id, page=0):
+    g = await asyncio.to_thread(gifts.get_admin_drop, drop_id)
+    if not g:
+        return await my_drops(event, page)
+    enabled = bool(g["enabled"])
+    text = (f"📦 <b>Дроп #{g['id']}</b>\n"
+            f"🎁 {esc(g['title'])}\n"
+            f"Продано: {g['sold']} / {g['supply']}\n"
+            f"Цена: {g['price_stars']} RiseStars\n"
+            f"Статус: {'🟢 Активен' if enabled else '🔴 Остановлен'}\n\n"
+            "Покупки продолжают учитываться сервером — данные дропа не удаляются")
+    await show(event, text, kb(
+        [btn("🔴 Остановить" if enabled else "🟢 Возобновить",
+             f"adm:localgift:toggle:{g['id']}:{page}",
+             style="danger" if enabled else "success")],
+        [btn("‹ К списку", f"adm:localgift:list:{page}", style="primary")],
+    ))
+
 
 async def choose_upgrade(event,state,allow):
     data=await state.get_data()
@@ -115,7 +134,7 @@ async def on_callback(call,state,parts):
         await state.set_state("Adm:input")
         await state.set_data({"act":"localgift_qty","gift_id":slug})
         return await show(call,f"🎁 <b>{esc(gift['title'])}</b>\n\n"
-             "📦 Введи количество подарков в дропе (1–1 000 000)",
+             "📦 Введи количество подарков в дропе (от 1 до 2 147 483 647)",
              kb([btn("Отмена","adm:localgifts:0",style="danger")]))
     if sub=="upgrade":
         return await choose_upgrade(call,state,len(parts)>3 and parts[3]=="1")
@@ -147,6 +166,12 @@ async def on_callback(call,state,parts):
         try: page = int(parts[3])
         except (ValueError, IndexError): page = 0
         return await my_drops(call, page)
+    if sub=="detail":
+        try: drop_id = int(parts[3])
+        except (ValueError, IndexError): return
+        try: page = int(parts[4])
+        except (ValueError, IndexError): page = 0
+        return await drop_detail(call, drop_id, page)
     if sub=="toggle":
         try: drop_id = int(parts[3])
         except (ValueError, IndexError): return
@@ -154,7 +179,7 @@ async def on_callback(call,state,parts):
         except (ValueError, IndexError): page = 0
         ok = await asyncio.to_thread(gifts.toggle_drop, drop_id)
         if ok: await db.log_admin_action(config.OWNER_ID, f"Переключён дроп #{drop_id}")
-        return await my_drops(call, page)
+        return await drop_detail(call, drop_id, page)
     if sub=="refresh":
         try:
             timeout=aiohttp.ClientTimeout(total=12)
