@@ -103,7 +103,7 @@ def backup_postgres():
         return
     tool = subprocess.run([pg_dump, "--version"], text=True,
                           capture_output=True, timeout=10)
-    matches = re.search(r"(\\d+)\\.", tool.stdout)
+    matches = re.search(r"(\d+)\.", tool.stdout)
     client_major = int(matches.group(1)) if matches else 0
     log.info("BACKUP_SOURCE_VERSION server=%s pg_dump=%s", server_major, client_major)
     if server_major > client_major:
