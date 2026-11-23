@@ -147,8 +147,20 @@ def backup_postgres():
                         else "permissions" if "permission denied" in detail
                         else "server_busy" if "could not serialize" in detail
                         else "other")
-            log.error("BACKUP_FAILED pg_dump exit=%d category=%s",
-                      proc.returncode, category)
+            # Emit a limited, redacted diagnostic without URLs, usernames,
+            # database names, credentials, or raw query text.
+            line = next((ln for ln in detail.splitlines() if "pg_dump: error:" in ln),
+                        "no_pg_dump_error_line")
+            if "connection to server" in line or "connection string" in line:
+                line = "connection_details_redacted"
+            else:
+                line = re.sub(r"postgres(?:ql)?://[^\\s]+", "[dsn-redacted]", line)
+                line = re.sub(r"\\b(host|dbname|user|password)=\\S+", r"\\1=[redacted]", line)
+                line = re.sub(r"\\b[0-9]{5,}\\b", "[id]", line)
+                line = re.sub(r'"[^"]+"', '"[redacted]"', line)
+                line = line[:220]
+            log.error("BACKUP_FAILED pg_dump exit=%d category=%s detail=%s",
+                      proc.returncode, category, line)
             return
         # Decompress and read every archive block; no database is modified.
         checked = subprocess.run([pg_restore, "--file=/dev/null", str(temporary)],
