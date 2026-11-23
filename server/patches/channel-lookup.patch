@@ -101,7 +101,7 @@ index fa238df..1a9b0cb 100644
 +		writeError(w, http.StatusBadRequest, "channel lookup failed")
 +		return
 +	}
-+	writeJSON(w, http.StatusOK, map[string]any{"found": found, "channel_id": strconv.FormatInt(channel.ID, 10)})
++	writeJSON(w, http.StatusOK, map[string]any{"found": found, "channel_id": strconv.FormatInt(channel.ID, 10), "broadcast": channel.Broadcast, "megagroup": channel.Megagroup})
 +}
 +
  func (s *Server) handleSetChannelVerified(w http.ResponseWriter, r *http.Request) {
