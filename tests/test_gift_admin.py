@@ -26,19 +26,37 @@ class PickerTest(unittest.IsolatedAsyncioTestCase):
         text, markup=rendered[0]
         return text,markup.inline_keyboard
 
-    async def test_page_one_five_columns_ten_rows(self):
+    async def test_page_one_compact_grid(self):
         text,rows=await self.check_page(0)
-        self.assertEqual([len(r) for r in rows[:10]],[5]*10)
-        self.assertIn("1/3",text)
-        self.assertTrue(any(b.text=="›" for b in rows[10]))
+        self.assertEqual([len(r) for r in rows[:3]],[4]*3)
+        self.assertIn("1/11",text)
+        self.assertTrue(any(b.text=="›" for b in rows[3]))
         self.assertEqual(rows[0][0].callback_data,"adm:localgift:pick:gift000")
 
-    async def test_last_page_twenty_three_and_back(self):
-        text,rows=await self.check_page(2)
-        self.assertEqual([len(r) for r in rows[:5]],[5,5,5,5,3])
-        self.assertTrue(any(b.text=="‹" for b in rows[5]))
-        self.assertFalse(any(b.text=="›" for b in rows[5]))
-        self.assertIn("3/3",text)
+    async def test_last_page_three_collections(self):
+        text,rows=await self.check_page(10)
+        self.assertEqual([len(r) for r in rows[:1]],[3])
+        self.assertTrue(any(b.text=="‹" for b in rows[1]))
+        self.assertFalse(any(b.text=="›" for b in rows[1]))
+        self.assertIn("11/11",text)
+
+    async def test_drops_paged_with_compact_buttons(self):
+        rows = [dict(id=i, title=f"Gift {i}", sold=0, supply=10,
+                     price_stars=100, enabled=1) for i in range(29, 0, -1)]
+        rendered=[]
+        async def fake_show(event,text,markup):
+            rendered.append((text, markup.inline_keyboard))
+        with patch.object(gift_admin,"show",new=fake_show), \
+             patch.object(gift_admin.gifts,"count_admin_drops",return_value=29), \
+             patch.object(gift_admin.gifts,"list_admin_drops",
+                          side_effect=lambda limit,offset: rows[offset:offset+limit]):
+            await gift_admin.my_drops(object(),1)
+        text, buttons = rendered[0]
+        self.assertIn("2/4",text)
+        self.assertEqual([b.text for line in buttons[:2] for b in line],
+                         [f"#{i}" for i in range(21,13,-1)])
+        self.assertTrue(any(b.text=="‹ Назад" for b in buttons[2]))
+        self.assertTrue(any(b.text=="Далее ›" for b in buttons[2]))
 
 class MiniAppSignedIdentityTest(unittest.TestCase):
     def setUp(self):
