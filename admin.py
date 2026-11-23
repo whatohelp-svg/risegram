@@ -218,6 +218,24 @@ async def admin_remove_native_nft_username(message: Message, state: FSMContext):
     )
 
 
+def native_action_error(status: int, result: dict) -> str:
+    """Return an actionable owner-only error without exposing backend secrets."""
+    detail = str(result.get("code") or result.get("error") or result.get("message") or "")
+    lowered = detail.lower()
+    if ("no space left" in lowered or "sqlstate 53100" in lowered
+            or "disk full" in lowered):
+        return "На PostgreSQL закончилось место — операции заблокированы. Расширь том Railway и повтори."
+    if "already" in lowered and ("exist" in lowered or "taken" in lowered):
+        return "NFT уже существует или имя занято — проверь юзернейм перед повтором."
+    if "not found" in lowered or "not_found" in lowered:
+        return "Объект не найден на MTProto сервере — проверь ID чата и текущую галочку."
+    if "invalid" in lowered or "bad_request" in lowered:
+        return "Сервер отклонил параметры: " + re.sub(r"\\s+", " ", detail)[:180]
+    if detail:
+        return f"MTProto HTTP {status}: " + re.sub(r"\\s+", " ", detail)[:180]
+    return f"MTProto HTTP {status} — сервер не выполнил операцию."
+
+
 @admin_router.message(Command("grantnft", "grantverify", "revokeverify"))
 async def grant_channel_username(message: Message):
     """Mint usernames or grant/revoke native channel and supergroup verification.
@@ -334,16 +352,25 @@ async def grant_channel_username(message: Message):
                     )
                 success = f"{entity} {channel_id}: верификация {value} {'снята' if revoking else 'выдана'}."
             async with session.post(base + endpoint, json=payload) as response:
-                response.raise_for_status()
-                result = await response.json(content_type=None)
-                completed = result.get("status") == "completed"
+                status = response.status
+                try:
+                    result = await response.json(content_type=None)
+                except (ValueError, ClientError):
+                    result = {}
+                if not isinstance(result, dict):
+                    result = {}
+                if status >= 400 or result.get("status") != "completed":
+                    note = native_action_error(status, result)
+                    log.warning("Native admin operation rejected: action=%s peer=%s http=%s code=%s",
+                                action, channel_id, status, str(result.get("code") or "")[:80])
+                    await message.answer("❌ " + esc(note) + "\nНикаких изменений не подтверждено")
+                    return
     except (ClientError, TimeoutError, ValueError, KeyError):
         log.exception("Native group/channel verification change failed")
-        await message.answer("Сервер не подтвердил действие. Проверьте чат и статус в профиле.")
+        await message.answer("❌ Ошибка подключения к MTProto серверу. Попробуй после восстановления базы.")
         return
-    if completed:
-        await audit(f"{success} Администратор: {message.from_user.id}")
-    await message.answer(success if completed else "Сервер не подтвердил действие.")
+    await audit(f"{success} Администратор: {message.from_user.id}")
+    await message.answer("✅ " + esc(success))
 
 
 @admin_router.message(Command(config.ADMIN_COMMAND))
