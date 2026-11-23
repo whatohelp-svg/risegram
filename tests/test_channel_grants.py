@@ -7,6 +7,13 @@ import admin
 
 
 class ChannelGrantTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        # Audit writes are covered elsewhere; verification route tests must not
+        # require a provisioned SQLite admin_logs table.
+        self.audit_patch = patch.object(admin, "audit", new_callable=AsyncMock)
+        self.audit_patch.start()
+        self.addCleanup(self.audit_patch.stop)
+
     def message(self, text):
         return SimpleNamespace(text=text, chat=SimpleNamespace(id=21),
                                from_user=SimpleNamespace(id=21), message_id=17,
