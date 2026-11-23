@@ -203,14 +203,14 @@ async def on_input(message,state,data):
     async def retry(error):
         await message.answer("❌ "+esc(error),reply_markup=kb([btn("Отмена","adm:localgifts:0")]))
     if act=="localgift_qty":
-        if not text.isdigit() or not 1<=int(text)<=1000000:
-            return await retry("Количество от 1 до 1 000 000")
+        if not text.isdigit() or not 1<=int(text)<=2**31-1:
+            return await retry("Количество от 1 до 2 147 483 647")
         await state.update_data(act="localgift_price",qty=int(text))
-        return await message.answer("⭐ Введи цену одного подарка в RiseStars (1–1 000 000 000)",
+        return await message.answer("⭐ Введи цену одного подарка в RiseStars (1–2 147 483 647)",
              reply_markup=kb([btn("Отмена","adm:localgifts:0")]))
     if act=="localgift_price":
-        if not text.isdigit() or not 1<=int(text)<=1000000000:
-            return await retry("Цена от 1 до 1 000 000 000 RiseStars")
+        if not text.isdigit() or not 1<=int(text)<=2**31-1:
+            return await retry("Цена от 1 до 2 147 483 647 RiseStars")
         from native_drops import ASSETS
         template = ASSETS.get(data["gift_id"])
         if template and not template[1]:
