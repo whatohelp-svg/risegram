@@ -103,16 +103,8 @@ async def publish(session, assets, row):
 async def worker():
     if not config.MTPROTO_ADMIN_API_TOKEN:
         return
-    # Complete native mark normalization while the stable MTProto service is online.
-    from refresh_native_verification_marks_once import main as normalize_marks
-    async def normalize_once():
-        await asyncio.sleep(8)
-        try:
-            await normalize_marks()
-            log.info("RISEGRAM_VERIFICATION_MARKS_FINALIZED")
-        except Exception:
-            log.exception("RISEGRAM_VERIFICATION_MARKS_FINALIZE_ERROR")
-    asyncio.create_task(normalize_once(), name="native-mark-normalize-once")
+    # Previous gift restoration and verifier repair jobs were single-use.
+    # Never replay administrative mutations on an ordinary app restart.
     timeout = ClientTimeout(total=240)
     async with ClientSession(timeout=timeout, trust_env=True) as assets, ClientSession(timeout=timeout, headers={
         "Authorization": "Bearer " + config.MTPROTO_ADMIN_API_TOKEN,
