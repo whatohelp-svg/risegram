@@ -116,26 +116,39 @@ def backup_postgres():
     args = [pg_dump, "--dbname", dsn, "--format=custom", "--compress=9",
             "--no-owner", "--no-acl", "--file", str(temporary)]
     log.info("BACKUP_START %s", label)
+    errfile = ROOT / (label + ".stderr.partial")
+    errfile.unlink(missing_ok=True)
     try:
-        proc = subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        too_large = False
-        while proc.poll() is None:
-            if ((temporary.exists() and temporary.stat().st_size >= MAX_PG)
-                    or shutil.disk_usage(ROOT).free < MIN_FREE):
-                too_large = True
-                proc.terminate()
-                try:
-                    proc.wait(timeout=6)
-                except subprocess.TimeoutExpired:
-                    proc.kill()
-                break
-            time.sleep(1)
-        proc.wait(timeout=30)
+        # Keep diagnostic output out of service logs: PostgreSQL errors may contain
+        # connection details. Only emit coarse error categories.
+        with errfile.open("wb") as error_sink:
+            proc = subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=error_sink)
+            too_large = False
+            while proc.poll() is None:
+                if ((temporary.exists() and temporary.stat().st_size >= MAX_PG)
+                        or shutil.disk_usage(ROOT).free < MIN_FREE):
+                    too_large = True
+                    proc.terminate()
+                    try:
+                        proc.wait(timeout=6)
+                    except subprocess.TimeoutExpired:
+                        proc.kill()
+                    break
+                time.sleep(1)
+            proc.wait(timeout=30)
         if too_large:
             log.error("BACKUP_ABORT storage headroom guard")
             return
         if proc.returncode != 0:
-            log.error("BACKUP_FAILED pg_dump exit=%d", proc.returncode)
+            detail = errfile.read_text(errors="replace").lower()
+            category = ("source_disk_full" if "no space left on device" in detail
+                        else "authentication" if "authentication failed" in detail
+                        else "connectivity" if "could not connect" in detail
+                        else "permissions" if "permission denied" in detail
+                        else "server_busy" if "could not serialize" in detail
+                        else "other")
+            log.error("BACKUP_FAILED pg_dump exit=%d category=%s",
+                      proc.returncode, category)
             return
         # Decompress and read every archive block; no database is modified.
         checked = subprocess.run([pg_restore, "--file=/dev/null", str(temporary)],
@@ -150,6 +163,7 @@ def backup_postgres():
         log.exception("BACKUP_FAILED export")
     finally:
         temporary.unlink(missing_ok=True)
+        errfile.unlink(missing_ok=True)
 
 def run():
     try:
