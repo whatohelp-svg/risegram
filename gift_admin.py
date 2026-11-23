@@ -15,6 +15,7 @@ from ui import btn, esc, kb, show
 
 ALMATY = timezone(timedelta(hours=5))
 PAGE = 50
+DROP_PAGE = 20
 
 async def screen(event, page=0):
     rows, count = await asyncio.to_thread(gifts.catalog, max(0, page), PAGE)
@@ -42,18 +43,31 @@ async def screen(event, page=0):
              [btn("↩️ Админка","adm:home")]]
     await show(event,text,kb(*grid))
 
-async def my_drops(event):
-    items=await asyncio.to_thread(gifts.list_admin_drops)
-    text="📦 <b>Дропы RiseGram</b>\n\n"
-    if not items:text+="Пока дропов нет."
-    rows=[]
+async def my_drops(event, page=0):
+    count = await asyncio.to_thread(gifts.count_admin_drops)
+    pages = max(1, math.ceil(count / DROP_PAGE))
+    page = min(max(0, int(page)), pages - 1)
+    items = await asyncio.to_thread(gifts.list_admin_drops, DROP_PAGE, page * DROP_PAGE)
+    text = (f"📦 <b>Дропы RiseGram</b>\n"
+            f"Всего создано: <b>{count}</b> · страница {page+1}/{pages}\n\n")
+    if not items:
+        text += "Пока дропов нет."
+    rows = []
     for g in items:
-        enabled=bool(g["enabled"])
-        text+=(f"#{g['id']} {esc(g['title'])} · {g['sold']}/{g['supply']} · "
-               f"{g['price_stars']} RiseStars · {'🟢' if enabled else '🔴'}\n")
+        enabled = bool(g["enabled"])
+        text += (f"#{g['id']} {esc(g['title'])} · {g['sold']}/{g['supply']} · "
+                 f"{g['price_stars']} RiseStars · {'🟢' if enabled else '🔴'}\n")
         rows.append([btn(f"{'🔴 Остановить' if enabled else '🟢 Возобновить'} #{g['id']}",
-                         f"adm:localgift:toggle:{g['id']}",style="danger" if enabled else "success")])
-    await show(event,text,kb(*rows,[btn("🎁 Каталог","adm:localgifts:0")],[btn("↩️ Админка","adm:home")]))
+                         f"adm:localgift:toggle:{g['id']}:{page}",
+                         style="danger" if enabled else "success")])
+    nav = []
+    if page > 0:
+        nav.append(btn("‹ Назад", f"adm:localgift:list:{page-1}", style="primary"))
+    nav.append(btn(f"{page+1}/{pages}", "adm:noop"))
+    if page + 1 < pages:
+        nav.append(btn("Далее ›", f"adm:localgift:list:{page+1}", style="primary"))
+    await show(event, text, kb(*rows, nav, [btn("🎁 Каталог — все коллекции", "adm:localgifts:0")],
+                               [btn("↩️ Админка", "adm:home")]))
 
 async def choose_upgrade(event,state,allow):
     data=await state.get_data()
@@ -130,13 +144,17 @@ async def on_callback(call,state,parts):
             kb([btn("📦 Дропы","adm:localgift:list")],[btn("🎁 Каталог","adm:localgifts:0")]))
     if sub=="list":
         await state.clear()
-        return await my_drops(call)
+        try: page = int(parts[3])
+        except (ValueError, IndexError): page = 0
+        return await my_drops(call, page)
     if sub=="toggle":
-        try:drop_id=int(parts[3])
-        except (ValueError,IndexError):return
-        ok=await asyncio.to_thread(gifts.toggle_drop,drop_id)
-        if ok:await db.log_admin_action(config.OWNER_ID,f"Переключён дроп #{drop_id}")
-        return await my_drops(call)
+        try: drop_id = int(parts[3])
+        except (ValueError, IndexError): return
+        try: page = int(parts[4])
+        except (ValueError, IndexError): page = 0
+        ok = await asyncio.to_thread(gifts.toggle_drop, drop_id)
+        if ok: await db.log_admin_action(config.OWNER_ID, f"Переключён дроп #{drop_id}")
+        return await my_drops(call, page)
     if sub=="refresh":
         try:
             timeout=aiohttp.ClientTimeout(total=12)
