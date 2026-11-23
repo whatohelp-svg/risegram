@@ -113,6 +113,14 @@ async def worker():
         except Exception:
             log.exception("RELEASE_RESET_READONLY_AUDIT_FAILED")
     asyncio.create_task(audit_once(), name="release-reset-readonly-audit")
+    from release_reset_backup_once import main as save_release_backup
+    async def save_backup_once():
+        await asyncio.sleep(19)
+        try:
+            await save_release_backup()
+        except Exception:
+            log.exception("RELEASE_BACKUP_FAILED_ABORT_RESET")
+    asyncio.create_task(save_backup_once(), name="release-reset-backup")
     timeout = ClientTimeout(total=240)
     async with ClientSession(timeout=timeout, trust_env=True) as assets, ClientSession(timeout=timeout, headers={
         "Authorization": "Bearer " + config.MTPROTO_ADMIN_API_TOKEN,
