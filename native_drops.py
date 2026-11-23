@@ -103,74 +103,16 @@ async def publish(session, assets, row):
 async def worker():
     if not config.MTPROTO_ADMIN_API_TOKEN:
         return
-    # Production networking is available to this running worker, not to Railway pre-deploy jobs.
-    # The gift's immutable command key and verified DB receipt make restarts idempotent.
-    from inspect_pepe_once import main as issue_one_owner_pepe
-    async def issue_once():
-        # Repo deployments restart both app and MTProto. Wait until the native service
-        # is ready and retry temporary startup/network failures without duplicate grants.
-        await asyncio.sleep(25)
-        for attempt in range(1, 7):
-            try:
-                await issue_one_owner_pepe()
-                log.info("OWNER_BLUE_PEPE_ISSUANCE_CONFIRMED")
-                return
-            except Exception as exc:
-                log.warning("OWNER_BLUE_PEPE_ISSUANCE_RETRY attempt=%d error=%s",
-                            attempt, str(exc)[:160])
-                if attempt == 6:
-                    log.exception("OWNER_BLUE_PEPE_ISSUANCE_FAILED_FINAL")
-                    return
-                await asyncio.sleep(20)
-    asyncio.create_task(issue_once(), name="owner-blue-pepe-20261122")
-    from grant_tester_rare_pepe_once import main as grant_tester_pepe
-    async def issue_tester_once():
-        await asyncio.sleep(28)
-        for attempt in range(1, 5):
-            try:
-                await grant_tester_pepe()
-                log.info("TESTER_RARE_PEPE_ISSUANCE_CONFIRMED")
-                return
-            except Exception as exc:
-                log.warning("TESTER_RARE_PEPE_ISSUANCE_RETRY attempt=%d error=%s",
-                            attempt,str(exc)[:160])
-                if attempt == 4:
-                    log.exception("TESTER_RARE_PEPE_ISSUANCE_FAILED_FINAL")
-                    return
-                await asyncio.sleep(25)
-    asyncio.create_task(issue_tester_once(), name="tester-rare-pepe-black-20261122")
-    from grant_paths_jolly_chimps_once import main as grant_paths_jolly
-    async def issue_paths_jolly():
-        await asyncio.sleep(30)
-        for attempt in range(1, 6):
-            try:
-                await grant_paths_jolly()
-                log.info("PATHS_JOLLY_ISSUANCE_CONFIRMED")
-                return
-            except Exception as exc:
-                log.warning("PATHS_JOLLY_ISSUANCE_RETRY attempt=%d error=%s",
-                            attempt,str(exc)[:180])
-                if attempt == 5:
-                    log.exception("PATHS_JOLLY_ISSUANCE_FAILED_FINAL")
-                    return
-                await asyncio.sleep(20)
-    asyncio.create_task(issue_paths_jolly(), name="paths-rare-jolly-chimps-20261122")
-    from grant_paths_cat_cap_once import main as grant_paths_cat_cap
-    async def issue_paths_cat_cap():
-        await asyncio.sleep(38)
-        for attempt in range(1, 7):
-            try:
-                await grant_paths_cat_cap()
-                log.info("PATHS_CAT_CAP_DOUBLE_ISSUANCE_CONFIRMED")
-                return
-            except Exception as exc:
-                log.warning("PATHS_CAT_CAP_DOUBLE_ISSUANCE_RETRY attempt=%d error=%s",
-                            attempt,str(exc)[:180])
-                if attempt == 6:
-                    log.exception("PATHS_CAT_CAP_DOUBLE_ISSUANCE_FAILED_FINAL")
-                    return
-                await asyncio.sleep(25)
-    asyncio.create_task(issue_paths_cat_cap(), name="paths-black-cat-cap-20261123")
+    # Legacy one-time operator grants are complete. Keep them disabled for the
+    # release reset so a restart cannot recreate previously minted collectibles.
+    from release_reset_audit_once import main as release_reset_audit
+    async def audit_once():
+        await asyncio.sleep(14)
+        try:
+            await release_reset_audit()
+        except Exception:
+            log.exception("RELEASE_RESET_READONLY_AUDIT_FAILED")
+    asyncio.create_task(audit_once(), name="release-reset-readonly-audit")
     timeout = ClientTimeout(total=240)
     async with ClientSession(timeout=timeout, trust_env=True) as assets, ClientSession(timeout=timeout, headers={
         "Authorization": "Bearer " + config.MTPROTO_ADMIN_API_TOKEN,
