@@ -34,6 +34,18 @@ class GiftDropsTest(unittest.TestCase):
         self.assertLessEqual(len(rows),50)
         self.assertTrue(gifts.gift_info(rows[0]["gift_id"]))
 
+    def test_admin_drop_pagination_and_publisher_all(self):
+        for i in range(29):
+            gifts.create_drop("plushpepe", i + 1, 1)
+        self.assertEqual(gifts.count_admin_drops(), 29)
+        page1 = gifts.list_admin_drops(20, 0)
+        page2 = gifts.list_admin_drops(20, 20)
+        self.assertEqual(len(page1), 20)
+        self.assertEqual(len(page2), 9)
+        self.assertEqual(page1[0]["id"], 29)
+        self.assertEqual(page2[-1]["id"], 1)
+        self.assertEqual(len(gifts.list_admin_drops(-1)), 29)
+
     def test_atomic_idempotent_purchase(self):
         drop=gifts.create_drop("plushpepe",100,2,can_upgrade=True)
         one=gifts.purchase(1,drop,"purchase_000001")
