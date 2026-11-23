@@ -48,7 +48,9 @@ def manifest(label, file, method):
 
 def backup_sqlite():
     src_file = Path(os.getenv("DB_PATH", "/data/risegram.db"))
-    label = "bot-sqlite-20261123"
+    label = os.getenv("RISEGRAM_SQLITE_BACKUP_LABEL", "bot-sqlite-20261123")
+    if not re.fullmatch(r"[a-z0-9-]{1,60}", label):
+        raise RuntimeError("Invalid SQLite backup label")
     if already_verified(label):
         return
     if not src_file.is_file():
@@ -79,7 +81,9 @@ def backup_sqlite():
         temp.unlink(missing_ok=True)
 
 def backup_postgres():
-    label = "mtproto-postgres-20261123"
+    label = os.getenv("RISEGRAM_MT_PROTO_BACKUP_LABEL", "mtproto-postgres-20261123")
+    if not re.fullmatch(r"[a-z0-9-]{1,60}", label):
+        raise RuntimeError("Invalid Postgres backup label")
     if already_verified(label):
         return
     dsn = os.getenv("RISEGRAM_MT_PROTO_BACKUP_DSN", "")
