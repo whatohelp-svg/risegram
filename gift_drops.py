@@ -150,10 +150,18 @@ def list_live_drops(at=None):
           AND (d.ends_at IS NULL OR d.ends_at>?) AND d.sold<d.supply
         ORDER BY d.starts_at DESC, d.id DESC""", (at,at))]
 
-def list_admin_drops(limit=20):
+def count_admin_drops():
+    with connection() as conn:
+        return conn.execute("SELECT COUNT(*) FROM rg_gift_drops").fetchone()[0]
+
+def list_admin_drops(limit=20, offset=0):
+    # LIMIT -1 remains supported for the publisher, which must process every drop.
+    limit = int(limit)
+    offset = max(0, int(offset))
     with connection() as conn:
         return [dict(r) for r in conn.execute("""SELECT d.*,c.title FROM rg_gift_drops d
-        JOIN rg_gift_catalog c ON c.gift_id=d.gift_id ORDER BY d.id DESC LIMIT ?""",(limit,))]
+        JOIN rg_gift_catalog c ON c.gift_id=d.gift_id
+        ORDER BY d.id DESC LIMIT ? OFFSET ?""",(limit,offset))]
 
 def toggle_drop(drop_id):
     with connection() as conn:
