@@ -96,7 +96,12 @@ async def run_postgres():
             deleted={}
             if unique_ids:
                 await db.execute("""
-                    UPDATE users SET emoji_status_collectible_id=NULL
+                    UPDATE users
+                       SET emoji_status_document_id=0,
+                           emoji_status_until=0,
+                           emoji_status_collectible_id=NULL,
+                           emoji_status_collectible='{}'::jsonb,
+                           updated_at=now()
                      WHERE emoji_status_collectible_id = ANY(%s::bigint[])
                 """,(unique_ids,))
                 # Remove links and command receipts that would otherwise FK-restrict
