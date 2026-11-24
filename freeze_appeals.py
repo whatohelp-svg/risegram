@@ -1,4 +1,4 @@
-"""HTTPS appeal form for native RiseGram accounts frozen in MTProto.
+"""HTTPS appeal guide and legacy form endpoint for frozen RiseGram accounts.
 
 The stock Android freeze sheet opens links in a WebView and cannot handle
 tg:// URLs. Use one unguessable, per-freeze capability URL, validated against
@@ -83,30 +83,18 @@ async def _active_user(ticket: str, conn) -> int | None:
 
 
 async def h_appeal_get(request: web.Request) -> web.Response:
-    ticket = request.query.get("t", "")
-    if not _valid_token(ticket):
-        return _page("Обращение в RiseGram", "<p>Откройте «Оспорить» в замороженном аккаунте RiseGram — там будет персональная ссылка на обращение</p>", 400)
-    try:
-        async with await psycopg.AsyncConnection.connect(
-            _dsn(), connect_timeout=8, row_factory=dict_row
-        ) as conn:
-            user_id = await _active_user(ticket, conn)
-    except Exception:
-        log.exception("Cannot validate freeze appeal")
-        return _page("Сервис временно недоступен", "<p>Не удалось проверить аккаунт — попробуйте позже</p>", 503)
-    if user_id is None:
-        return _page("Ссылка недействительна", "<p>Заморозка уже снята или ссылка на обращение устарела</p>", 403)
+    # This page is only a public guide; no account data or capability is
+    # forwarded to Telegram. The existing POST endpoint remains compatible.
     return _page("❄️ Оспорить заморозку", (
-        "<p>Сообщение будет передано администрации поддержки RiseGram (@youtube)"
-        " — даже если из приложения нельзя писать</p>"
-        '<form method="post" action="/appeal">'
-        '<input type="hidden" name="t" value="' + html.escape(ticket, quote=True) + '">'
-        '<label for="message">Причина обращения</label>'
-        '<textarea id="message" name="message" minlength="10" maxlength="1200"'
-        ' placeholder="Опишите проблему и почему ограничение следует пересмотреть" required></textarea>'
-        '<button type="submit">Отправить обращение</button></form>'
-        "<p><small>Максимум 3 обращения за 24 часа — не передавайте эту персональную ссылку другим людям"
-        "</small></p>"
+        "<p>Чтобы оспорить заморозку аккаунта, перейдите по кнопке ниже, "
+        "нажмите «Старт» (если потребуется), затем выберите «🆘 Поддержка» "
+        "и опишите проблему.</p>"
+        "<p>Укажите свой юзернейм или ID в RiseGram и причину обращения. "
+        "Не отправляйте коды входа и пароли.</p>"
+        '<a href="https://t.me/risegrambot?start=appeal" '
+        'rel="noreferrer noopener" style="display:block;text-align:center;'
+        'background:#278fe1;color:#fff;text-decoration:none;border-radius:12px;'
+        'padding:13px;font-size:17px;font-weight:600">Перейти в бот RiseGram</a>'
     ))
 
 
@@ -160,7 +148,7 @@ async def h_appeal_post(request: web.Request) -> web.Response:
         text = (f"❄️ <b>Обращение о заморозке #{appeal_id}</b>\n"
                 f"RiseGram ID: <code>{user_id}</code>\n"
                 f"<b>Текст:</b>\n{html.escape(message)}\n\n"
-                "Ответьте пользователю из внутреннего аккаунта поддержки @youtube")
+                "Ответьте пользователю из внутреннего аккаунта поддержки @support")
         notified = await safe_send(request.app["bot"], config.OWNER_ID, text)
         if not notified:
             log.warning("Appeal %s saved, owner Telegram delivery link unavailable", appeal_id)
