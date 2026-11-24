@@ -27,7 +27,9 @@ func rgDisplayGiftValue(ctx context.Context,userID int64,info domain.StarGiftVal
     // kopecks (ISO 4217 minor units). Conversion is an estimate, not cash value.
     mode:=rgValueMode(ctx,userID)
     if info.LastSalePrice>0 {info.Value=info.LastSalePrice;info.ValueIsAverage=false}
-    if info.Currency!="XTR" && info.Currency!="USD" {return info}
+    if info.Currency!="XTR" && info.LastSalePrice<=0 {
+        if info.FloorPrice>0 {info.Value=info.FloorPrice} else {info.Value=info.InitialSaleStars}
+    }
     info.Currency="XTR"
     if mode=="stars" {return info}
     var multiplier int64
