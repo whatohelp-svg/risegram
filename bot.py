@@ -759,8 +759,8 @@ async def cb_verify_major(call: CallbackQuery):
 async def cb_verify_account(call: CallbackQuery, user: dict):
     if not await need_feature(call, "verification"):
         return
-    if user.get("verified"):
-        await call.answer("Ваш аккаунт уже верифицирован ✅", show_alert=True)
+    if user.get("verified_major"):
+        await call.answer("Метка Major уже есть ✅", show_alert=True)
         return
     await send_stars_invoice(
         call.bot,
@@ -776,15 +776,8 @@ async def cb_verify_account(call: CallbackQuery, user: dict):
 
 @router.callback_query(F.data == "verify:channel")
 async def cb_verify_channel(call: CallbackQuery, state: FSMContext):
-    if not await need_feature(call, "verification"):
-        return
-    await state.set_state(Flow.verify_channel)
-    await show(
-        call,
-        "📣 <b>Мажор для канала или группы</b>\n\nОтправьте @юзернейм канала или группы. "
-        "Добавьте бота администратором туда — так мы убедимся, что чат ваш.",
-        cancel_kb("verify:major"),
-    )
+    await state.clear()
+    await cb_native_chat_shop(call)
 
 
 @router.message(StateFilter(Flow.verify_channel), F.text)
@@ -1231,11 +1224,11 @@ async def deliver_order(bot: Bot, uid: int, payload: str, stars: int, charge: st
             "(не официальная верификация)"
         )
     if kind == "vm":
-        if a[0] == "a":
-            await db.set_verification(uid, "major", True)
-            return True, "verify", "Мажор · аккаунт", "✅ Готово! Ваш аккаунт получил статус <b>Мажор</b>."
-        await db.add_verified_entity(uid, "channel", a[1])
-        return True, "verify", f"Мажор · @{a[1]}", f"✅ Готово! @{esc(a[1])} получил(а) статус <b>Мажор</b>."
+        if a[0] != "a":
+            return False, "verify", "Устаревшая оплата метки для чата", ""
+        await db.set_verification(uid, "major", True)
+        await sync_mtproto_verification(uid, force=True)
+        return True, "verify", "Major · аккаунт", "✅ Платная метка <b>Major</b> назначена вашему аккаунту RiseGram."
     if kind == "sc":
         rid = int(a[1])
         if not await db.mark_scam_paid(rid, charge):
