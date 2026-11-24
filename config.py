@@ -52,8 +52,11 @@ RISESTARS_PACKS = [1_000, 5_000, 10_000, 50_000, 100_000]   # кнопки в м
 MIN_CUSTOM_RISESTARS = 100
 MAX_STARS_PER_INVOICE = 10_000           # лимит одного счёта в Telegram
 
-VERIFY_PRICE = 50                        # «Мажор»
-SCAM_PRICE = 15                          # метка SCAM
+VERIFY_PRICE = 50                        # paid Major status
+CHANNEL_NFT_PRICE = 40                   # native group/channel collectible username
+CHANNEL_MAJOR_PRICE = 50                 # paid Major issuer mark for a channel/group
+CHANNEL_RISEGRAM_PRICE = 50              # commercial RiseGram issuer (not official)
+SCAM_PRICE = 0                           # reports are free; warnings are NOT for sale
 NUMBER_FORMATS = {                       # +888
     "a": {"title": "+888 8 XXX", "price": 50, "prefix": "8", "digits": 3},
     "b": {"title": "+888 0XXX XXXX", "price": 25, "prefix": "0", "digits": 7},
