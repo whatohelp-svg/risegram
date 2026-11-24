@@ -70,8 +70,8 @@ async def find(conn,name,mid,uid):
 
 
 @router.message(Command("poststars","removepoststars"))
-async def preview(message:Message,user:dict):
-    args=(message.text or "").split()
+async def preview(message:Message,user:dict,*,menu_args=None):
+    args=menu_args if menu_args is not None else (message.text or "").split()
     if len(args) not in (2,3):
         return await message.answer("⭐ Управление звёздами поста\n/poststars t.me/канал/2\n/removepoststars t.me/канал/2 1000\n\nУдаляются только административные начисления. Чужие платные реакции остаются.")
     match=LINK.fullmatch(args[1])
