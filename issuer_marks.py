@@ -9,7 +9,7 @@ import config
 import database as db
 
 log = logging.getLogger("risegram.verification")
-ISSUERS = {"risegram": "RiseGram", "major": "Major"}
+ISSUERS = {"risegram": "RiseGram", "major": "Major", "risegramclub": "RiseGram Club"}
 _ready = asyncio.Event()
 
 
@@ -55,13 +55,13 @@ async def install():
             pack = await command(session, "/v1/stickers/create", prefix + "-emoji", {
                 "title": f"{label} Verification", "short_name": f"rg_{slug}_verification",
                 "kind": "emoji", "emoji": "☑️",
-            }, Path(__file__).parent / "data" / f"{slug}-issuer.webp")
+            }, Path(__file__).parent / "data" / f"{'risegram' if slug == 'risegramclub' else slug}-issuer.webp")
             pack_set_id = pack["set_id"]
             if "document_id" not in pack:
                 # Older servers returned only the set ID when creating a pack.
                 pack = await command(session, "/v1/stickers/add", prefix + "-material",
                                      {"set_id": str(pack["set_id"]), "emoji": "☑️"},
-                                     Path(__file__).parent / "data" / f"{slug}-issuer.webp")
+                                     Path(__file__).parent / "data" / f"{'risegram' if slug == 'risegramclub' else slug}-issuer.webp")
             doc = int(pack["document_id"])
             await command(session, "/v1/botverification/icons/upsert", prefix + "-icon", {
                 "document_id": doc, "name": label, "owner_bot_id": bot_id,
@@ -69,10 +69,10 @@ async def install():
             await command(session, "/v1/botverification/verifiers/grant", prefix + "-grant", {
                 "bot_id": bot_id, "icon_document_id": doc, "company_name": label,
                 "can_modify_custom_description": True,
-                "default_description": f"Аккаунт верифицирован организацией «{label}».",
+                "default_description": ("Платная косметическая метка RiseGram Club, не официальная верификация." if slug == "risegramclub" else f"Аккаунт верифицирован организацией «{label}»."),
             })
             # Native profile badges use animated custom emoji documents.
-            asset = Path(__file__).parent / "data" / f"{slug}-issuer.tgs"
+            asset = Path(__file__).parent / "data" / f"{'risegram' if slug == 'risegramclub' else slug}-issuer.tgs"
             material = await command(session, "/v1/stickers/add", prefix + "-animated-material",
                                      {"set_id": str(pack_set_id), "emoji": "☑️"}, asset)
             animated_id = int(material["document_id"])
@@ -88,7 +88,7 @@ async def install():
                               prefix + "-animated-grant-" + str(current["Version"]), {
                     "version": int(current["Version"]), "bot_id": bot_id, "icon_document_id": animated_id,
                     "company_name": label, "can_modify_custom_description": True,
-                    "default_description": f"Аккаунт верифицирован организацией «{label}».",
+                    "default_description": ("Платная косметическая метка RiseGram Club, не официальная верификация." if slug == "risegramclub" else f"Аккаунт верифицирован организацией «{label}»."),
                 })
             await db.set_meta("native_issuer:" + slug, str(bot_id))
             log.info("Native issuer ready: %s", label)
