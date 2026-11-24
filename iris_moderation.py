@@ -53,7 +53,7 @@ def parse(text):
     name=None
     if parts and parts[0].startswith("@"):
         name=parts.pop(0)[1:].lower()
-        if not re.fullmatch(r"[a-z][a-z0-9_]{2,31}",name):
+        if not re.fullmatch(r"(?:[a-z][a-z0-9_]{0,31}|[а-яё][а-яё0-9_]{0,31})",name):
             raise ValueError("Неверный @юзернейм")
     duration=None
     if action in ("mute","ban","warn") and parts:
@@ -289,7 +289,7 @@ async def handle(request):
                         if r["rights"]!=target["banned_rights"]:
                             raise ValueError("Ограничение изменено другим администратором")
                         raise ValueError("Ограничение уже действует. Сначала сними его")
-                    if target["status"]!="active" or any(v is True for v in target["banned_rights"].values()):
+                    if target["status"]!="active" or any(target["banned_rights"].get(k) is True for k in SEND_KEYS+["ViewMessages"]):
                         raise ValueError("Участник уже ограничен или не в группе")
                     rights=dict(target["banned_rights"])
                     rights.update({k:True for k in SEND_KEYS})
