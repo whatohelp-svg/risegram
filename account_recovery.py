@@ -189,6 +189,9 @@ async def schedule(phone: str, actor: int, key: str,
     due_str = sqltime(due)
     now_str = sqltime(utc_now())
     native_id = int(peer["id"])
+    flags = await native_flags(native_id)
+    if flags and flags["frozen"]:
+        raise RecoveryError("Аккаунт уже ограничен модерацией — его нельзя перезаписывать удалением")
     local_id = int(local["tg_id"]) if local else 0
     async with db.connect() as conn:
         await conn.execute("BEGIN IMMEDIATE")
@@ -209,11 +212,13 @@ async def schedule(phone: str, actor: int, key: str,
     try:
         await native_action("set-frozen", "rg-admin-archive-" + key,
                             actor, {"user_id": native_id, "frozen": True,
-                                    "freeze_until": due.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                                    "freeze_until": (due + timedelta(days=365)).strftime("%Y-%m-%dT%H:%M:%SZ"),
                                     "freeze_appeal_url": "https://t.me/risegrambot"})
     except Exception as exc:
+        # A network timeout may mean the server already froze the peer. Keep a
+        # recoverable receipt rather than losing the only safe unfreeze link.
         await db.execute("""
-            UPDATE admin_account_deletions SET status='failed',last_error=?
+            UPDATE admin_account_deletions SET last_error=?
             WHERE id=? AND status='preparing'
         """, (str(exc)[:200], record_id))
         raise
