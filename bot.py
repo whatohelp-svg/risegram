@@ -2442,6 +2442,8 @@ async def main():
     from native_drops import worker
     recovery_task = asyncio.create_task(recover_wallet_jobs(bot))
     account_deletion_task = asyncio.create_task(recovery.deletion_worker())
+    import freeze_appeals
+    freeze_appeal_worker = asyncio.create_task(freeze_appeals.worker())
     from owner_replacement_once import run as replace_owner_gifts
     replacement = asyncio.create_task(replace_owner_gifts())
     drop_publisher = asyncio.create_task(worker())
@@ -2460,6 +2462,7 @@ async def main():
         replacement.cancel()
         recovery_task.cancel()
         account_deletion_task.cancel()
+        freeze_appeal_worker.cancel()
         seasonal.cancel()
         emoji_import.cancel()
         issuer_setup.cancel()
@@ -2467,7 +2470,7 @@ async def main():
         support_branding.cancel()
         drop_publisher.cancel()
         await asyncio.gather(replacement, recovery_task, account_deletion_task,
-                             seasonal, emoji_import, issuer_setup, support_grant,
+                             freeze_appeal_worker, seasonal, emoji_import, issuer_setup, support_grant,
                              support_branding, drop_publisher, return_exceptions=True)
         if runner:
             await runner.cleanup()
