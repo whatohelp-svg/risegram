@@ -31,9 +31,9 @@ new_view = '''func applyAccountFreezeProjection(user domain.User, viewerUserID i
 	// stable for peers. Give other authenticated viewers the synthetic frozen
 	// mark; the owner still sees their own live account and freeze app config.
 	if freeze.Frozen {
+		// The account remains real. Keep the privacy-filtered last-seen state:
+		// zeroing it made Android show "last seen long ago" after freezing.
 		user.FrozenForViewer = viewerUserID != 0 && user.ID != viewerUserID && user.ID != domain.OfficialSystemUserID
-		user.Status = domain.UserStatus{Kind: domain.UserStatusEmpty}
-		user.LastSeenAt = 0
 	} else {
 		user.FrozenForViewer = false
 	}
@@ -102,7 +102,7 @@ test_src=test_src.replace(old_assert,new_assert,1)
 old_identity='''if got.FirstName != "" || got.Username != "" || len(got.RestrictionReasons) != 0 {
 		t.Fatalf("other-view kept persona fields: %+v, want tombstone", got)
 	}'''
-new_identity='''if got.FirstName != "Frozen" || len(got.RestrictionReasons) != 0 || got.Status.Kind != domain.UserStatusEmpty {
+new_identity='''if got.FirstName != "Frozen" || len(got.RestrictionReasons) != 0 {
 		t.Fatalf("other-view missing original profile / empty presence: %+v", got)
 	}'''
 if test_src.count(old_identity)!=1:
