@@ -88,6 +88,24 @@ replace_once(
 )
 path.write_text(src)
 
+# The native account freeze worker normally treats freeze_until as a hard
+# deletion deadline. Admin-recoverable removals use a separate durable 30-day
+# bot receipt, which is the *only* allowed finalization authority. Excluding
+# only our specific actor prefix prevents two independent deletion workers from
+# racing and lets the client show the true 30-day freeze deadline. All
+# moderation freezes keep upstream behavior unchanged.
+store = Path("internal/store/postgres/account_lifecycle.go")
+store_src = store.read_text()
+old_due = """   WHERE r.frozen = true AND r.frozen_until IS NOT NULL AND r.frozen_until <= $1
+     AND u.deleted_at IS NULL AND u.is_bot = false"""
+new_due = """   WHERE r.frozen = true AND r.frozen_until IS NOT NULL AND r.frozen_until <= $1
+     AND r.actor NOT LIKE 'risegram-admin-archive-%'
+     AND u.deleted_at IS NULL AND u.is_bot = false"""
+n = store_src.count(old_due)
+if n != 1:
+    raise SystemExit(f"Recoverable deletion patch: freeze worker exclusion, found {n}, expected 1")
+store.write_text(store_src.replace(old_due, new_due, 1))
+
 # Update pinned upstream decision tests to enforce safe defaults.
 tests = Path("internal/app/account/lifecycle_test.go")
 t = tests.read_text()
