@@ -1020,7 +1020,7 @@ async def sync_mtproto_verification(user_id: int, force: bool = False) -> dict:
                 import native_economy
                 async with native_economy.transaction() as ledger:
                     current_mark=await (await ledger.execute("""SELECT b.company_name FROM custom_verifications v JOIN bot_verifier_settings b ON b.bot_id=v.verifier_bot_id WHERE v.peer_type='user' AND v.peer_id=%s""",(native_peer,))).fetchone()
-                if current_mark and current_mark["company_name"] in ("RiseGram Developer","RiseGram Tester","RiseGram Admin","RiseGram Head Admin","RiseGram Support","Hold"):
+                if current_mark and current_mark["company_name"] in ("RiseGram Developer","RiseGram Tester","RiseGram Moderator","RiseGram Admin","RiseGram Head Admin","RiseGram Support","Hold"):
                     return {"configured":True,"synced":True,"role_preserved":True}
                 mark_key = f"native_profile_mark:{native_peer}"
                 old = await db.get_meta(mark_key)
