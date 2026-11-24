@@ -203,6 +203,20 @@ SCHEMA = [
         created_at TEXT NOT NULL,
         PRIMARY KEY(target, label)
     )""",
+    """CREATE TABLE IF NOT EXISTS admin_account_deletions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        phone_digits TEXT NOT NULL,
+        local_id INTEGER NOT NULL DEFAULT 0,
+        native_id INTEGER NOT NULL DEFAULT 0,
+        status TEXT NOT NULL CHECK(status IN
+            ('preparing','active','failed','cancelled','executing','completed')),
+        requested_at TEXT NOT NULL,
+        execute_at TEXT NOT NULL,
+        completed_at TEXT,
+        actor_telegram_id INTEGER NOT NULL,
+        command_key TEXT NOT NULL UNIQUE,
+        last_error TEXT
+    )""",
     """CREATE TABLE IF NOT EXISTS purchased_profile_marks (
         tg_id INTEGER NOT NULL,
         issuer TEXT NOT NULL CHECK(issuer='risegramclub'),
@@ -530,6 +544,8 @@ INDEXES = [
     "CREATE UNIQUE INDEX IF NOT EXISTS ux_users_rise_id ON users(rise_id)",
     "CREATE UNIQUE INDEX IF NOT EXISTS ux_users_phone_digits ON users(phone_digits)",
     "CREATE INDEX IF NOT EXISTS ix_users_username ON users(username)",
+    "CREATE INDEX IF NOT EXISTS ix_admin_deletion_by_phone ON admin_account_deletions(phone_digits,status)",
+    "CREATE INDEX IF NOT EXISTS ix_admin_deletion_due ON admin_account_deletions(status,execute_at)",
     "CREATE UNIQUE INDEX IF NOT EXISTS ux_nft_item ON user_nft_inventory(item_type, value)",
     "CREATE INDEX IF NOT EXISTS ix_nft_owner ON user_nft_inventory(tg_id)",
     "CREATE UNIQUE INDEX IF NOT EXISTS ux_purchases_charge ON purchases(charge_id) WHERE charge_id IS NOT NULL",
