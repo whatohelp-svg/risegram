@@ -93,7 +93,7 @@ async def native_flags(user_id: int) -> dict | None:
     ) as conn:
         await conn.execute("SET TRANSACTION READ ONLY")
         row = await (await conn.execute("""
-            SELECT frozen, actor, command_id FROM account_restrictions WHERE user_id=%s
+            SELECT frozen, actor, command_id, frozen_until FROM account_restrictions WHERE user_id=%s
         """, (user_id,))).fetchone()
         return dict(row) if row else None
 
@@ -222,6 +222,11 @@ async def schedule(phone: str, actor: int, key: str,
             WHERE id=? AND status='preparing'
         """, (str(exc)[:200], record_id))
         raise
+    verified = await native_flags(native_id)
+    if not verified or not verified["frozen"] or not str(verified.get("actor") or "").startswith("risegram-admin-archive-"):
+        raise RecoveryError("MTProto не подтвердил настоящую заморозку — статус не изменён")
+    if verified["frozen_until"] is None or abs((verified["frozen_until"] - due).total_seconds()) > 5:
+        raise RecoveryError("MTProto вернул неверную дату заморозки — операция требует проверки")
     await db.execute("""
         UPDATE admin_account_deletions SET status='active',last_error=NULL
         WHERE id=? AND status='preparing'
@@ -298,6 +303,9 @@ async def restore(phone: str, actor: int, expected_record_id: int = 0,
                 raise RecoveryError("На аккаунте другая блокировка модерации — снимать её нельзя")
             await native_action("set-frozen", "rg-admin-restore-" + str(receipt["id"]),
                                 actor, {"user_id": native_id, "frozen": False})
+            after = await native_flags(native_id)
+            if after and after["frozen"]:
+                raise RecoveryError("MTProto не подтвердил снятие заморозки")
         await db.execute("""
             UPDATE admin_account_deletions
                SET status='cancelled',completed_at=?,last_error=NULL
