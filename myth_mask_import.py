@@ -137,6 +137,28 @@ async def run():
                     obj=json.loads(gz.read((8<<20)+1))
                 if not isinstance(obj,dict) or "layers" not in obj or "fr" not in obj:
                     raise ValueError("invalid animation")
+                # The ordinary native pack validator intentionally rejects Lottie
+                # expression strings from unsigned sources. Preserve static/keyframe
+                # fallback data, remove executable expression strings only when a
+                # valid fallback is present, and keep every other validator intact.
+                stripped=0
+                def clean(node):
+                    nonlocal stripped
+                    if isinstance(node,dict):
+                        if isinstance(node.get("x"),str) and node["x"].strip():
+                            if "k" not in node or node["k"] is None:
+                                raise ValueError("expression without fallback: "+path[:150])
+                            del node["x"]
+                            stripped+=1
+                        for child in node.values():
+                            clean(child)
+                    elif isinstance(node,list):
+                        for child in node:
+                            clean(child)
+                clean(obj)
+                if stripped:
+                    LOG.info("RG_MYTH_MASK_SAFE_FALLBACK path=%s expressions=%d",path[:150],stripped)
+                    return gzip.compress(json.dumps(obj,ensure_ascii=False,separators=(",",":"),allow_nan=False).encode(),compresslevel=9,mtime=0)
                 return raw
             payloads=await asyncio.gather(*(animation(path) for _,path in assets))
         buf=io.BytesIO()
