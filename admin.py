@@ -310,7 +310,7 @@ async def grant_channel_username(message: Message):
     action = parts[0].split("@")[0].lower() if parts else ""
     verification = action in ("/grantverify", "/revokeverify")
     revoking = action == "/revokeverify"
-    name_pattern = r"[A-Za-z][A-Za-z0-9_]{3,31}"
+    name_pattern = r"(?:[A-Za-z][A-Za-z0-9_]{0,31}|[А-Яа-яЁё][А-Яа-яЁё0-9_]{0,31})"
     usage = (
         "Используйте /grantverify или /revokeverify @чат official|risegram|major"
         " [group|channel] (тип нужен для числового ID при выдаче)"
@@ -1177,7 +1177,7 @@ async def on_input(message: Message, state: FSMContext, user: dict):
                 nid = await resolve(text)
                 if nid:
                     return await ask(message,state,"native_mint",
-                        "🏷 "+esc(await native_label(nid))+"\nВведите новый NFT-юзернейм (один, от 4 символов)",uid=nid)
+                        "🏷 "+esc(await native_label(nid))+"\nВведите новый NFT-юзернейм (один, от 1 символа)",uid=nid)
             return await again("❌ Аккаунт не найден или не связан с ботом. Введите @юзернейм:")
         await state.clear()
         if act == "grant_target":
