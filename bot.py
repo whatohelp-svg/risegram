@@ -2432,6 +2432,8 @@ async def main():
     dp = Dispatcher(storage=MemoryStorage())
     dp.message.outer_middleware(GuardMiddleware())
     dp.callback_query.outer_middleware(GuardMiddleware())
+    from channel_stars_owner import router as channel_stars_router
+    dp.include_router(channel_stars_router)
     dp.include_router(support_router)  # explicit owner/support staff ACL
     dp.include_router(admin_router)  # панель /admin и владелец /owner обрабатываются раньше общего меню
     dp.include_router(router)
