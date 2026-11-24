@@ -838,26 +838,27 @@ async def msg_verify_channel(message: Message, state: FSMContext, user: dict):
 async def cb_scam_hub(call: CallbackQuery):
     if not await need_feature(call, "scam_labels"):
         return
-    p = config.SCAM_PRICE
     await show(
         call,
-        "⚠️ <b>Пожаловаться на SCAM</b>\n\nЗаявка бесплатна и требует фактической причины. "
-        "Решение принимает модерация RiseGram. Метки SCAM и FAKE нельзя купить.",
+        "⚠️ <b>Пожаловаться на SCAM / FAKE</b>\n\nЗаявка бесплатна. "
+        "Нужна проверяемая причина, окончательное решение принимает модерация.",
         kb(
-            [btn(f"👤 Аккаунт · {p} ⭐", "scam:account", style="danger")],
-            [btn(f"📣 Канал или группа · {p} ⭐", "scam:channel", style="danger")],
+            [btn("⚠️ SCAM аккаунт", "scam:account:SCAM"),
+             btn("🎭 FAKE аккаунт", "scam:account:FAKE")],
+            [btn("⚠️ SCAM чат", "scam:channel:SCAM"),
+             btn("🎭 FAKE чат", "scam:channel:FAKE")],
             back_row("donat:hub"),
         ),
     )
 
 
-@router.callback_query(F.data.in_({"scam:account", "scam:channel"}))
+@router.callback_query(F.data.regexp(r"^scam:(account|channel):(SCAM|FAKE)$"))
 async def cb_scam_kind(call: CallbackQuery, state: FSMContext):
     if not await need_feature(call, "scam_labels"):
         return
-    kind = call.data.split(":")[1]
+    _, kind, label = call.data.split(":")
     await state.set_state(Flow.scam_target)
-    await state.update_data(kind=kind)
+    await state.update_data(kind=kind, label=label)
     what = "аккаунта" if kind == "account" else "канала или группы"
     await show(call, f"⚠️ Отправьте @юзернейм {what}, который нужно пометить.", cancel_kb("donat:scam"))
 
@@ -872,14 +873,15 @@ async def msg_scam_target(message: Message, state: FSMContext, user: dict):
     if name in mine or name in config.RESERVED_USERNAMES:
         await message.answer("❌ Этот юзернейм пометить нельзя.")
         return
-    if await db.fetchone("SELECT 1 AS x FROM scam_requests WHERE target=? AND status IN ('pending','approved')", (name,)):
+    report_label = (await state.get_data()).get("label", "SCAM")
+    if await db.fetchone("SELECT 1 AS x FROM scam_requests WHERE target=? AND label=? AND status IN ('pending','approved')", (name, report_label)):
         await message.answer("ℹ️ На этот юзернейм уже есть заявка или метка.")
         await state.clear()
         return
     await state.update_data(target=name)
     await state.set_state(Flow.scam_reason)
     await message.answer(
-        f"Кратко опишите, почему @{esc(name)} мошенник (10–300 символов). Это увидит модератор:",
+        f"Кратко опишите, почему @{esc(name)} {'выдаёт себя за другого' if report_label=='FAKE' else 'мошенничает'} (10–300 символов). Это увидит модератор:",
         reply_markup=cancel_kb("donat:scam"),
     )
 
@@ -896,12 +898,13 @@ async def msg_scam_reason(message: Message, state: FSMContext, user: dict):
     if not target:
         await message.answer("Сессия устарела, начните заново: /shop")
         return
-    rid = await db.create_scam_request(user["tg_id"], kind, target, reason, 0)
+    label = data.get("label", "SCAM")
+    rid = await db.create_scam_request(user["tg_id"], kind, target, reason, 0, label=label)
     await db.execute("UPDATE scam_requests SET status='pending' WHERE id=? AND status='unpaid'", (rid,))
-    await message.answer(f"✅ Жалоба #{rid} на @{esc(target)} передана в модерацию бесплатно",
+    await message.answer(f"✅ Жалоба {label} #{rid} на @{esc(target)} передана в модерацию бесплатно",
                          reply_markup=kb([btn("💎 Донат", "donat:hub")]))
     await safe_send(message.bot, config.OWNER_ID,
-        f"⚠️ Новая жалоба #{rid} на @{esc(target)}: {esc(reason)}")
+        f"⚠️ Новая жалоба {label} #{rid} на @{esc(target)}: {esc(reason)}")
 
 
 # ═══════════════════════════ номера +888 ════════════════════════════════════
