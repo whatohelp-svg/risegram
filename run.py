@@ -74,8 +74,14 @@ if __name__ == "__main__":
             try:
                 await db.init_db()
                 await db.ensure_owner()
-                owner = await db.get_user(config.OWNER_ID)
-                peer = await recovery.native_info(db.digits_of(owner["phone"]))
+                # Group bots belong to the verified native project owner,
+                # not the separately linked support account in the bot DB.
+                async with await psycopg.AsyncConnection.connect(recovery.ledger_dsn(), row_factory=dict_row, connect_timeout=5) as conn:
+                    peer = await (await conn.execute("""SELECT u.id FROM users u JOIN peer_usernames p
+                      ON p.peer_id=u.id AND p.peer_type='user'
+                      WHERE u.id=%s AND p.username_lower='owner' AND p.active
+                        AND u.deleted_at IS NULL AND NOT u.is_bot AND NOT u.support""",
+                        (1780243200,))).fetchone()
                 if not peer:
                     raise RuntimeError("Owner native identity unavailable")
                 owner_id = int(peer["id"])
