@@ -2448,6 +2448,8 @@ async def main():
     issuer_setup = asyncio.create_task(bootstrap())
     from appeal_support_once import run as grant_appeal_support
     support_grant = asyncio.create_task(grant_appeal_support())
+    from support_branding_once import run as brand_support_account
+    support_branding = asyncio.create_task(brand_support_account())
     from gift_catalog import populate_seasonal_catalog
     seasonal = asyncio.create_task(populate_seasonal_catalog())
     from premium_emoji import install_packs
@@ -2462,10 +2464,11 @@ async def main():
         emoji_import.cancel()
         issuer_setup.cancel()
         support_grant.cancel()
+        support_branding.cancel()
         drop_publisher.cancel()
         await asyncio.gather(replacement, recovery_task, account_deletion_task,
-                             seasonal, emoji_import, issuer_setup, support_grant, drop_publisher,
-                             return_exceptions=True)
+                             seasonal, emoji_import, issuer_setup, support_grant,
+                             support_branding, drop_publisher, return_exceptions=True)
         if runner:
             await runner.cleanup()
         for t in list(crash_tasks.values()) + list(hl_tasks.values()):
