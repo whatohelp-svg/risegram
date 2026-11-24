@@ -48,7 +48,7 @@ RiseStars, Gram, виртуальные номера, NFT-юзернеймы и 
 """
 DIGEST=hashlib.sha256(TEXT.encode()).hexdigest()
 PENDING={}
-LOCKS={}
+LOCKS=[asyncio.Lock() for _ in range(128)]
 PROMPT=("📜 <b>Условия использования RiseGram</b>\n\n"
         "Перед получением кода прочитай соглашение и политику конфиденциальности.\n"
         "Нажимая «Принимаю», ты подтверждаешь согласие с редакцией "+VERSION+".\n"
@@ -67,7 +67,7 @@ async def accept(uid):
         VALUES(?,?,?,?) ON CONFLICT(tg_id,version) DO NOTHING""",(uid,VERSION,DIGEST,db.now()))
 
 def lock_for(uid):
-    return LOCKS.setdefault(uid,asyncio.Lock())
+    return LOCKS[uid % len(LOCKS)]
 
 async def prompt(bot,uid,code_message=None):
     # Keep pending OTP only in volatile memory, never logs or persistent storage.
@@ -77,7 +77,12 @@ async def prompt(bot,uid,code_message=None):
         if v[0]<now:
             PENDING.pop(k,None)
     if code_message is not None and len(PENDING)<10000:
-        PENDING[uid]=(now+120,code_message)
+        item=(now+120,code_message)
+        PENDING[uid]=item
+        def erase():
+            if PENDING.get(uid) is item:
+                PENDING.pop(uid,None)
+        asyncio.get_running_loop().call_later(120,erase)
     sent=await safe_send(bot,uid,PROMPT,markup())
     if not sent:
         PENDING.pop(uid,None)
