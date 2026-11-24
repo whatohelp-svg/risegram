@@ -101,7 +101,42 @@ def user_line(u: dict) -> str:
 
 
 async def parse_target(text: str) -> dict | None:
+    text = text.strip()
+    if text.startswith("@") or re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{3,31}", text):
+        from support_console import resolve, local_for_native
+        try:
+            nid = await resolve(text)
+            if nid:
+                return await local_for_native(nid)
+            # No native alias: allow unique bot-side name, never an ambiguous match.
+            name = db.norm_username(text)
+            rows = await db.fetchall("""SELECT DISTINCT u.* FROM users u
+                WHERE lower(replace(u.username,'@',''))=? OR lower(replace(u.active_username,'@',''))=?
+                OR u.tg_id IN (SELECT tg_id FROM user_nft_inventory WHERE item_type='username' AND is_active=1 AND lower(value)=?)""",
+                (name,name,name))
+            return rows[0] if len(rows)==1 else None
+        except Exception:
+            log.exception("Admin username resolution failed")
+            return None
     return await db.find_user(text)
+
+
+async def recovery_target(raw: str) -> str:
+    raw = raw.strip()
+    if raw.startswith("@") or re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{3,31}", raw):
+        from support_console import resolve
+        nid = await resolve(raw)
+        if not nid:
+            raise recovery.RecoveryError("Аккаунт с таким @юзернеймом не найден")
+        peer = await recovery.native_by_id(nid)
+        if not peer or peer["deleted_at"] or not peer["phone"]:
+            raise recovery.RecoveryError("Аккаунт не найден или не имеет номера RiseGram")
+        digits = db.digits_of(peer["phone"])
+        exact = await recovery.native_info(digits)
+        if not exact or int(exact["id"]) != nid:
+            raise recovery.RecoveryError("Не удалось однозначно подтвердить аккаунт")
+        return digits
+    return raw
 
 
 # ════════════════════════════ главный экран ══════════════════════════════
@@ -124,9 +159,9 @@ async def home_screen(event, user: dict):
     rows = [
         [btn("📊 Аналитика", "adm:stats", style="primary"), btn("👥 Юзеры", "adm:users:0", style="primary")],
         [btn("💰 Выдача валюты", "adm:grant", style="success"), btn("🏷 Выдать юзернеймы", "adm:inv", style="success")],
-        [btn("🗑 Удалить аккаунт по номеру", "adm:delphone", style="danger")],
+        [btn("🗑 Удалить аккаунт", "adm:delphone", style="danger")],
         [btn("♻️ Восстановить аккаунт", "adm:recoverlist", style="success"),
-         btn("📞 Восстановить по номеру", "adm:restorephone", style="success")],
+         btn("📞 Восстановить по @юзернейму", "adm:restorephone", style="success")],
         [btn("🎁 Дроп подарков", "adm:localgifts:0", style="success")],
         [btn("☑️ Верификация RiseGram", "adm:verifyrise", style="primary"), btn("💠 Верификация Major", "adm:verifymajor", style="primary")],
         [btn("📣 Галочки групп и каналов · выдать / снять", "adm:verifychats", style="primary")],
@@ -156,7 +191,7 @@ async def revoke_user_verification(message: Message):
     if len(parts) != 3 or parts[2].lower() not in ("risegram", "major", "both"):
         await message.answer("Используйте /revokeuserverify @пользователь risegram|major|both")
         return
-    user = await db.find_user(parts[1])
+    user = await parse_target(parts[1])
     if not user:
         await message.answer("Аккаунт не найден. Укажите RiseGram ID или юзернейм из админки.")
         return
@@ -927,7 +962,7 @@ async def deletion_preview(event, state, raw):
     if getattr(event, "from_user", None) is None or event.from_user.id != config.OWNER_TELEGRAM_ID:
         return await event.answer("Только владелец может удалять аккаунты")
     try:
-        info = await recovery.preview(raw)
+        info = await recovery.preview(await recovery_target(raw))
         if info["receipt"] and info["receipt"]["status"] in recovery.ACTIVE:
             return await show(event,
                 "Аккаунт уже ожидает удаления. Его можно восстановить.",
@@ -984,7 +1019,7 @@ async def confirm_account_deletion(call, state, key):
                 f"receipt={result['id']} admin={call.from_user.id}")
     return await show(call,
         f"✅ Аккаунт ограничен на MTProto до <b>{result['due']} UTC</b>\n"
-        "Его данные не уничтожены. Восстановление через /owner → «Восстановить по номеру»",
+        "Его данные не уничтожены. Восстановление через /owner → «Восстановить по @юзернейму»",
         kb([btn("♻️ Восстановить", "adm:recoverpick:" + data["phone"])],home_row()))
 
 
@@ -992,7 +1027,7 @@ async def restoration_preview(event, state, raw):
     if getattr(event,"from_user",None) is None or event.from_user.id != config.OWNER_TELEGRAM_ID:
         return await event.answer("Только владелец может восстанавливать аккаунты")
     try:
-        info = await recovery.preview(raw)
+        info = await recovery.preview(await recovery_target(raw))
         if not info["native"]:
             raise recovery.RecoveryError("Native аккаунт отсутствует. Требуется ручное восстановление из резервной копии.")
         record = info["receipt"]
@@ -1071,7 +1106,7 @@ async def screen_recoverable(event):
         description += "В списке нет удалений из админки\n"
     description += "\nУдаления из клиента ищутся по номеру отдельно"
     return await show(event, description,
-        kb(*buttons[:12], [btn("📞 Восстановить по номеру", "adm:restorephone", style="success")],
+        kb(*buttons[:12], [btn("📞 Восстановить по @юзернейму", "adm:restorephone", style="success")],
            home_row()))
 
 
@@ -1099,6 +1134,12 @@ async def on_input(message: Message, state: FSMContext, user: dict):
         return await restoration_preview(message, state, text)
     if act == "usearch":
         await state.clear()
+        if text.startswith("@") or re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{3,31}", text):
+            exact = await parse_target(text)
+            if exact:
+                return await screen_user(message, int(exact["tg_id"]))
+            if text.startswith("@"):
+                return await message.answer("Аккаунт с таким @юзернеймом не найден или не связан с ботом", reply_markup=kb(home_row()))
         total = await db.count_users(text)
         rows_db = await db.list_users(PAGE, 0, text)
         out = f"🔎 <b>Поиск «{esc(text)}»</b> ({total})\n\n"
@@ -1448,7 +1489,7 @@ async def adm_cb(call: CallbackQuery, state: FSMContext, user: dict):
         if call.from_user.id != config.OWNER_TELEGRAM_ID:
             return await call.answer("Только владелец", show_alert=True)
         return await ask(call, state, "delete_phone",
-                         "Введите номер RiseGram с кодом страны. Удаление будет отложено на 30 дней")
+                         "Введите @юзернейм RiseGram или номер. Удаление будет отложено на 30 дней")
     if route == "delconfirm":
         return await confirm_account_deletion(call, state, parts[2] if len(parts) == 3 else "")
     if route == "recoverlist":
@@ -1457,7 +1498,7 @@ async def adm_cb(call: CallbackQuery, state: FSMContext, user: dict):
         if call.from_user.id != config.OWNER_TELEGRAM_ID:
             return await call.answer("Только владелец", show_alert=True)
         return await ask(call, state, "restore_phone",
-                         "♻️ Введите номер удаляемого аккаунта RiseGram с кодом страны\n"
+                         "♻️ Введите @юзернейм удаляемого аккаунта RiseGram или номер\n"
                          "Будет восстановлен исходный серверный профиль, если удаление ещё не завершено")
     if route == "recoverpick":
         if call.from_user.id != config.OWNER_TELEGRAM_ID:
@@ -1559,7 +1600,7 @@ async def adm_cb(call: CallbackQuery, state: FSMContext, user: dict):
         await state.set_data({"act": "risk_label", "risk_kind": parts[2],
                               "risk_label": parts[3], "risk_enabled": parts[4] == "on"})
         question = ("Пришли @юзернейм и причину от 8 символов\nПример: @example выдаёт себя за администрацию" if parts[4]=="on"
-                    else "Пришли @юзернейм или ID для снятия выбранной метки")
+                    else "Пришли @юзернейм для снятия выбранной метки")
         return await show(call, question, kb(cancel_row("adm:risks")))
 
     if route == "verifychats":
@@ -1589,13 +1630,13 @@ async def adm_cb(call: CallbackQuery, state: FSMContext, user: dict):
     if route in ("verifyrise", "verifymajor"):
         kind = "RiseGram" if route == "verifyrise" else "Major"
         return await show(call,
-            f"☑️ <b>Верификация {kind}</b>\n\nВыбери пользователя или найди его по ID / @username, затем нажми «Выдать {kind}» или «Снять {kind}» в карточке.",
+            f"☑️ <b>Верификация {kind}</b>\n\nВыбери пользователя или найди его по @username, затем нажми «Выдать {kind}» или «Снять {kind}» в карточке.",
             kb([btn("👥 Выбрать пользователя", "adm:users:0", style="primary")],
                [btn("🔎 Найти пользователя", "adm:usearch")], home_row()))
     if route == "users":
         return await screen_users(call, num(parts, 2))
     if route == "usearch":
-        return await ask(call, state, "usearch", "🔎 Введите часть имени, @юзернейм или ID:", "adm:users:0")
+        return await ask(call, state, "usearch", "🔎 Введите @юзернейм или часть имени:", "adm:users:0")
     if route == "u":
         return await screen_user(call, num(parts, 2))
     if route in ("uban", "uver", "uverrise", "uvermajor", "udel", "udelok", "ucode", "unum", "uun", "uph", "umsg"):
@@ -1645,7 +1686,7 @@ async def adm_cb(call: CallbackQuery, state: FSMContext, user: dict):
 
     # ── валюта ──
     if route == "grant":
-        return await ask(call, state, "grant_target", "💰 <b>Выдача и списание</b>\n\nВведите @юзернейм, ID или номер игрока:")
+        return await ask(call, state, "grant_target", "💰 <b>Выдача и списание</b>\n\nВведите @юзернейм игрока:")
     if route == "g":
         uid, cur = num(parts, 2), parts[3] if len(parts) > 3 else "stars"
         u = await db.get_user(uid)
@@ -1660,7 +1701,7 @@ async def adm_cb(call: CallbackQuery, state: FSMContext, user: dict):
 
     # ── выдача юзернеймов, маркет и NFT ──
     if route == "inv":
-        return await ask(call, state, "inv_target", "🏷 <b>Выдача NFT-юзернеймов</b>\n\nВведите @юзернейм, ID или номер игрока:")
+        return await ask(call, state, "inv_target", "🏷 <b>Выдача NFT-юзернеймов</b>\n\nВведите @юзернейм игрока:")
     if route == "mkt":
         return await screen_market(call, num(parts, 2))
     if route == "mktdel":
@@ -1733,7 +1774,7 @@ async def adm_cb(call: CallbackQuery, state: FSMContext, user: dict):
 
     # ── бан ──
     if route == "ban":
-        return await ask(call, state, "ban_target", "🔨 <b>Банхаммер</b>\n\nВведите @юзернейм, ID или номер. Статус переключится (бан ↔ разбан):")
+        return await ask(call, state, "ban_target", "🔨 <b>Банхаммер</b>\n\nВведите @юзернейм. Статус переключится (бан ↔ разбан):")
 
     # ── задания ──
     if route == "tasks":
@@ -1794,7 +1835,7 @@ async def adm_cb(call: CallbackQuery, state: FSMContext, user: dict):
         if route == "admins":
             return await screen_admins(call)
         if route == "aadd":
-            return await ask(call, state, "admin_add", "🛡 Введите @юзернейм, RiseGram ID или номер пользователя, которого нужно сделать администратором:", "adm:admins")
+            return await ask(call, state, "admin_add", "🛡 Введите @юзернейм пользователя, которого нужно сделать администратором:", "adm:admins")
         target_id = num(parts, 2)
         if target_id == int(config.OWNER_ID):
             return await call.answer("Владельца нельзя удалить из администраторов.", show_alert=True)
@@ -1803,7 +1844,7 @@ async def adm_cb(call: CallbackQuery, state: FSMContext, user: dict):
             await audit(f"Администратор удалён: {target_id}")
         return await screen_admins(call)
     if route == "tadd":
-        return await ask(call, state, "tester_add", "🧪 Введите @юзернейм или ID тестера:", "adm:testers")
+        return await ask(call, state, "tester_add", "🧪 Введите @юзернейм тестера:", "adm:testers")
     if route == "trm":
         await db.remove_tester(num(parts, 2))
         await audit(f"Тестер удалён: {num(parts, 2)}")
