@@ -12,6 +12,9 @@ import re
 import secrets
 
 import nft_username_admin as nftnames
+import donat_native as native_shop
+import psycopg
+import time
 
 from aiohttp import ClientError, ClientSession, ClientTimeout
 from aiogram import Bot, F, Router
@@ -127,6 +130,7 @@ async def home_screen(event, user: dict):
         [btn("🗑 NFT-юзернеймы · снять / удалить", "adm:nftcontrol", style="danger")],
         [btn("⚡ Тумблеры функций", "adm:feat", style="success"), btn("🔨 Банхаммер", "adm:ban", style="danger")],
         [btn("🎯 Задания", "adm:tasks"), btn("🛒 Маркет", "adm:mkt:0"), btn(scam_label, "adm:scam:0", style="danger" if pending else None)],
+        [btn("⚠️ Выдать / снять SCAM и FAKE", "adm:risks", style="danger")],
         [btn("🧾 Покупки", "adm:buys:0"), btn("📣 Рассылка", "adm:cast")],
         [btn("🧪 Тестеры", "adm:testers")],
         [btn("👥 Автовступление RiseGram", "adm:autojoin")],
@@ -1159,9 +1163,21 @@ async def on_input(message: Message, state: FSMContext, user: dict):
 
     # ── SCAM, тестеры, перенос номеров ──
     if act == "scam_revoke":
-        n = await db.revoke_scam_label(text)
-        await audit(f"Снята метка SCAM @{db.norm_username(text)} ({n})")
-        return await done("✅ Метка снята." if n else "ℹ️ Активной метки на этот юзернейм нет.", kb([btn("⚠️ К заявкам", "adm:scam:0")], home_row()))
+        return await again("Используй меню «SCAM/FAKE» — снятие теперь синхронизируется с MTProto")
+    if act == "risk_label":
+        kind = data.get("risk_kind")
+        label = data.get("risk_label")
+        enabled = bool(data.get("risk_enabled"))
+        target, _, reason = text.partition(" ")
+        if not target or (enabled and len(reason.strip()) < 8):
+            return await again("Формат: @юзернейм причина (минимум 8 символов)\nДля снятия достаточно @юзернейма")
+        try:
+            await native_shop.change_risk_label(target, kind, label, enabled, reason,
+                int(message.from_user.id), f"{message.chat.id}-{message.message_id}")
+        except (native_shop.NativePurchaseError, psycopg.Error, OSError) as exc:
+            return await again("❌ " + esc(str(exc)[:180]))
+        await audit(f"{'Выдана' if enabled else 'Снята'} метка {label} {kind} {target}: {reason[:150]}")
+        return await done(f"✅ MTProto подтвердил действие: {label} {'выдана' if enabled else 'снята'} для {esc(target)}")
     if act == "tester_add":
         t = await parse_target(text)
         if not t:
@@ -1348,6 +1364,41 @@ async def adm_cb(call: CallbackQuery, state: FSMContext, user: dict):
         return await home_screen(call, user)
 
     # ── игроки ──
+    if route == "risks":
+        return await show(call,
+            "⚠️ <b>Модерация SCAM / FAKE</b>\n\n"
+            "Только модераторы — метки синхронизируются с клиентом RiseGram\n"
+            "Выберите тип действия, затем укажите @объект и причину\n"
+            "SCAM и FAKE не продаются",
+            kb(
+                [btn("⚠️ SCAM аккаунт", "adm:risk:user:SCAM:on"),
+                 btn("🎭 FAKE аккаунт", "adm:risk:user:FAKE:on")],
+                [btn("⚠️ SCAM группа", "adm:risk:group:SCAM:on"),
+                 btn("🎭 FAKE группа", "adm:risk:group:FAKE:on")],
+                [btn("⚠️ SCAM канал", "adm:risk:channel:SCAM:on"),
+                 btn("🎭 FAKE канал", "adm:risk:channel:FAKE:on")],
+                [btn("🧹 Снять метку", "adm:riskclear")], home_row()))
+    if route == "riskclear":
+        return await show(call,
+            "🧹 Снятие меток (каждая операция логируется)",
+            kb(
+                [btn("SCAM аккаунт", "adm:risk:user:SCAM:off"),
+                 btn("FAKE аккаунт", "adm:risk:user:FAKE:off")],
+                [btn("SCAM группа", "adm:risk:group:SCAM:off"),
+                 btn("FAKE группа", "adm:risk:group:FAKE:off")],
+                [btn("SCAM канал", "adm:risk:channel:SCAM:off"),
+                 btn("FAKE канал", "adm:risk:channel:FAKE:off")],
+                back_row("adm:risks")))
+    if route == "risk":
+        if len(parts) != 5 or parts[2] not in ("user", "group", "channel") or parts[3] not in ("SCAM", "FAKE") or parts[4] not in ("on", "off"):
+            return await call.answer("Некорректное действие", show_alert=True)
+        await state.set_state(Adm.input)
+        await state.set_data({"act": "risk_label", "risk_kind": parts[2],
+                              "risk_label": parts[3], "risk_enabled": parts[4] == "on"})
+        question = ("Пришли @юзернейм и причину от 8 символов\nПример: @example выдаёт себя за администрацию" if parts[4]=="on"
+                    else "Пришли @юзернейм или ID для снятия выбранной метки")
+        return await show(call, question, kb(cancel_row("adm:risks")))
+
     if route == "verifychats":
         return await show(call,
             "📣 <b>Верификация каналов и групп RiseGram</b>\n\n"
