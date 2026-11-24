@@ -1532,6 +1532,9 @@ async def start_api(bot) -> web.AppRunner | None:
     app.on_startup.append(native_bot_proxy.install)
     app.on_cleanup.append(native_bot_proxy.cleanup)
     app.add_routes(native_bot_proxy.routes())
+    import typevirt_wallet
+    await typevirt_wallet.setup()
+    app.router.add_post("/internal/typevirt/wallet", typevirt_wallet.handle)
     app.add_routes([
         # Public web and Electron clients retired: keep JSON APIs and the
         # bot miniapp only, as they are still used by the native ecosystem.
