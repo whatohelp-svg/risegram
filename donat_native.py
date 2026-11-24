@@ -244,4 +244,6 @@ async def change_risk_label(target: str, kind: str, label: str,
             await db.remove_risk_label(name, other)
         else:
             await db.remove_risk_label(name, label)
+            if label == "SCAM":
+                await db.revoke_scam_label(name)
     return result
