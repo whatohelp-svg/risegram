@@ -822,7 +822,7 @@ async def screen_scam(call: CallbackQuery, page: int):
     if not rows_db:
         text += "Очередь пуста."
     rows.append(pager("adm:scam", page, total))
-    rows.append([btn("🧹 Снять метку по юзернейму", "adm:scamrevoke")])
+    rows.append([btn("🧹 Снять SCAM / FAKE", "adm:riskclear")])
     rows.append(home_row())
     await show(call, text, kb(*rows))
 
@@ -1513,7 +1513,8 @@ async def on_input(message: Message, state: FSMContext, user: dict):
 
     # ── SCAM, тестеры, перенос номеров ──
     if act == "scam_revoke":
-        return await again("Используй меню «SCAM/FAKE» — снятие теперь синхронизируется с MTProto")
+        await state.clear()
+        return await message.answer("Выберите метку для снятия",reply_markup=kb([btn("Снять SCAM","adm:risk:user:SCAM:off"),btn("Снять FAKE","adm:risk:user:FAKE:off")],[btn("Группа / канал","adm:riskclear")],home_row()))
     if act == "risk_label":
         kind = data.get("risk_kind")
         label = data.get("risk_label")
@@ -1783,7 +1784,7 @@ async def adm_cb(call: CallbackQuery, state: FSMContext, user: dict):
                  btn("🎭 FAKE группа", "adm:risk:group:FAKE:on")],
                 [btn("⚠️ SCAM канал", "adm:risk:channel:SCAM:on"),
                  btn("🎭 FAKE канал", "adm:risk:channel:FAKE:on")],
-                [btn("🧹 Снять метку", "adm:riskclear")], home_row()))
+                [btn("🧹 Снять SCAM / FAKE", "adm:riskclear")], home_row()))
     if route == "riskclear":
         return await show(call,
             "🧹 Снятие меток (каждая операция логируется)",
@@ -2006,7 +2007,8 @@ async def adm_cb(call: CallbackQuery, state: FSMContext, user: dict):
             return await scam_decide(call, num(parts, 3), sub == "ok")
         return await screen_scam(call, num(parts, 2))
     if route == "scamrevoke":
-        return await ask(call, state, "scam_revoke", "🧹 Введите @юзернейм, с которого нужно снять метку SCAM:", "adm:scam:0")
+        await state.clear()
+        return await show(call,"🧹 Снять метку SCAM / FAKE",kb([btn("SCAM аккаунт","adm:risk:user:SCAM:off"),btn("FAKE аккаунт","adm:risk:user:FAKE:off")],[btn("SCAM группа","adm:risk:group:SCAM:off"),btn("FAKE группа","adm:risk:group:FAKE:off")],[btn("SCAM канал","adm:risk:channel:SCAM:off"),btn("FAKE канал","adm:risk:channel:FAKE:off")],back_row("adm:scam:0")))
 
     # ── покупки ──
     if route == "buys":
