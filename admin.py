@@ -144,6 +144,7 @@ async def home_screen(event, user: dict):
     ]
     if int(user["tg_id"]) == int(config.OWNER_ID):
         rows.insert(6, [btn("🛡 Админы", "adm:admins")])
+        rows.insert(0, [btn("🛟 Панель поддержки", "adm:sup:home", style="primary")])
     markup = kb(*rows)
     await show(event, text, markup)
 
