@@ -120,7 +120,7 @@ async def handle(request):
         action=body.get("action")
         chat=body.get("chat_id")
         mid=body.get("message_id")
-        if type(uid) is not int or not 0<uid<=MAX or action not in ("balance","play","recover","hilo_start","hilo_finish"):
+        if type(uid) is not int or not 0<uid<=MAX or action not in ("balance","play","recover","hilo_start","hilo_finish","admin"):
             raise ValueError()
         if action!="balance" and (type(chat) is not int or type(mid) is not int or not 0<mid<=2147483647):
             raise ValueError()
@@ -135,7 +135,7 @@ async def handle(request):
     try:
         async with economy.transaction() as conn:
             await conn.execute("SET LOCAL statement_timeout='8s'")
-            bot=await (await conn.execute("""SELECT b.token_secret FROM bots b JOIN users u ON u.id=b.bot_user_id
+            bot=await (await conn.execute("""SELECT b.token_secret,b.owner_user_id FROM bots b JOIN users u ON u.id=b.bot_user_id
                 WHERE b.bot_user_id=%s AND u.is_bot AND u.deleted_at IS NULL""",(BOT_ID,))).fetchone()
             if not bot or not bot["token_secret"] or not hmac.compare_digest(auth[7:],str(BOT_ID)+":"+bot["token_secret"]):
                 return response({"ok":False,"error":"Unauthorized"},401)
@@ -146,6 +146,8 @@ async def handle(request):
                 row=await (await conn.execute("SELECT balance FROM stars_balances WHERE user_id=%s",(uid,))).fetchone()
                 legacy=await (await conn.execute("SELECT balance FROM risegram_typevirt_wallet WHERE user_id=%s",(uid,))).fetchone()
                 return response({"ok":True,"balance":str(row["balance"] if row else 0),"legacy_reserve":str(legacy["balance"] if legacy else 0)})
+            if action=="admin" and uid!=int(bot["owner_user_id"]):
+                return response({"ok":False,"error":"Только владелец TypeVirt"},403)
             if action=="hilo_finish":
                 peer_type="user" if chat==uid else "channel"
                 peer_id=uid if chat==uid else -chat-1000000000000
@@ -184,14 +186,14 @@ async def handle(request):
                 await conn.execute("UPDATE risegram_typevirt_hilo SET result=%s WHERE token=%s",(Jsonb(out),token))
                 return response(out)
             if chat==uid:
-                updates=await (await conn.execute("""SELECT u.id,u.created_at,p.body FROM bot_api_updates u
+                updates=await (await conn.execute("""SELECT u.id,u.created_at,p.body,p.reply_to_msg_id FROM bot_api_updates u
                     JOIN private_messages p ON p.sender_user_id=%s AND p.recipient_user_id=u.bot_user_id
                     AND p.recipient_box_id=u.message_id
                     WHERE u.bot_user_id=%s AND u.update_kind='message' AND u.peer_type='user'
                     AND u.peer_id=%s AND u.message_id=%s ORDER BY u.id LIMIT 1""",(uid,BOT_ID,uid,mid))).fetchone()
-            elif chat < -1000000000000 and action in ("play","hilo_start"):
+            elif chat < -1000000000000 and action in ("play","hilo_start","admin"):
                 cid=-chat-1000000000000
-                updates=await (await conn.execute("""SELECT u.id,u.created_at,m.body FROM bot_api_updates u
+                updates=await (await conn.execute("""SELECT u.id,u.created_at,m.body,m.reply_to_msg_id FROM bot_api_updates u
                     JOIN channel_messages m ON m.channel_id=u.peer_id AND m.id=u.message_id
                     WHERE u.bot_user_id=%s AND u.update_kind='message' AND u.peer_type='channel'
                     AND u.peer_id=%s AND u.message_id=%s AND m.sender_user_id=%s AND NOT m.deleted
@@ -212,7 +214,49 @@ async def handle(request):
             row=await (await conn.execute("SELECT balance FROM stars_balances WHERE user_id=%s FOR UPDATE",(uid,))).fetchone()
             balance=int(row["balance"]) if row else 0
             key="typevirt-shared:"+str(update_id)
-            if action=="hilo_start":
+            if action=="admin":
+                parts=updates["body"].strip().split()
+                cmd=parts[0].lower().lstrip("/").split("@")[0] if parts else ""
+                if cmd not in ("giveme","givemoney","takemoney","givestars","takestars"):
+                    raise ValueError("Используй /giveme 100 или /givemoney @username 100")
+                target_id=uid
+                if cmd=="giveme" and len(parts)==2:
+                    raw=parts[1]
+                elif cmd!="giveme" and len(parts)==3:
+                    name=parts[1].lower().lstrip("@")
+                    if not re.fullmatch(r"[a-z0-9_]{3,32}",name):
+                        raise ValueError("Укажи @юзернейм RiseGram")
+                    targets=await (await conn.execute("""SELECT DISTINCT u.id FROM users u
+                        LEFT JOIN peer_usernames p ON p.peer_type='user' AND p.peer_id=u.id AND p.active
+                        WHERE NOT u.is_bot AND u.deleted_at IS NULL AND (lower(u.username)=%s OR p.username_lower=%s)""",(name,name))).fetchall()
+                    if len(targets)!=1:
+                        raise ValueError("Аккаунт не найден однозначно")
+                    target_id=int(targets[0]["id"])
+                    raw=parts[2]
+                elif cmd!="giveme" and len(parts)==2 and chat!=uid and updates["reply_to_msg_id"]:
+                    ref=await (await conn.execute("""SELECT sender_user_id FROM channel_messages
+                        WHERE channel_id=%s AND id=%s AND NOT deleted""",(-chat-1000000000000,updates["reply_to_msg_id"]))).fetchone()
+                    if not ref:
+                        raise ValueError("Сообщение не найдено")
+                    target_id=int(ref["sender_user_id"])
+                    raw=parts[1]
+                else:
+                    raise ValueError("Формат: /giveme 100, /givemoney @username 100, /takemoney @username 100")
+                if raw.lower() in ("все","всё","all"):
+                    raise ValueError("Укажи точную сумму")
+                amount=stake(raw,MAX)
+                target=await (await conn.execute("SELECT username,first_name FROM users WHERE id=%s AND NOT is_bot AND deleted_at IS NULL",(target_id,))).fetchone()
+                if not target:
+                    raise ValueError("Аккаунт не найден")
+                await conn.execute("INSERT INTO stars_balances(user_id,balance,granted) VALUES(%s,0,true) ON CONFLICT DO NOTHING",(target_id,))
+                current=await (await conn.execute("SELECT balance FROM stars_balances WHERE user_id=%s FOR UPDATE",(target_id,))).fetchone()
+                current=int(current["balance"])
+                delta=-amount if cmd in ("takemoney","takestars") else amount
+                if not 0<=current+delta<=MAX:
+                    raise ValueError("Недостаточно звёзд или превышен технический предел")
+                await economy.post(conn,key+":admin",[(target_id,"stars",delta)],"TypeVirt: выдача владельцем" if delta>0 else "TypeVirt: изъятие владельцем")
+                result={"ok":True,"balance":str(current+delta),"delta":str(delta),"target":"@"+target["username"] if target["username"] else target["first_name"] or "Игрок"}
+            elif action=="hilo_start":
                 parts=updates["body"].lower().split()
                 if len(parts)!=2 or parts[0] not in ("хл","hilo","hi-lo"):
                     raise ValueError("Пример: хл 100 или хл все")
