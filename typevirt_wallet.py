@@ -45,9 +45,10 @@ async def handle(request):
         action = body.get("action")
         amount = body.get("amount",0)
         key = body.get("key","")
+        callback_id = body.get("callback_id","")
         if type(uid) is not int or not 0<uid<2**63 or action not in ("balance","deposit","withdraw","donate"):
             raise ValueError()
-        if action!="balance" and (type(amount) is not int or not 1<=amount<=MAX_AMOUNT or not isinstance(key,str) or not re.fullmatch(r"[A-Za-z0-9_-]{10,100}",key)):
+        if action!="balance" and (type(amount) is not int or not 1<=amount<=MAX_AMOUNT or not isinstance(key,str) or not re.fullmatch(r"[A-Za-z0-9_-]{16,32}",key) or not isinstance(callback_id,str) or not re.fullmatch(r"-?[0-9]{1,19}",callback_id) or not -(2**63)<=int(callback_id)<2**63):
             raise ValueError()
     except (ValueError,TypeError):
         return reply({"ok":False,"error":"Некорректная операция"},400)
@@ -73,8 +74,18 @@ async def handle(request):
                 if (old["user_id"],old["action"],old["amount"])!=(uid,action,amount):
                     return reply({"ok":False,"error":"Повтор с другими параметрами"},409)
                 return reply({"ok":True,"balance":str(old["balance_after"]),"native_balance":str(old["native_after"]),"duplicate":True})
+            # The bot token alone cannot authorize a debit. Verify the actual
+            # native user's private callback and bind its exact amount/nonce.
+            expected = f"tvw:{action}:{amount}:{key}".encode()
+            confirmed = await (await conn.execute("""SELECT 1 FROM bot_api_updates
+                WHERE bot_user_id=%s AND callback_query_id=%s AND callback_user_id=%s
+                  AND peer_type='user' AND peer_id IN (%s,%s) AND callback_data=%s
+                  AND created_at>now()-interval '10 minutes' LIMIT 1""",
+                (BOT_ID,int(callback_id),uid,uid,BOT_ID,expected))).fetchone()
+            if not confirmed:
+                return reply({"ok":False,"error":"Подтверждение пользователя не найдено или устарело"},403)
             if action in ("withdraw","donate") and balance<amount:
-                return reply({"ok":False,"error":"Недостаточно снежного кошелька RiseStars"},409)
+                return reply({"ok":False,"error":"Недостаточно RiseStars в кошельке TypeVirt"},409)
             if action=="deposit":
                 # Spendable native balance is debited; a matching reserve is
                 # represented by the user's withdrawable wallet balance.
