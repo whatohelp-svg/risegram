@@ -175,6 +175,30 @@ async def native_chat_issuer(uid: int, kind: str, channel_id: int,
     }, "badge-" + charge)
 
 
+async def issue_profile_club(uid: int, charge: str) -> dict:
+    user = await db.get_user(uid)
+    if not user or user.get("banned"):
+        raise NativePurchaseError("Аккаунт недоступен")
+    issuer = await db.get_meta("native_issuer:risegramclub")
+    if not issuer or not str(issuer).isdigit():
+        raise NativePurchaseError("RiseGram Club ещё не настроен на сервере")
+    async with await psycopg.AsyncConnection.connect(
+        os.environ["RISEGRAM_LEDGER_DSN"], connect_timeout=8, row_factory=dict_row
+    ) as conn:
+        await conn.execute("SET TRANSACTION READ ONLY")
+        peer_id = await _native_peer_id(conn, user)
+    result = await native_command("/v1/botverification/marks/grant", {
+        "peer_type": "user", "peer_id": peer_id, "verifier_bot_id": int(issuer),
+        "description": "Платная косметическая метка RiseGram Club. Не подтверждает личность",
+    }, "club-" + charge)
+    await db.execute("""
+        INSERT INTO purchased_profile_marks(tg_id,issuer,charge_id,created_at)
+        VALUES(?,'risegramclub',?,?)
+        ON CONFLICT(tg_id,issuer) DO NOTHING
+    """, (uid, charge, db.now()))
+    return result
+
+
 async def change_risk_label(target: str, kind: str, label: str,
                             enabled: bool, reason: str, actor: int,
                             command: str) -> dict:
