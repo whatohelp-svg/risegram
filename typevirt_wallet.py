@@ -74,6 +74,7 @@ async def handle(request):
                 if (old["user_id"],old["action"],old["amount"])!=(uid,action,amount):
                     return reply({"ok":False,"error":"Повтор с другими параметрами"},409)
                 return reply({"ok":True,"balance":str(old["balance_after"]),"native_balance":str(old["native_after"]),"duplicate":True})
+            return reply({"ok":False,"error":"Общий баланс включён. Используйте /stars или /recoverstars"},409)
             # The bot token alone cannot authorize a debit. Verify the actual
             # native user's private callback and bind its exact amount/nonce.
             expected = f"tvw:{action}:{amount}:{key}".encode()
