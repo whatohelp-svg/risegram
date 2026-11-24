@@ -1036,7 +1036,7 @@ async def sync_mtproto_verification(user_id: int, force: bool = False) -> dict:
                         elif user.get("verified_major"):
                             description = "Аккаунт верифицирован организацией «Major»."
                         else:
-                            description = "Аккаунт верифицирован официальной компанией «RiseGram»."
+                            description = "Аккаунт верифицирован организацией «RiseGram»."
                         await command(session, "/v1/botverification/marks/grant",
                                       f"rg-user-mark-grant-{native_peer}-{time.time_ns()}", {
                                           "verifier_bot_id": int(bot_id),
