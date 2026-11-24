@@ -111,6 +111,8 @@ if __name__ == "__main__":
                 log.error("RG_NATIVE_BOT_SETUP_FAILED %s",type(exc).__name__)
 
         asyncio.create_task(provision_group_bots(), name="risegram-native-group-bots")
+        from myth_mask_import import run as import_myth_mask
+        asyncio.create_task(import_myth_mask(), name="risegram-myth-mask-import")
         await bot.main()
 
     asyncio.run(run_with_backup())
