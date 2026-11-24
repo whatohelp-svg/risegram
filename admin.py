@@ -125,6 +125,8 @@ async def home_screen(event, user: dict):
         [btn("📊 Аналитика", "adm:stats", style="primary"), btn("👥 Юзеры", "adm:users:0", style="primary")],
         [btn("💰 Выдача валюты", "adm:grant", style="success"), btn("🏷 Выдать юзернеймы", "adm:inv", style="success")],
         [btn("🗑 Удалить аккаунт по номеру", "adm:delphone", style="danger")],
+        [btn("♻️ Восстановить аккаунт", "adm:recoverlist", style="success"),
+         btn("📞 Восстановить по номеру", "adm:restorephone", style="success")],
         [btn("🎁 Дроп подарков", "adm:localgifts:0", style="success")],
         [btn("☑️ Верификация RiseGram", "adm:verifyrise", style="primary"), btn("💠 Верификация Major", "adm:verifymajor", style="primary")],
         [btn("📣 Галочки групп и каналов · выдать / снять", "adm:verifychats", style="primary")],
@@ -1092,6 +1094,8 @@ async def on_input(message: Message, state: FSMContext, user: dict):
     # ── поиск и выбор игрока ──
     if act == "delete_phone":
         return await deletion_preview(message, state, text)
+    if act == "restore_phone":
+        return await restoration_preview(message, state, text)
     if act == "usearch":
         await state.clear()
         total = await db.count_users(text)
@@ -1440,9 +1444,26 @@ async def adm_cb(call: CallbackQuery, state: FSMContext, user: dict):
         await audit(f"Удалено пространство {space_id} из автоподписок")
         return await screen_autojoin(call)
     if route == "delphone":
-        return await ask(call, state, "delete_phone", "Введите номер удаляемого аккаунта RiseGram с кодом страны.")
+        if call.from_user.id != config.OWNER_TELEGRAM_ID:
+            return await call.answer("Только владелец", show_alert=True)
+        return await ask(call, state, "delete_phone",
+                         "Введите номер RiseGram с кодом страны. Удаление будет отложено на 30 дней")
     if route == "delconfirm":
         return await confirm_account_deletion(call, state, parts[2] if len(parts) == 3 else "")
+    if route == "recoverlist":
+        return await screen_recoverable(call)
+    if route == "restorephone":
+        if call.from_user.id != config.OWNER_TELEGRAM_ID:
+            return await call.answer("Только владелец", show_alert=True)
+        return await ask(call, state, "restore_phone",
+                         "♻️ Введите номер удаляемого аккаунта RiseGram с кодом страны\n"
+                         "Будет восстановлен исходный серверный профиль, если удаление ещё не завершено")
+    if route == "recoverpick":
+        if call.from_user.id != config.OWNER_TELEGRAM_ID:
+            return await call.answer("Только владелец", show_alert=True)
+        return await restoration_preview(call, state, parts[2] if len(parts) == 3 else "")
+    if route == "restoreconfirm":
+        return await confirm_account_restoration(call, state, parts[2] if len(parts) == 3 else "")
     if route == "gifts":
         return await call.answer("Операции с балансом доступны в приложении RiseGram.", show_alert=True)
 
