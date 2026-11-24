@@ -160,46 +160,44 @@ async def recovery_target(raw: str) -> str:
 # ════════════════════════════ главный экран ══════════════════════════════
 
 
-async def home_screen(event, user: dict):
+async def home_screen(event, user: dict, page: int = 0):
     await db.ensure_owner()
     me = await db.get_user(user["tg_id"])
     maint = await db.get_meta("maintenance") == "1"
     pending = await db.scalar("SELECT COUNT(*) FROM scam_requests WHERE status='pending'")
-    text = (
-        f"💎 <b>{config.BRAND} Ecosystem — GOD MODE</b>\n\n"
-        f"{config.BRAND} ID: <b>{me['rise_id']}</b>\n"
-        f"{await client_wallet_line(me)}\n"
-        f"☑️ Статус: <b>{'Официальный владелец' if int(user['tg_id']) == int(config.OWNER_ID) else 'Администратор / тестер'}</b>\n"
-        "🏷 NFT каналу или супергруппе: <code>/grantnft @чат @имя</code>\nПроверка чата: <code>/grantverify @чат official|risegram|major</code>\nСнятие галочки: <code>/revokeverify @чат official|risegram|major</code>\n"
-        f"🛠 Техработы: <b>{'ВКЛ' if maint else 'выкл'}</b>"
-    )
-    scam_label = f"⚠️ SCAM-заявки ({pending})" if pending else "⚠️ SCAM-заявки"
-    rows = [
-        [btn("📊 Аналитика", "adm:stats", style="primary"), btn("👥 Юзеры", "adm:users:0", style="primary")],
-        [btn("💰 Выдача валюты", "adm:grant", style="success"), btn("🏷 Выдать юзернеймы", "adm:inv", style="success")],
-        [btn("🗑 Удалить аккаунт", "adm:delphone", style="danger")],
-        [btn("♻️ Восстановить аккаунт", "adm:recoverlist", style="success"),
-         btn("📞 Восстановить по @юзернейму", "adm:restorephone", style="success")],
-        [btn("🎁 Дроп подарков", "adm:localgifts:0", style="success")],
-        [btn("☑️ Верификация RiseGram", "adm:verifyrise", style="primary"), btn("💠 Верификация Major", "adm:verifymajor", style="primary")],
-        [btn("📣 Галочки групп и каналов · выдать / снять", "adm:verifychats", style="primary")],
-        [btn("❎ Снять галочки с аккаунта", "adm:verifyrevokeuser", style="danger")],
-        [btn("🗑 NFT-юзернеймы · снять / удалить", "adm:nftcontrol", style="danger")],
-        [btn("⚡ Тумблеры функций", "adm:feat", style="success"), btn("🔨 Банхаммер", "adm:ban", style="danger")],
-        [btn("🎯 Задания", "adm:tasks"), btn("🛒 Маркет", "adm:mkt:0"), btn(scam_label, "adm:scam:0", style="danger" if pending else None)],
-        [btn("⚠️ Выдать / снять SCAM и FAKE", "adm:risks", style="danger")],
-        [btn("🧾 Покупки", "adm:buys:0"), btn("📣 Рассылка", "adm:cast")],
-        [btn("🧪 Тестеры", "adm:testers")],
-        [btn("👥 Автовступление RiseGram", "adm:autojoin")],
-        [btn("📞 Перенос номеров", "adm:legacy")],
-        [btn("📜 Системные логи", "adm:logs:0"), btn(("🟢 Техработы: выключить" if maint else "🛠 Техработы: включить"), "adm:maint")],
-        [btn("🏠 Выйти в меню", "menu:main")],
-    ]
-    if int(user["tg_id"]) == int(config.OWNER_ID):
-        rows.insert(6, [btn("🛡 Админы", "adm:admins")])
-        rows.insert(0, [btn("🛟 Панель поддержки", "adm:sup:home", style="primary")])
-    markup = kb(*rows)
-    await show(event, text, markup)
+    owner = event.from_user.id == config.OWNER_TELEGRAM_ID
+    page = 1 if page==1 else 0
+    text = (f"💎 <b>{config.BRAND} — GOD MODE</b>\n"
+            f"Страница {page+1}/2 · {'Управление' if page==0 else 'Система'}\n\n"
+            f"ID: <b>{me['rise_id']}</b>\n{await client_wallet_line(me)}\n"
+            f"Техработы: <b>{'ВКЛ' if maint else 'выкл'}</b>")
+    scam_label = f"⚠️ SCAM ({pending})" if pending else "⚠️ SCAM-заявки"
+    if page==0:
+        rows=[
+            [btn("👥 Пользователи","adm:users:0"),btn("📊 Аналитика","adm:stats")],
+            [btn("💰 Валюта","adm:grant"),btn("🎁 Подарки","adm:localgifts:0")],
+            [btn("☑️ Верификации","adm:vermenu"),btn("🏷 NFT-юзернеймы","adm:nftmenu")],
+            [btn("🔨 Банхаммер","adm:ban"),btn("⚠️ SCAM / FAKE","adm:risks")],
+            [btn("🛒 Маркет","adm:mkt:0"),btn("🧾 Покупки","adm:buys:0")],
+            [btn("♻️ Восстановление","adm:recoverlist"),btn("🗑 Удаление","adm:delphone",style="danger")],
+        ]
+        if owner:
+            rows.append([btn("🛟 Поддержка","adm:sup:home"),btn("⭐ Звёзды поста","adm:postmenu")])
+    else:
+        rows=[
+            [btn("⚡ Функции","adm:feat"),btn("🎯 Задания","adm:tasks")],
+            [btn("🧪 Тестеры","adm:testers"),btn(scam_label,"adm:scam:0")],
+            [btn("📣 Рассылка","adm:cast"),btn("📜 Логи","adm:logs:0")],
+            [btn("📞 Перенос номеров","adm:legacy"),btn("♻️ По @имени","adm:restorephone")],
+            [btn("👥 Автовступление","adm:autojoin"),btn("🛠 Техработы","adm:maint")],
+        ]
+        if owner:
+            rows.append([btn("🛡 Администраторы","adm:admins"),btn("💾 База данных","adm:dbmenu")])
+    rows += [[btn("◀ 1/2" if page else "• 1/2","adm:home:0"),btn("2/2 ▶" if not page else "• 2/2","adm:home:1")],
+             [btn("🏠 Выйти в меню","menu:main")]]
+    await show(event,text,kb(*rows))
+
+
 
 
 @admin_router.message(Command("revokeuserverify"))
@@ -227,12 +225,12 @@ async def revoke_user_verification(message: Message):
 
 
 @admin_router.message(Command("removenft", "revokenft", "deletenft"))
-async def admin_remove_native_nft_username(message: Message, state: FSMContext):
+async def admin_remove_native_nft_username(message: Message, state: FSMContext, *, menu_args=None):
     """Preview before revoking or permanently deleting a *collectible* username.
 
     Never deletes an ordinary editable username, any profile, chat or session.
     """
-    parts = (message.text or "").split()
+    parts = menu_args if menu_args is not None else (message.text or "").split()
     command = parts[0].split("@")[0].lower() if parts else ""
     permanent = command == "/deletenft"
     if permanent and message.from_user.id != config.OWNER_TELEGRAM_ID:
@@ -299,9 +297,9 @@ def native_action_error(status: int, result: dict) -> str:
 
 
 @admin_router.message(Command("grantrole","revokerole"), OwnerOnly())
-async def role_verification(message: Message):
+async def role_verification(message: Message, *, menu_args=None):
     import role_marks
-    parts=(message.text or "").split()
+    parts=menu_args if menu_args is not None else (message.text or "").split()
     if len(parts)!=3 or not parts[1].startswith("@") or parts[2].lower() not in role_marks.ROLES:
         return await message.answer("/grantrole @username developer|tester|admin|headadmin|support|hold\n/revokerole @username тип")
     try:
@@ -312,14 +310,14 @@ async def role_verification(message: Message):
         await message.answer("❌ "+esc(str(exc)[:180]))
 
 @admin_router.message(Command("grantnft", "grantverify", "revokeverify"))
-async def grant_channel_username(message: Message):
+async def grant_channel_username(message: Message, *, menu_args=None):
     """Mint usernames or grant/revoke native channel and supergroup verification.
 
     AdminOnly is enforced on the router and the chat is always a private admin
     conversation. Basic (non-super) groups cannot be marked by native MTProto;
     convert them to supergroups first.
     """
-    parts = (message.text or "").split()
+    parts = menu_args if menu_args is not None else (message.text or "").split()
     action = parts[0].split("@")[0].lower() if parts else ""
     verification = action in ("/grantverify", "/revokeverify")
     revoking = action == "/revokeverify"
@@ -1158,6 +1156,99 @@ async def on_input(message: Message, state: FSMContext, user: dict):
     async def again(note: str):
         await message.answer(note, reply_markup=kb(cancel_row()))
 
+    # Button flows use the same validated command implementations.
+    if act in ("menuverify","menunfttarget","menunftname","menupost"):
+        if act=="menuverify":
+            kind=data.get("kind")
+            mode=data.get("mode")
+            if mode not in ("grant","revoke") or not text.startswith("@") or len(text.split())!=1:
+                return await again("Введите один @юзернейм RiseGram")
+            import role_marks
+            try:
+                peer,pid,entity=await role_marks.lookup(text)
+                if kind in role_marks.ROLES:
+                    if message.from_user.id!=config.OWNER_TELEGRAM_ID:
+                        return await done("Только владелец")
+                    await state.clear()
+                    return await role_verification(message,menu_args=["/grantrole" if mode=="grant" else "/revokerole",text,kind])
+                if kind not in ("risegram","major","official"):
+                    return await done("Неизвестный вид")
+                if peer=="channel":
+                    await state.clear()
+                    return await grant_channel_username(message,menu_args=["/grantverify" if mode=="grant" else "/revokeverify",str(pid),kind,"group" if entity["megagroup"] else "channel"])
+                from support_console import local_for_native
+                local=await local_for_native(pid)
+                if local and not entity["is_bot"] and kind!="official":
+                    await db.set_verification(int(local["tg_id"]),kind,mode=="grant")
+                    result=await sync_mtproto_verification(int(local["tg_id"]),force=True)
+                    return await done(("✅ Изменено" if result.get("synced") and not result.get("role_preserved") else "⚠️ Синхронизация не подтвердила замену метки (возможен служебный статус)")+" · "+esc(text))
+                # Native-only users/bots: same native admin interface as channels.
+                from issuer_marks import command
+                async with economy.transaction() as conn:
+                    current=await (await conn.execute("""SELECT v.verifier_bot_id,b.company_name FROM custom_verifications v JOIN bot_verifier_settings b ON b.bot_id=v.verifier_bot_id WHERE v.peer_type='user' AND v.peer_id=%s""",(pid,))).fetchone()
+                    verifier=await (await conn.execute("SELECT bot_id FROM bot_verifier_settings WHERE lower(company_name)=%s AND enabled",(kind,))).fetchone()
+                if kind!="official" and not verifier:
+                    return await done("Верификатор не найден")
+                if kind!="official" and mode=="revoke" and (not current or current["verifier_bot_id"]!=verifier["bot_id"]):
+                    return await done("У аккаунта нет выбранной метки")
+                async with nftnames.native_session() as session:
+                    key=f"rg-menuverify-{message.chat.id}-{message.message_id}"
+                    if kind=="official":
+                        await command(session,"/v1/accounts/set-verified",key,{"user_id":pid,"verified":mode=="grant"})
+                    else:
+                        fields={"verifier_bot_id":int(verifier["bot_id"]),"peer_type":"user","peer_id":pid}
+                        if mode=="grant":
+                            fields["description"]=("Бот" if entity["is_bot"] else "Аккаунт")+" верифицирован организацией «"+("RiseGram" if kind=="risegram" else "Major")+"»."
+                        await command(session,"/v1/botverification/marks/"+mode,key,fields)
+                await audit(f"Native verification {mode} {kind} {pid}")
+                return await done("✅ Верификация обновлена · "+esc(text))
+            except (ValueError,ClientError,TimeoutError,psycopg.Error) as exc:
+                return await again("❌ "+esc(str(exc)[:180]))
+        if act=="menunfttarget":
+            import role_marks
+            try:
+                if not text.startswith("@") or len(text.split())!=1:
+                    raise ValueError("Введите один @юзернейм")
+                peer,pid,entity=await role_marks.lookup(text)
+                kind="user" if peer=="user" else "group" if entity["megagroup"] else "channel"
+                await state.update_data(act="menunftname",target=text,peer_id=pid,target_kind=kind)
+                return await message.answer("Введите NFT-юзернейм, например @а или @rare",reply_markup=kb(cancel_row("adm:nftmenu")))
+            except (ValueError,psycopg.Error) as exc:
+                return await again("❌ "+esc(str(exc)[:180]))
+        if act=="menunftname":
+            try:
+                name=nftnames.normalize(text)
+                mode=data.get("mode")
+                target=data["target"]
+                kind=data["target_kind"]
+                pid=int(data["peer_id"])
+                import role_marks
+                peer,actual,_=await role_marks.lookup(target)
+                if actual!=pid or peer!=("user" if kind=="user" else "channel"):
+                    raise ValueError("Владелец имени изменился")
+                if mode in ("revoke","delete"):
+                    if mode=="delete" and message.from_user.id!=config.OWNER_TELEGRAM_ID:
+                        return await done("Только владелец")
+                    return await admin_remove_native_nft_username(message,state,menu_args=["/deletenft" if mode=="delete" else "/removenft",kind,target,name])
+                if mode!="grant" or message.from_user.id!=config.OWNER_TELEGRAM_ID:
+                    return await done("Только владелец")
+                key=f"rg-menu-nft-{message.chat.id}-{message.message_id}"
+                payload={"username":name,"owner_user_id" if kind=="user" else "owner_channel_id":str(pid),"currency":"USD","amount":"0","purchase_date":int(time.time()),"actor":"risegram-owner","reason":"Owner requested NFT grant from menu"}
+                async with nftnames.native_session() as session:
+                    for dry in (True,False):
+                        async with session.post(nftnames.base()+"/v1/collectible-usernames/mint",json={**payload,"command_id":key+("-dry" if dry else ""),"dry_run":dry}) as response:
+                            result=await response.json(content_type=None)
+                            if response.status!=200 or result.get("status")!="completed" or (dry and result.get("dry_run") is not True):
+                                raise ValueError(native_action_error(response.status,result))
+                await audit(f"NFT @{name} granted from menu to {kind}:{pid}")
+                return await done("✅ NFT @"+esc(name)+" выдан "+esc(target))
+            except (ValueError,nftnames.NFTUsernameAdminError,ClientError,TimeoutError,psycopg.Error) as exc:
+                return await again("❌ "+esc(str(exc)[:180]))
+        if act=="menupost":
+            from channel_stars_owner import preview
+            await state.clear()
+            return await preview(message,user,menu_args=["/poststars",*text.split()])
+
     # ── поиск и выбор игрока ──
     if act == "delete_phone":
         return await deletion_preview(message, state, text)
@@ -1605,7 +1696,43 @@ async def adm_cb(call: CallbackQuery, state: FSMContext, user: dict):
     if route == "noop":
         return
     if route == "home":
-        return await home_screen(call, user)
+        return await home_screen(call, user, num(parts,2))
+    if route == "vermenu":
+        return await show(call,"☑️ <b>Верификации</b>\nВыберите действие",kb([btn("Выдать","adm:verpick:grant",style="success"),btn("Снять","adm:verpick:revoke",style="danger")],home_row()))
+    if route == "verpick":
+        mode=parts[2] if len(parts)==3 else ""
+        if mode not in ("grant","revoke"):
+            return await call.answer("Неверное действие")
+        rows=[[btn("RiseGram",f"adm:verinput:{mode}:risegram"),btn("Major",f"adm:verinput:{mode}:major")],
+              [btn("Синяя галочка",f"adm:verinput:{mode}:official")]]
+        if call.from_user.id==config.OWNER_TELEGRAM_ID:
+            rows += [[btn("Hold",f"adm:verinput:{mode}:hold"),btn("Разработчик",f"adm:verinput:{mode}:developer")],
+                     [btn("Тестер",f"adm:verinput:{mode}:tester"),btn("Админ",f"adm:verinput:{mode}:admin")],
+                     [btn("Гл. админ",f"adm:verinput:{mode}:headadmin"),btn("Поддержка",f"adm:verinput:{mode}:support")]]
+        return await show(call,"Выберите вид верификации",kb(*rows,back_row("adm:vermenu")))
+    if route == "verinput":
+        if len(parts)!=4 or parts[2] not in ("grant","revoke"):
+            return await call.answer("Неверное действие")
+        return await ask(call,state,"menuverify","Введите @юзернейм аккаунта, бота, группы или канала","adm:vermenu",mode=parts[2],kind=parts[3])
+    if route == "nftmenu":
+        rows=[[btn("Снять NFT в резерв","adm:nftpick:revoke")]]
+        if call.from_user.id==config.OWNER_TELEGRAM_ID:
+            rows.insert(0,[btn("Выдать NFT","adm:nftpick:grant",style="success")])
+            rows.append([btn("Удалить навсегда","adm:nftpick:delete",style="danger")])
+        return await show(call,"🏷 <b>NFT-юзернеймы</b>\nАккаунты, боты, группы и каналы",kb(*rows,home_row()))
+    if route == "nftpick":
+        mode=parts[2] if len(parts)==3 else ""
+        if mode not in ("grant","revoke","delete") or (mode!="revoke" and call.from_user.id!=config.OWNER_TELEGRAM_ID):
+            return await call.answer("Нет доступа",show_alert=True)
+        return await ask(call,state,"menunfttarget","Введите @юзернейм владельца NFT","adm:nftmenu",mode=mode)
+    if route == "postmenu":
+        if call.from_user.id!=config.OWNER_TELEGRAM_ID:
+            return await call.answer("Только владелец",show_alert=True)
+        return await ask(call,state,"menupost","Введите ссылку на пост и необязательное количество звёзд для снятия\nНапример: t.me/rise_gram/2 1000","adm:home:0")
+    if route == "dbmenu":
+        if call.from_user.id!=config.OWNER_TELEGRAM_ID:
+            return await call.answer("Только владелец",show_alert=True)
+        return await show(call,"💾 Диагностика базы: /dbspace",kb(back_row("adm:home:1")))
     if route == "stats":
         return await screen_stats(call)
     if route == "gifts":
