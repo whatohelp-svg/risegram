@@ -658,6 +658,26 @@ async def revoke_goods(p: dict) -> str:
         if kind == "nm":
             row = await db.fetchone("SELECT id FROM user_nft_inventory WHERE item_type='number' AND value=?", (a[1],))
             return await remove_nft(row["id"], force=True) if row else "номер уже удалён"
+        if kind == "vc":
+            if a[0] != "a":
+                return "Некорректная покупка"
+            bot_id = await db.get_meta("native_issuer:risegramclub")
+            if not bot_id:
+                return "⚠️ Нужно снять метку вручную"
+            async with nftnames.native_session() as session:
+                async with session.post(nftnames.base() + "/v1/accounts/resolve-by-phone",
+                                        json={"phone": (await db.get_user(uid))["phone"]}) as response:
+                    peer = await response.json(content_type=None)
+                if not peer.get("found"):
+                    return "⚠️ MTProto аккаунт не найден, требуется проверка"
+                from issuer_marks import command
+                await command(session, "/v1/botverification/marks/revoke",
+                              "rg-refund-club-" + str(p["id"]), {
+                                  "verifier_bot_id": int(bot_id), "peer_type": "user",
+                                  "peer_id": int(peer["user_id"]),
+                              })
+            await db.execute("DELETE FROM purchased_profile_marks WHERE tg_id=? AND issuer='risegramclub'", (uid,))
+            return "метка RiseGram Club снята"
         if kind == "cg":
             peer_kind, peer_id, name = a[0], int(a[1]), a[2]
             snapshot = await nftnames.prepare(peer_kind, str(peer_id), name, "revoke")
