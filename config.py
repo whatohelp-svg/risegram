@@ -54,6 +54,7 @@ MAX_STARS_PER_INVOICE = 10_000           # лимит одного счёта в
 
 VERIFY_PRICE = 50                        # paid Major status
 CHANNEL_NFT_PRICE = 40                   # native group/channel collectible username
+ACCOUNT_RISEGRAM_CLUB_PRICE = 50          # cosmetic mark; not official verification
 CHANNEL_MAJOR_PRICE = 50                 # paid Major issuer mark for a channel/group
 CHANNEL_RISEGRAM_PRICE = 50              # commercial RiseGram issuer (not official)
 SCAM_PRICE = 0                           # reports are free; warnings are NOT for sale
