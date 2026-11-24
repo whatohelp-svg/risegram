@@ -203,6 +203,14 @@ SCHEMA = [
         created_at TEXT NOT NULL,
         PRIMARY KEY(target, label)
     )""",
+    """CREATE TABLE IF NOT EXISTS purchased_profile_marks (
+        tg_id INTEGER NOT NULL,
+        issuer TEXT NOT NULL CHECK(issuer='risegramclub'),
+        charge_id TEXT NOT NULL UNIQUE,
+        created_at TEXT NOT NULL,
+        PRIMARY KEY(tg_id, issuer),
+        FOREIGN KEY(tg_id) REFERENCES users(tg_id) ON DELETE CASCADE
+    )""",
     """CREATE TABLE IF NOT EXISTS testers (
         tg_id INTEGER PRIMARY KEY,
         username TEXT,
