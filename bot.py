@@ -233,6 +233,9 @@ def main_kb():
 @router.message(CommandStart())
 async def cmd_start(message: Message, state: FSMContext, user: dict):
     await state.clear()
+    import terms_policy
+    if not await terms_policy.accepted(int(user["tg_id"])):
+        return await show(message,terms_policy.PROMPT,terms_policy.markup())
     if (message.text or "").split(maxsplit=1)[1:] == ["games"]:
         await games_hub(message, user)
         return
@@ -241,6 +244,9 @@ async def cmd_start(message: Message, state: FSMContext, user: dict):
 
 @router.callback_query(F.data == "menu:main")
 async def cb_main(call: CallbackQuery, user: dict):
+    import terms_policy
+    if not await terms_policy.accepted(int(user["tg_id"])):
+        return await show(call,terms_policy.PROMPT,terms_policy.markup())
     await show(call, await main_text(user), main_kb())
 
 
@@ -319,6 +325,20 @@ async def cmd_terms(message: Message):
     await show(message,terms_policy.PROMPT,terms_policy.markup())
 
 
+@router.callback_query(F.data.startswith("purchase_terms:"))
+async def cb_purchase_terms(call:CallbackQuery,user:dict):
+    import terms_policy
+    uid=int(user["tg_id"])
+    if call.data=="purchase_terms:decline:"+terms_policy.PURCHASE_VERSION:
+        return await show(call,"Покупка отменена. Средства не списаны.",kb(back_row("menu:main")))
+    if call.data!="purchase_terms:accept:"+terms_policy.PURCHASE_VERSION:
+        return await call.answer("Редакция изменилась. Открой магазин заново",show_alert=True)
+    if await db.telegram_chat_id(uid)!=call.from_user.id:
+        return await call.answer("Не удалось подтвердить аккаунт",show_alert=True)
+    await terms_policy.accept_purchase(uid)
+    return await show(call,"✅ Условия покупки приняты. Выбери товар заново — повторно принимать условия не нужно.",kb([btn("Донат","donat:hub"),btn("Маркет","market:hub")],back_row("menu:main")))
+
+
 @router.callback_query(F.data.startswith("terms:"))
 async def cb_terms(call:CallbackQuery,user:dict):
     import terms_policy
@@ -330,7 +350,9 @@ async def cb_terms(call:CallbackQuery,user:dict):
     if await db.telegram_chat_id(int(user["tg_id"]))!=call.from_user.id:
         return await call.answer("Не удалось подтвердить аккаунт",show_alert=True)
     sent=await terms_policy.confirm(call.bot,int(user["tg_id"]))
-    await show(call,"✅ Условия приняты. Код отправлен отдельным сообщением." if sent else "✅ Условия приняты. Запроси код входа в клиенте заново.",kb([btn("Код входа","menu:code")],back_row("menu:main")))
+    if sent:
+        return await show(call,"✅ Условия приняты. Код отправлен отдельным сообщением.",kb([btn("Код входа","menu:code")],back_row("menu:main")))
+    await show(call,await main_text(user),main_kb())
 
 
 @router.message(Command("code"))
@@ -448,6 +470,20 @@ async def cb_profile(call: CallbackQuery, user: dict):
 
 
 async def send_stars_invoice(bot: Bot, chat_id: int, *, title: str, description: str, payload: str, stars: int, label: str):
+    import terms_policy
+    linked=await db.get_by_telegram(chat_id)
+    if not linked:
+        # Existing callers sometimes supply the local account ID.
+        linked=await db.get_user(chat_id)
+    if not linked:
+        raise economy.WalletError("Аккаунт оплаты не найден")
+    uid=int(linked["tg_id"])
+    if not await terms_policy.purchase_accepted(uid):
+        await safe_send(bot,uid,terms_policy.PURCHASE_PROMPT,terms_policy.purchase_markup())
+        raise economy.WalletError("Примите условия покупки, затем повторите выбор товара")
+    chat_id=await db.telegram_chat_id(uid)
+    if not chat_id:
+        raise economy.WalletError("Аккаунт оплаты не привязан")
     await bot.send_invoice(
         chat_id=chat_id,
         title=title[:32],
@@ -848,6 +884,9 @@ async def msg_hold_target(message: Message,state: FSMContext,user: dict):
 
 @router.callback_query(F.data.startswith("hold:buy:"))
 async def cb_hold_buy(call: CallbackQuery,user: dict):
+    import terms_policy
+    if not await terms_policy.purchase_accepted(int(user["tg_id"])):
+        return await show(call,terms_policy.PURCHASE_PROMPT,terms_policy.purchase_markup())
     if not await need_feature(call,"verification"):
         return
     import hold_shop
@@ -1321,6 +1360,10 @@ async def on_pre_checkout(q: PreCheckoutQuery):
     linked = await db.get_by_telegram(q.from_user.id)
     if not linked:
         await q.answer(ok=False, error_message="Сначала запустите бота для привязки аккаунта.")
+        return
+    import terms_policy
+    if not await terms_policy.purchase_accepted(int(linked["tg_id"])):
+        await q.answer(ok=False,error_message="Примите условия покупки в @risegrambot и повторите оплату")
         return
     err = await validate_order(linked["tg_id"], q.invoice_payload, q.total_amount)
     if err:
@@ -2352,6 +2395,9 @@ async def cb_market_buy(call: CallbackQuery, user: dict):
 
 @router.callback_query(F.data.regexp(r"^market:buyok:\d+$"))
 async def cb_market_buyok(call: CallbackQuery, user: dict):
+    import terms_policy
+    if not await terms_policy.purchase_accepted(int(user["tg_id"])):
+        return await show(call,terms_policy.PURCHASE_PROMPT,terms_policy.purchase_markup())
     if not await need_feature(call, "market"):
         return
     ok, msg, info = await db.buy_listing(user["tg_id"], int(call.data.split(":")[2]))
