@@ -142,6 +142,9 @@ async def execute(sql: str, params: Iterable[Any] = ()) -> int:
 # ─────────────────────────────── схема ──────────────────────────────────────
 
 SCHEMA = [
+    """CREATE TABLE IF NOT EXISTS rg_terms_acceptance (
+        tg_id INTEGER NOT NULL, version TEXT NOT NULL, document_hash TEXT NOT NULL,
+        accepted_at TEXT NOT NULL, PRIMARY KEY(tg_id,version))""",
     """CREATE TABLE IF NOT EXISTS native_game_results(
         game_id INTEGER PRIMARY KEY, won INTEGER NOT NULL, payout TEXT NOT NULL, refunded INTEGER NOT NULL)""",
     """CREATE TABLE IF NOT EXISTS native_wallet_jobs(
