@@ -44,6 +44,8 @@ COPY server/patches/keep_frozen_profiles.py /tmp/keep_frozen_profiles.py
 RUN python3 /tmp/keep_frozen_profiles.py
 COPY server/patches/owner_gift_permit.go /src/internal/rpc/risegram_owner_gift_permit.go
 RUN gofmt -w /src/internal/rpc/risegram_owner_gift_permit.go
+COPY server/patches/gift_value_preferences.go /src/internal/rpc/risegram_gift_value_preferences.go
+RUN gofmt -w /src/internal/rpc/risegram_gift_value_preferences.go
 RUN go mod download
 ENV CGO_ENABLED=0
 
