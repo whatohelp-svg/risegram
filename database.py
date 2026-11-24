@@ -275,6 +275,7 @@ SCHEMA = [
         kind TEXT,
         target TEXT,
         reason TEXT,
+        label TEXT NOT NULL DEFAULT 'SCAM',
         status TEXT DEFAULT 'unpaid',
         price INTEGER DEFAULT 0,
         charge_id TEXT,
@@ -500,6 +501,7 @@ COLUMNS: dict[str, dict[str, str]] = {
         "last_bonus_at": "TEXT", "dox_claimed": "INTEGER DEFAULT 0", "created_at": "TEXT",
         "last_seen": "TEXT",
     },
+    "scam_requests": {"label": "TEXT NOT NULL DEFAULT 'SCAM'"},
     "testers": {"username": "TEXT", "added_at": "TEXT", "added_by": "INTEGER"},
     "admin_logs": {"admin_id": "INTEGER", "action_text": "TEXT", "created_at": "TEXT"},
     "user_nft_inventory": {
@@ -1517,11 +1519,14 @@ async def add_verified_entity(owner_id: int, kind: str, target: str) -> None:
     )
 
 
-async def create_scam_request(requester_id: int, kind: str, target: str, reason: str, price: int) -> int:
+async def create_scam_request(requester_id: int, kind: str, target: str, reason: str, price: int,
+                              label: str = "SCAM") -> int:
+    if label not in ("SCAM", "FAKE"):
+        raise ValueError("Unsupported safety report type")
     async with connect() as db:
         cur = await db.execute(
-            "INSERT INTO scam_requests (requester_id,kind,target,reason,status,price,created_at) VALUES (?,?,?,?, 'unpaid',?,?)",
-            (requester_id, kind, norm_username(target), reason, price, now()),
+            "INSERT INTO scam_requests (requester_id,kind,target,reason,label,status,price,created_at) VALUES (?,?,?,?,?, 'unpaid',?,?)",
+            (requester_id, kind, norm_username(target), reason, label, price, now()),
         )
         await db.commit()
         return cur.lastrowid
@@ -1556,7 +1561,7 @@ async def is_scam_target(target: str | None) -> bool:
     t = norm_username(target)
     if not t:
         return False
-    return bool(await scalar("SELECT COUNT(*) FROM scam_requests WHERE status='approved' AND target=?", (t,)))
+    return bool(await scalar("SELECT COUNT(*) FROM scam_requests WHERE status='approved' AND label='SCAM' AND target=?", (t,)))
 
 
 async def revoke_scam_label(target: str) -> int:
