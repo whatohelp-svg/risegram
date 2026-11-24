@@ -31,6 +31,7 @@ import database as db
 import gift_drops
 import native_economy as economy
 import donat_native as native_shop
+import psycopg
 from admin import admin_router
 from aiohttp import ClientError
 from api import native_wallet, client_wallet_line, start_api, sync_collectible_usernames, sync_mtproto_verification
@@ -603,6 +604,128 @@ async def is_chat_admin(bot: Bot, name: str, uid: int) -> bool | None:
     return m.status in ("creator", "administrator")
 
 
+@router.callback_query(F.data == "donat:chats")
+async def cb_native_chat_shop(call: CallbackQuery):
+    if not await need_feature(call, "store"):
+        return
+    await show(call,
+        "📣 <b>Донат для групп и каналов RiseGram</b>\n\n"
+        f"🏷 NFT-юзернейм — {config.CHANNEL_NFT_PRICE} ⭐\n"
+        f"💠 Major — {config.CHANNEL_MAJOR_PRICE} ⭐\n"
+        f"🟢 RiseGram — {config.CHANNEL_RISEGRAM_PRICE} ⭐\n\n"
+        "Платные метки обозначаются как коммерческие — они не равны официальной галочке\n"
+        "Только создатель чата может оформить покупку",
+        kb(
+            [btn("👥 Для группы", "chatshop:kind:group")],
+            [btn("📣 Для канала", "chatshop:kind:channel")],
+            back_row("donat:hub"),
+        ))
+
+
+@router.callback_query(F.data.startswith("chatshop:kind:"))
+async def cb_native_chat_kind(call: CallbackQuery):
+    kind = call.data.split(":")[-1]
+    if kind not in native_shop.KINDS or not await need_feature(call, "store"):
+        return
+    await show(call, "Выбери товар для " + ("группы" if kind == "group" else "канала") + ":",
+        kb(
+            [btn(f"🏷 NFT-юзернейм · {config.CHANNEL_NFT_PRICE} ⭐", f"chatshop:pick:{kind}:name")],
+            [btn(f"💠 Major · {config.CHANNEL_MAJOR_PRICE} ⭐", f"chatshop:pick:{kind}:major")],
+            [btn(f"🟢 RiseGram (платная метка) · {config.CHANNEL_RISEGRAM_PRICE} ⭐",
+                 f"chatshop:pick:{kind}:risegram")],
+            back_row("donat:chats"),
+        ))
+
+
+@router.callback_query(F.data.startswith("chatshop:pick:"))
+async def cb_native_chat_pick(call: CallbackQuery, state: FSMContext):
+    parts = call.data.split(":")
+    if len(parts) != 4 or parts[2] not in native_shop.KINDS or parts[3] not in ("name", "major", "risegram"):
+        return
+    if not await need_feature(call, "store"):
+        return
+    await state.set_state(Flow.native_chat_target)
+    await state.set_data({"native_kind": parts[2], "native_product": parts[3]})
+    await show(call, "Отправь существующий @юзернейм или числовой ID "
+               "своей группы/канала в RiseGram\n\n"
+               "Проверка идёт по базе RiseGram — создатель чата обязан совпасть с покупателем",
+               cancel_kb("donat:chats"))
+
+
+async def chat_shop_invoice(bot: Bot, uid: int, kind: str, channel_id: int,
+                            product: str, name: str = ""):
+    if product == "name":
+        payload, price, title = (f"cg:{kind}:{channel_id}:{name}",
+                                 config.CHANNEL_NFT_PRICE, "NFT для чата RiseGram")
+    else:
+        price = config.CHANNEL_MAJOR_PRICE if product == "major" else config.CHANNEL_RISEGRAM_PRICE
+        payload, title = f"vb:{kind}:{channel_id}:{product}", f"Метка {product} для чата"
+    chat_id = await db.telegram_chat_id(uid)
+    if chat_id is None:
+        raise native_shop.NativePurchaseError("Нет связи с Telegram-ботом оплаты")
+    await send_stars_invoice(bot, chat_id, title=title, stars=price,
+        payload=payload, label="RiseGram · чат", description=(
+            f"{'NFT @'+name if product=='name' else 'Коммерческая метка '+product} "
+            f"для {kind} #{channel_id} в RiseGram"
+        ))
+
+
+@router.message(StateFilter(Flow.native_chat_target), F.text)
+async def msg_native_chat_target(message: Message, state: FSMContext, user: dict):
+    data = await state.get_data()
+    kind, product = data.get("native_kind"), data.get("native_product")
+    if kind not in native_shop.KINDS or product not in ("name", "major", "risegram"):
+        await state.clear()
+        return await message.answer("Сессия устарела — открой донат снова")
+    try:
+        peer = await native_shop.validate_chat_owner(int(user["tg_id"]), kind, message.text)
+    except (native_shop.NativePurchaseError, OSError, psycopg.Error) as exc:
+        return await message.answer("❌ " + esc(str(exc)[:200]))
+    channel_id = peer["channel_id"]
+    await state.update_data(channel_id=channel_id)
+    if product == "name":
+        await state.set_state(Flow.native_chat_username)
+        return await message.answer(f"✅ Владелец чата <code>{channel_id}</code> подтверждён\n"
+            "Отправь новый свободный @юзернейм (4–32 символа)")
+    await state.clear()
+    try:
+        await chat_shop_invoice(message.bot, int(user["tg_id"]), kind, channel_id, product)
+    except Exception:
+        log.exception("Native chat invoice failed")
+        return await message.answer("❌ Счёт не создан — проверь настройки оплаты")
+    await message.answer("✅ Счёт на платную метку отправлен")
+
+
+@router.message(StateFilter(Flow.native_chat_username), F.text)
+async def msg_native_chat_username(message: Message, state: FSMContext, user: dict):
+    data = await state.get_data()
+    kind, channel_id = data.get("native_kind"), data.get("channel_id")
+    if kind not in native_shop.KINDS or not channel_id:
+        await state.clear()
+        return await message.answer("Сессия устарела — открой донат снова")
+    try:
+        name = await native_shop.check_chat_username(message.text)
+        await native_shop.validate_chat_owner(int(user["tg_id"]), kind, str(channel_id))
+    except (native_shop.NativePurchaseError, OSError, psycopg.Error) as exc:
+        return await message.answer("❌ " + esc(str(exc)[:200]))
+    await state.clear()
+    try:
+        await chat_shop_invoice(message.bot, int(user["tg_id"]), kind,
+                                int(channel_id), "name", name)
+    except Exception:
+        log.exception("Native username invoice failed")
+        return await message.answer("❌ Счёт не создан — попробуй снова")
+    await message.answer(f"✅ Счёт на NFT @{esc(name)} отправлен")
+
+
+@router.callback_query(F.data == "verify:official")
+async def official_verification_application(call: CallbackQuery):
+    await show(call, "☑️ <b>Официальная галочка RiseGram</b>\n\n"
+        "Не продаётся — модерация проверяет подлинность аккаунта или канала\n"
+        "Отправь запрос через «Поддержка» и укажи ссылку на профиль и основания",
+        kb([btn("🆘 Написать в поддержку", "menu:support")], back_row("donat:verify")))
+
+
 @router.callback_query(F.data == "donat:verify")
 async def cb_verify_hub(call: CallbackQuery):
     if not await need_feature(call, "verification"):
@@ -995,8 +1118,8 @@ async def expected_price(payload: str) -> int | None:
         if kind == "cg":
             return config.CHANNEL_NFT_PRICE
         if kind == "vb":
-            return (config.CHANNEL_MAJOR_PRICE if a[0] == "major"
-                    else config.CHANNEL_RISEGRAM_PRICE if a[0] == "risegram" else None)
+            return (config.CHANNEL_MAJOR_PRICE if a[2] == "major"
+                    else config.CHANNEL_RISEGRAM_PRICE if a[2] == "risegram" else None)
         if kind == "sc":
             return None  # warning marks cannot be bought
         if kind == "nm":
@@ -1048,10 +1171,13 @@ async def validate_order(uid: int, payload: str, total: int) -> str | None:
         elif kind == "nu":
             if not valid_username(a[0]) or await db.username_taken(a[0]) or await db.reserved_by_other("username", a[0], uid):
                 return "Юзернейм уже занят."
+    except native_shop.NativePurchaseError as exc:
+        return str(exc)[:180]
     except (IndexError, ValueError):
         return "Счёт повреждён."
-    except (native_shop.NativePurchaseError, OSError) as exc:
-        return str(exc)[:180]
+    except (OSError, psycopg.Error) as exc:
+        log.warning("Native shop precheckout unavailable: %s", type(exc).__name__)
+        return "Сервер RiseGram недоступен — повторите покупку позже"
     return None
 
 
