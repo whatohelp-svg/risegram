@@ -212,7 +212,7 @@ async def schedule(phone: str, actor: int, key: str,
     try:
         await native_action("set-frozen", "rg-admin-archive-" + key,
                             actor, {"user_id": native_id, "frozen": True,
-                                    "freeze_until": (due + timedelta(days=365)).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                                    "freeze_until": due.strftime("%Y-%m-%dT%H:%M:%SZ"),
                                     "freeze_appeal_url": "https://t.me/risegrambot"})
     except Exception as exc:
         # A network timeout may mean the server already froze the peer. Keep a
