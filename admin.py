@@ -11,6 +11,7 @@ import math
 import re
 import secrets
 
+import account_recovery as recovery
 import nft_username_admin as nftnames
 import donat_native as native_shop
 import psycopg
@@ -63,6 +64,7 @@ admin_router.callback_query.filter(AdminOnly(), F.message.chat.type == "private"
 class Adm(StatesGroup):
     input = State()      # универсальный ввод; действие лежит в data["act"]
     delete_confirm = State()
+    restore_confirm = State()
     nft_confirm = State()
     cast_confirm = State()
 
@@ -918,67 +920,156 @@ async def apply_balance(bot, uid, cur, delta, key):
     return f"Готово. Баланс: {fmt_num(balance)} {cur}."
 
 
-async def native_account_request(path, fields):
-    if not config.MTPROTO_ADMIN_API_TOKEN or not config.MTPROTO_ADMIN_API_URL:
-        raise ValueError("native account service unavailable")
-    async with ClientSession(headers={"Authorization": "Bearer " + config.MTPROTO_ADMIN_API_TOKEN},
-                             timeout=ClientTimeout(total=12)) as session:
-        async with session.post(config.MTPROTO_ADMIN_API_URL.rstrip("/") + "/v1/accounts/" + path,
-                                json=fields) as response:
-            response.raise_for_status()
-            return await response.json()
-
-
 async def deletion_preview(event, state, raw):
-    if not re.fullmatch(r"\+?[0-9 ()-]{7,32}", raw) or not 7 <= len(db.digits_of(raw)) <= 15:
-        return await event.answer("Введите полный номер RiseGram, включая код страны.")
-    phone = db.digits_of(raw)
-    local = await db.fetchone("SELECT tg_id,name FROM users WHERE phone_digits=?", (phone,))
-    if local and local["tg_id"] == config.OWNER_ID:
-        return await event.answer("Удаление аккаунта владельца запрещено.")
+    if getattr(event, "from_user", None) is None or event.from_user.id != config.OWNER_TELEGRAM_ID:
+        return await event.answer("Только владелец может удалять аккаунты")
     try:
-        peer = await native_account_request("resolve-by-phone", {"phone": phone})
-        native_id = int(peer["user_id"]) if peer["found"] else 0
-    except (ClientError, TimeoutError, KeyError, TypeError, ValueError):
-        return await event.answer("Не удалось проверить номер на сервере. Попробуйте ещё раз.")
-    if not native_id and not local:
-        return await event.answer("Аккаунт с таким номером не найден.")
-    key = secrets.token_hex(12)
+        info = await recovery.preview(raw)
+        if info["receipt"] and info["receipt"]["status"] in recovery.ACTIVE:
+            return await show(event,
+                "Аккаунт уже ожидает удаления. Его можно восстановить.",
+                kb([btn("↩️ Восстановить", "adm:recoverpick:" + info["phone"])], home_row()))
+        if info["pending"]:
+            return await show(event,
+                "Удаление уже запрошено из клиента. Его можно отменить в разделе восстановления",
+                kb([btn("↩️ Восстановить", "adm:recoverpick:" + info["phone"])], home_row()))
+        if not info["native"]:
+            return await event.answer("Нет native аккаунта RiseGram. Удаление остановлено.")
+    except (recovery.RecoveryError, psycopg.Error, ClientError, TimeoutError, OSError) as exc:
+        log.warning("Deletion preview failed: %s", type(exc).__name__)
+        return await event.answer("❌ " + esc(str(exc)[:200]))
+    token = secrets.token_hex(12)
     await state.set_state(Adm.delete_confirm)
-    await state.set_data(dict(key=key, phone=phone, native_id=native_id, local_id=local["tg_id"] if local else 0))
-    target = esc(local["name"]) if local else f"ID {native_id}"
-    await show(event, f"Удалить аккаунт {target} с номером <code>+{phone}</code>? Сессии будут завершены. Восстановить аккаунт нельзя.",
-               kb([btn("Удалить аккаунт", "adm:delconfirm:" + key, style="danger")], cancel_row()))
+    await state.set_data({
+        "key": token, "phone": info["phone"],
+        "native_id": int(info["native"]["id"]),
+        "local_id": int(info["local"]["tg_id"]) if info["local"] else 0,
+        "actor": event.from_user.id, "created": time.time(),
+    })
+    title = esc(info["local"]["name"]) if info["local"] else "native ID " + str(info["native"]["id"])
+    await show(event,
+        f"🗑 <b>Удалить аккаунт {title}?</b>\n\n"
+        f"Номер: <code>+{info['phone']}</code>\n\n"
+        "Аккаунт будет ограничен на сервере MTProto на 30 дней.\n"
+        "В течение этого срока его можно восстановить по номеру из админки.\n"
+        "Сообщения, NFT, балансы и сессии не удаляются на этапе ожидания.\n"
+        "После 30 дней удаление окончательное.",
+        kb([btn("🗑 Запланировать удаление", "adm:delconfirm:" + token, style="danger")],
+           [btn("↩️ Отмена", "adm:home")]))
 
 
 async def confirm_account_deletion(call, state, key):
-    target = await state.get_data()
-    if not key or key != target.get("key") or await state.get_state() != Adm.delete_confirm.state:
-        return await call.answer("Подтверждение устарело. Выберите номер заново.", show_alert=True)
-    uid, peer, phone = target["local_id"], target["native_id"], target["phone"]
-    if uid == config.OWNER_ID:
-        return await call.answer("Удаление аккаунта владельца запрещено.", show_alert=True)
+    data = await state.get_data()
+    if (not key or key != data.get("key")
+            or await state.get_state() != Adm.delete_confirm.state
+            or call.from_user.id != config.OWNER_TELEGRAM_ID
+            or data.get("actor") != call.from_user.id
+            or time.time() - float(data.get("created") or 0) > 600):
+        return await call.answer("Подтверждение устарело. Выбери номер снова.", show_alert=True)
     try:
-        current = await db.fetchone("SELECT tg_id FROM users WHERE phone_digits=?", (phone,))
-        resolved = await native_account_request("resolve-by-phone", {"phone": phone})
-        actual_peer = int(resolved["user_id"]) if resolved["found"] else 0
-        if (current and current["tg_id"] != uid) or (actual_peer and actual_peer != peer):
-            await state.clear()
-            return await call.answer("У номера изменился владелец. Повторите поиск.", show_alert=True)
-        if peer:
-            result = await native_account_request("delete", {
-                "user_id": peer, "command_id": "delete-" + key,
-                "actor": f"risegram-admin-{call.from_user.id}", "reason": "Confirmed account removal",
-            })
-            if result.get("status") != "completed":
-                raise ValueError("deletion pending")
-        if uid and current:
-            await db.delete_user(uid, expected_phone=phone)
-    except (ClientError, TimeoutError, ValueError, KeyError, TypeError):
-        return await call.answer("Удаление не подтверждено. Повторите проверку этой кнопкой.", show_alert=True)
+        result = await recovery.schedule(
+            data["phone"], call.from_user.id, key,
+            expected_native_id=int(data["native_id"]),
+            expected_local_id=int(data["local_id"]),
+        )
+    except (recovery.RecoveryError, psycopg.Error, ClientError, TimeoutError, OSError) as exc:
+        log.warning("Recoverable deletion failed: %s", type(exc).__name__)
+        return await show(call, "❌ Не удалось запланировать удаление: " + esc(str(exc)[:180]),
+                          kb(home_row()))
     await state.clear()
-    await audit(f"Удаление аккаунта подтверждено: admin={call.from_user.id}, peer={peer}, account={uid}")
-    await show(call, "Аккаунт удалён.", kb(home_row()))
+    await audit(f"30-дневное удаление: phone=+{data['phone']} native={result['native_id']} "
+                f"receipt={result['id']} admin={call.from_user.id}")
+    return await show(call,
+        f"✅ Аккаунт ограничен на MTProto до <b>{result['due']} UTC</b>\n"
+        "Его данные не уничтожены. Восстановление через /owner → «Восстановить по номеру»",
+        kb([btn("♻️ Восстановить", "adm:recoverpick:" + data["phone"])],home_row()))
+
+
+async def restoration_preview(event, state, raw):
+    if getattr(event,"from_user",None) is None or event.from_user.id != config.OWNER_TELEGRAM_ID:
+        return await event.answer("Только владелец может восстанавливать аккаунты")
+    try:
+        info = await recovery.preview(raw)
+        if not info["native"]:
+            raise recovery.RecoveryError("Native аккаунт отсутствует. Требуется ручное восстановление из резервной копии.")
+        record = info["receipt"]
+        is_admin_pending = bool(record and record["status"] in ("active","preparing"))
+        is_client_pending = bool(info["pending"])
+        if not is_admin_pending and not is_client_pending:
+            raise recovery.RecoveryError("Для этого номера нет удаления, которое можно отменить")
+        if record and record["status"] == "executing":
+            raise recovery.RecoveryError("Окончательное удаление уже началось")
+        native_id = int(info["native"]["id"])
+    except (recovery.RecoveryError, psycopg.Error, ClientError, TimeoutError, OSError) as exc:
+        return await show(event, "❌ " + esc(str(exc)[:210]),
+                          kb([btn("📞 Другой номер", "adm:restorephone")],home_row()))
+    token = secrets.token_hex(12)
+    await state.set_state(Adm.restore_confirm)
+    await state.set_data({"key": token, "phone": info["phone"], "native_id": native_id,
+                          "record_id": int(record["id"]) if is_admin_pending else 0,
+                          "actor": event.from_user.id, "created": time.time()})
+    desc = []
+    if is_admin_pending:
+        desc.append(f"Удаление администратором до <b>{esc(record['execute_at'])} UTC</b>")
+    if is_client_pending:
+        desc.append(f"Удаление из клиента до <b>{info['pending']['execute_at']}</b>")
+    return await show(event,
+        f"♻️ <b>Восстановить аккаунт?</b>\n\n"
+        f"Номер: <code>+{info['phone']}</code>\n"
+        f"Native ID: <code>{native_id}</code>\n\n"
+        + "\n".join(desc) + "\n\n"
+        "Отмена удаления вернёт доступ к тому же профилю, без смены ID, NFT и балансов",
+        kb([btn("✅ Восстановить аккаунт", "adm:restoreconfirm:" + token, style="success")],
+           [btn("↩️ Отмена", "adm:home")]))
+
+
+async def confirm_account_restoration(call, state, key):
+    data = await state.get_data()
+    if (not key or key != data.get("key")
+            or await state.get_state() != Adm.restore_confirm.state
+            or call.from_user.id != config.OWNER_TELEGRAM_ID
+            or data.get("actor") != call.from_user.id
+            or time.time() - float(data.get("created") or 0) > 600):
+        return await call.answer("Подтверждение устарело. Проверь номер снова.", show_alert=True)
+    try:
+        result = await recovery.restore(
+            data["phone"], call.from_user.id,
+            expected_record_id=int(data["record_id"]),
+            expected_native_id=int(data["native_id"]),
+        )
+    except (recovery.RecoveryError, psycopg.Error, ClientError, TimeoutError, OSError) as exc:
+        log.warning("Account recovery failed: %s", type(exc).__name__)
+        return await show(call, "❌ Сервер не подтвердил восстановление: " + esc(str(exc)[:180]),
+                          kb([btn("🔄 Повторить", "adm:recoverpick:" + data["phone"])],home_row()))
+    await state.clear()
+    await audit(f"Восстановление: phone=+{data['phone']} native={result['native_id']} "
+                f"actor={call.from_user.id} admin={result['admin_cancelled']} "
+                f"client={result['client_cancelled']}")
+    return await show(call,
+        f"✅ <b>Аккаунт +{data['phone']} восстановлен на сервере RiseGram</b>\n"
+        f"Native ID: <code>{result['native_id']}</code>\n"
+        "Профиль, сообщения, NFT и балансы сохранены",
+        kb(home_row()))
+
+
+async def screen_recoverable(event):
+    if getattr(event,"from_user",None) is None or event.from_user.id != config.OWNER_TELEGRAM_ID:
+        return await event.answer("Только владелец")
+    rows = await recovery.recoverable_records()
+    description = "♻️ <b>Аккаунты с удалением на ожидании</b>\n\n"
+    buttons = []
+    for item in rows:
+        description += (f"• <code>+{item['phone_digits']}</code> · "
+                        f"{esc(item['status'])} · до {esc(item['execute_at'])} UTC\n")
+        if item["status"] in ("active","preparing"):
+            buttons.append([btn("↩️ Вернуть +" + item["phone_digits"],
+                                "adm:recoverpick:" + item["phone_digits"])])
+    if not rows:
+        description += "В списке нет удалений из админки\n"
+    description += "\nУдаления из клиента ищутся по номеру отдельно"
+    return await show(event, description,
+        kb(*buttons[:12], [btn("📞 Восстановить по номеру", "adm:restorephone", style="success")],
+           home_row()))
 
 
 @admin_router.message(StateFilter(Adm.input), F.text)
