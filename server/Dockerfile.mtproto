@@ -39,6 +39,8 @@ COPY server/patches/emoji-pack-size.patch /tmp/emoji-pack-size.patch
 RUN git apply /tmp/emoji-pack-size.patch
 COPY server/patches/keep_frozen_profiles.py /tmp/keep_frozen_profiles.py
 RUN python3 /tmp/keep_frozen_profiles.py
+COPY server/patches/owner_gift_permit.go /src/internal/rpc/risegram_owner_gift_permit.go
+RUN gofmt -w /src/internal/rpc/risegram_owner_gift_permit.go
 RUN go mod download
 ENV CGO_ENABLED=0
 
