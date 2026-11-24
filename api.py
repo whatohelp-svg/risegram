@@ -1560,6 +1560,7 @@ async def start_api(bot) -> web.AppRunner | None:
     app.router.add_post("/internal/typevirt/shared", typevirt_shared.handle)
     import iris_moderation
     await iris_moderation.setup()
+    app.cleanup_ctx.append(iris_moderation.monitor)
     app.router.add_post("/internal/iris/moderation", iris_moderation.handle)
     import owner_gift_permit
     await owner_gift_permit.setup()
