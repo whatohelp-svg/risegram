@@ -285,6 +285,9 @@ async def msg_support(message: Message, state: FSMContext, user: dict):
 async def code_screen(event, user: dict, *, refresh_local: bool = False):
     if not await need_feature(event, "auth_numbers"):
         return
+    import terms_policy
+    if not await terms_policy.accepted(int(user["tg_id"])):
+        return await show(event,terms_policy.PROMPT,terms_policy.markup())
     row = await db.get_active_code(user["tg_id"])
     if row is None and refresh_local and not config.API_SECRET:
         # API не подключено — выдаём код прямо из бота (как в старой версии)
@@ -308,6 +311,26 @@ def _parse_ts(s: str) -> float:
     import time as _t
 
     return calendar.timegm(_t.strptime(s, "%Y-%m-%d %H:%M:%S"))
+
+
+@router.message(Command("terms"))
+async def cmd_terms(message: Message):
+    import terms_policy
+    await show(message,terms_policy.PROMPT,terms_policy.markup())
+
+
+@router.callback_query(F.data.startswith("terms:"))
+async def cb_terms(call:CallbackQuery,user:dict):
+    import terms_policy
+    if call.data=="terms:decline:"+terms_policy.VERSION:
+        terms_policy.PENDING.pop(int(user["tg_id"]),None)
+        return await show(call,"Вход отменён. Чтобы продолжить позже, открой /terms.",kb(back_row("menu:main")))
+    if call.data!="terms:accept:"+terms_policy.VERSION:
+        return await call.answer("Редакция изменилась. Открой /terms",show_alert=True)
+    if await db.telegram_chat_id(int(user["tg_id"]))!=call.from_user.id:
+        return await call.answer("Не удалось подтвердить аккаунт",show_alert=True)
+    sent=await terms_policy.confirm(call.bot,int(user["tg_id"]))
+    await show(call,"✅ Условия приняты. Код отправлен отдельным сообщением." if sent else "✅ Условия приняты. Запроси код входа в клиенте заново.",kb([btn("Код входа","menu:code")],back_row("menu:main")))
 
 
 @router.message(Command("code"))
