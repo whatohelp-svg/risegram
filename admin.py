@@ -745,10 +745,10 @@ async def screen_scam(call: CallbackQuery, page: int):
     total = await db.scalar("SELECT COUNT(*) FROM scam_requests WHERE status='pending'")
     rows_db = await db.list_scam("pending", PAGE, page * PAGE)
     approved = await db.scalar("SELECT COUNT(*) FROM scam_requests WHERE status='approved'")
-    text = f"⚠️ <b>Заявки SCAM</b> (на проверке: {total}, активных меток: {approved})\n\n"
+    text = f"⚠️ <b>Жалобы SCAM / FAKE</b> (на проверке: {total}, одобренных: {approved})\n\n"
     rows = []
     for r in rows_db:
-        text += f"<b>#{r['id']}</b> @{esc(r['target'])} ({esc(r['kind'])})\nОт <code>{r['requester_id']}</code>: {esc(r['reason'])}\n\n"
+        text += f"<b>#{r['id']}</b> [{esc(r.get('label') or 'SCAM')}] @{esc(r['target'])} ({esc(r['kind'])})\nОт <code>{r['requester_id']}</code>: {esc(r['reason'])}\n\n"
         rows.append([btn(f"✅ #{r['id']}", f"adm:scam:ok:{r['id']}", style="success"), btn(f"❌ #{r['id']} + возврат", f"adm:scam:no:{r['id']}", style="danger")])
     if not rows_db:
         text += "Очередь пуста."
@@ -765,17 +765,18 @@ async def scam_decide(call: CallbackQuery, rid: int, approve: bool):
         return
     if approve:
         kind = "user" if req["kind"] == "account" else req["kind"]
+        label = req.get("label") or "SCAM"
         try:
             await native_shop.change_risk_label(
-                "@"+req["target"], kind, "SCAM", True, req["reason"],
+                "@"+req["target"], kind, label, True, req["reason"],
                 int(call.from_user.id), f"report-{rid}")
         except (native_shop.NativePurchaseError, psycopg.Error, OSError) as exc:
             return await call.answer("MTProto не подтвердил метку: " + str(exc)[:130], show_alert=True)
         if not await db.resolve_scam(rid, "approved", config.OWNER_ID):
             return await call.answer("Заявка уже обработана.", show_alert=True)
-        await audit(f"SCAM #{rid} подтверждена в MTProto: @{req['target']}")
+        await audit(f"{label} #{rid} подтверждена в MTProto: @{req['target']}")
         await safe_send(call.bot, req["requester_id"],
-            f"✅ Жалоба #{rid}: метка SCAM на @{esc(req['target'])} подтверждена")
+            f"✅ Жалоба #{rid}: метка {label} на @{esc(req['target'])} подтверждена")
         note = f"✅ Заявка #{rid} подтверждена сервером"
     else:
         if not await db.resolve_scam(rid, "rejected", config.OWNER_ID):
