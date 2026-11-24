@@ -658,9 +658,32 @@ async def revoke_goods(p: dict) -> str:
         if kind == "nm":
             row = await db.fetchone("SELECT id FROM user_nft_inventory WHERE item_type='number' AND value=?", (a[1],))
             return await remove_nft(row["id"], force=True) if row else "номер уже удалён"
+        if kind == "cg":
+            peer_kind, peer_id, name = a[0], int(a[1]), a[2]
+            snapshot = await nftnames.prepare(peer_kind, str(peer_id), name, "revoke")
+            result = await nftnames.execute(snapshot, admin_id=config.OWNER_TELEGRAM_ID,
+                                           command_id="rg-refund-nft-" + str(p["id"]))
+            return result
+        if kind == "vb":
+            issuer, peer_id = a[2], int(a[1])
+            verifier = await db.get_meta("native_issuer:" + issuer)
+            if not verifier:
+                return "⚠️ метка не отозвана — не найден верификатор; снимите вручную"
+            from issuer_marks import command
+            async with nftnames.native_session() as session:
+                await command(session, "/v1/botverification/marks/revoke",
+                              "rg-refund-mark-" + str(p["id"]), {
+                                  "verifier_bot_id": int(verifier), "peer_type": "channel",
+                                  "peer_id": peer_id,
+                              })
+            return "коммерческая метка снята с чата"
         if kind == "sc":
             await db.execute("UPDATE scam_requests SET status='refunded' WHERE id=? AND status IN ('pending','approved')", (int(a[1]),))
             return "метка SCAM снята"
+    except (nftnames.NFTUsernameAdminError, native_shop.NativePurchaseError) as exc:
+        return "⚠️ отмена товара требует ручной проверки: " + str(exc)[:160]
+    except (ClientError, OSError, psycopg.Error) as exc:
+        return "⚠️ сервер временно недоступен: " + type(exc).__name__
     except economy.WalletError as exc:
         return f"требуется ручная проверка списания: {exc}"
     except (IndexError, ValueError):
