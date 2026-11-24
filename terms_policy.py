@@ -49,15 +49,40 @@ RiseStars, Gram, виртуальные номера, NFT-юзернеймы и 
 DIGEST=hashlib.sha256(TEXT.encode()).hexdigest()
 PENDING={}
 LOCKS=[asyncio.Lock() for _ in range(128)]
-PROMPT=("📜 <b>Условия использования RiseGram</b>\n\n"
-        "Перед получением кода прочитай соглашение и политику конфиденциальности.\n"
-        "Нажимая «Принимаю», ты подтверждаешь согласие с редакцией "+VERSION+".\n"
-        "Если не согласен, не продолжай вход.")
+BASE="https://risegram-risegram.up.railway.app"
+PRIVACY_URL=BASE+"/privacy"
+PURCHASE_URL=BASE+"/purchase-terms"
+PURCHASE_VERSION="2026-11-24.1"
+# The separate purchase document uses the same published economic terms.
+PURCHASE_TEXT=TEXT.split("3. Внутренние активы и покупки\n",1)[1].split("\n4. Общение",1)[0].strip()
+PURCHASE_DIGEST=hashlib.sha256(PURCHASE_TEXT.encode()).hexdigest()
+PROMPT=("💎 <b>Добро пожаловать в RiseGram!</b>\n\n"
+        "Перед скачиванием и использованием приложения ознакомьтесь с пользовательским соглашением и политикой конфиденциальности.\n\n"
+        "Нажимая «Принимаю», вы подтверждаете согласие с условиями пользовательского соглашения и ознакомление с политикой конфиденциальности.\n"
+        "Редакция: "+VERSION)
+PURCHASE_PROMPT=("🛒 <b>Условия покупки в RiseGram</b>\n\n"
+        "Перед первой покупкой ознакомьтесь с условиями оплаты, получения виртуальных товаров и возвратов.\n\n"
+        "Нажимая «Принимаю», вы соглашаетесь с условиями покупок. Согласие сохраняется, повторно принимать его не нужно, пока редакция не изменится.")
 
 def markup():
-    return kb([btn("📄 Соглашение и конфиденциальность",url=URL)],
-              [btn("✅ Принимаю условия","terms:accept:"+VERSION,style="success")],
+    return kb([btn("📄 Пользовательское соглашение",url=URL)],
+              [btn("🔐 Политика конфиденциальности",url=PRIVACY_URL)],
+              [btn("✅ Принимаю","terms:accept:"+VERSION,style="success")],
               [btn("Не согласен","terms:decline:"+VERSION)])
+
+def purchase_markup():
+    return kb([btn("📄 Условия покупки",url=PURCHASE_URL)],
+              [btn("✅ Принимаю","purchase_terms:accept:"+PURCHASE_VERSION,style="success")],
+              [btn("Отмена","purchase_terms:decline:"+PURCHASE_VERSION)])
+
+async def purchase_accepted(uid):
+    return bool(await db.fetchone("SELECT 1 AS x FROM rg_terms_acceptance WHERE tg_id=? AND version=? AND document_hash=?",
+                                  (uid,"purchase:"+PURCHASE_VERSION,PURCHASE_DIGEST)))
+
+async def accept_purchase(uid):
+    await db.execute("""INSERT INTO rg_terms_acceptance(tg_id,version,document_hash,accepted_at)
+        VALUES(?,?,?,?) ON CONFLICT(tg_id,version) DO NOTHING""",
+        (uid,"purchase:"+PURCHASE_VERSION,PURCHASE_DIGEST,db.now()))
 
 async def accepted(uid):
     return bool(await db.fetchone("SELECT 1 AS x FROM rg_terms_acceptance WHERE tg_id=? AND version=? AND document_hash=?",(uid,VERSION,DIGEST)))
@@ -97,5 +122,15 @@ async def confirm(bot,uid):
     return False
 
 async def page(request):
-    body="<!doctype html><html lang='ru'><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>RiseGram — условия</title><style>body{max-width:760px;margin:32px auto;padding:0 20px;font:16px/1.6 system-ui;color:#25252a}h1{font-size:1.6rem}article{white-space:pre-wrap}a{color:#2563eb}</style><h1>RiseGram</h1><article>"+html.escape(TEXT)+"</article></html>"
+    path=request.path
+    if path=="/privacy":
+        title="Политика конфиденциальности RiseGram"
+        body_text="Редакция от 24 ноября 2026 года\n\n6. "+TEXT.split("\n6. ",1)[1]
+    elif path=="/purchase-terms":
+        title="Условия покупок RiseGram"
+        body_text="Редакция от 24 ноября 2026 года\n\n"+PURCHASE_TEXT+"\n\nПо вопросам платежей и возвратов: «Поддержка» в @risegrambot."
+    else:
+        title="Пользовательское соглашение RiseGram"
+        body_text=TEXT
+    body="<!doctype html><html lang='ru'><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>"+html.escape(title)+"</title><style>body{max-width:760px;margin:32px auto;padding:0 20px;font:16px/1.6 system-ui;color:#25252a}h1{font-size:1.6rem}article{white-space:pre-wrap}a{color:#2563eb}</style><h1>"+html.escape(title)+"</h1><article>"+html.escape(body_text)+"</article></html>"
     return web.Response(text=body,content_type="text/html",headers={"Cache-Control":"no-store","X-Content-Type-Options":"nosniff","Content-Security-Policy":"default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'"})
