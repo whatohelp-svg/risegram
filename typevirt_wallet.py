@@ -1,4 +1,4 @@
-"""TypeVirt internal RiseStars wallet. No real money, external Stars or game payouts.
+"""TypeVirt internal RiseStars wallet. Internal virtual Stars only; no real money or external Stars.
 Only the registered native TypeVirt service can call this endpoint.
 All debits/credits and idempotency receipts commit in one PostgreSQL transaction.
 """
@@ -46,7 +46,7 @@ async def handle(request):
         amount = body.get("amount",0)
         key = body.get("key","")
         callback_id = body.get("callback_id","")
-        if type(uid) is not int or not 0<uid<2**63 or action not in ("balance","deposit","withdraw","donate"):
+        if type(uid) is not int or not 0<uid<2**63 or action not in ("balance","deposit","withdraw","donate","gdep","gout","gdon","gimp"):
             raise ValueError()
         if action!="balance" and (type(amount) is not int or not 1<=amount<=MAX_AMOUNT or not isinstance(key,str) or not re.fullmatch(r"[A-Za-z0-9_-]{16,32}",key) or not isinstance(callback_id,str) or not re.fullmatch(r"-?[0-9]{1,19}",callback_id) or not -(2**63)<=int(callback_id)<2**63):
             raise ValueError()
@@ -79,14 +79,36 @@ async def handle(request):
             expected = f"tvw:{action}:{amount}:{key}".encode()
             confirmed = await (await conn.execute("""SELECT 1 FROM bot_api_updates
                 WHERE bot_user_id=%s AND callback_query_id=%s AND callback_user_id=%s
-                  AND peer_type='user' AND peer_id IN (%s,%s) AND callback_data=%s
+                  AND update_kind='callback_query' AND peer_type='user' AND peer_id IN (%s,%s) AND callback_data=%s
                   AND created_at>now()-interval '10 minutes' LIMIT 1""",
                 (BOT_ID,int(callback_id),uid,uid,BOT_ID,expected))).fetchone()
             if not confirmed:
                 return reply({"ok":False,"error":"Подтверждение пользователя не найдено или устарело"},403)
-            if action in ("withdraw","donate") and balance<amount:
+            if action in ("withdraw","donate","gimp") and balance<amount:
                 return reply({"ok":False,"error":"Недостаточно RiseStars в кошельке TypeVirt"},409)
-            if action=="deposit":
+            if action=="gdep":
+                await economy.post(conn,"typevirt:"+key,[(uid,"stars",-amount)],"TypeVirt: пополнение игрового баланса")
+                delta=0
+            elif action=="gimp":
+                # Existing separately deposited reserve is moved to gameplay
+                # exactly once, with the local worker applying the receipt.
+                delta=-amount
+            elif action in ("gout","gdon"):
+                # Virtual game awards are issued only on a confirmed withdrawal.
+                # Bound the daily issuance per player across donations and payouts.
+                issued=await (await conn.execute("""SELECT coalesce(sum(amount),0) AS n
+                    FROM risegram_typevirt_wallet_receipts WHERE user_id=%s
+                    AND action IN ('gout','gdon') AND created_at>=date_trunc('day',now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'""",(uid,))).fetchone()
+                if int(issued["n"])+amount>MAX_AMOUNT:
+                    return reply({"ok":False,"error":"Дневной лимит вывода и донатов: 1 000 000 000 RiseStars"},409)
+                recipient=uid if action=="gout" else int(bot["owner_user_id"])
+                await conn.execute("INSERT INTO stars_balances(user_id,balance,granted) VALUES(%s,0,true) ON CONFLICT DO NOTHING",(recipient,))
+                await economy.post(conn,"typevirt:"+key,[(recipient,"stars",amount)],"TypeVirt: игровые RiseStars" if action=="gout" else "TypeVirt: донат игровыми RiseStars")
+                if action=="gdon":
+                    await conn.execute("""INSERT INTO risegram_typevirt_donations(user_id,total) VALUES(%s,%s)
+                        ON CONFLICT(user_id) DO UPDATE SET total=risegram_typevirt_donations.total+excluded.total""",(uid,amount))
+                delta=0
+            elif action=="deposit":
                 # Spendable native balance is debited; a matching reserve is
                 # represented by the user's withdrawable wallet balance.
                 await economy.post(conn,"typevirt:"+key,[(uid,"stars",-amount)],"TypeVirt: пополнение кошелька")
@@ -104,11 +126,12 @@ async def handle(request):
                 delta=-amount
             row = await (await conn.execute("UPDATE risegram_typevirt_wallet SET balance=balance+%s,updated_at=now() WHERE user_id=%s RETURNING balance",(delta,uid))).fetchone()
             native = await (await conn.execute("SELECT balance FROM stars_balances WHERE user_id=%s",(uid,))).fetchone()
-            if not native:
+            if not native and action not in ("gimp","gdon"):
                 raise economy.WalletError("Нет активного кошелька RiseGram")
+            native_after=int(native["balance"]) if native else 0
             await conn.execute("""INSERT INTO risegram_typevirt_wallet_receipts(command_key,user_id,action,amount,balance_after,native_after)
-                VALUES(%s,%s,%s,%s,%s,%s)""",(key,uid,action,amount,row["balance"],native["balance"]))
-            result={"ok":True,"balance":str(row["balance"]),"native_balance":str(native["balance"])}
+                VALUES(%s,%s,%s,%s,%s,%s)""",(key,uid,action,amount,row["balance"],native_after))
+            result={"ok":True,"balance":str(row["balance"]),"native_balance":str(native_after)}
         return reply(result)
     except economy.WalletError as exc:
         return reply({"ok":False,"error":str(exc)},409)
