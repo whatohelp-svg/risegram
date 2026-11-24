@@ -462,3 +462,20 @@ patch_go_file(
     "\tgo rpc.NewBootstrapUpdateDispatcher(router, logger.Named(\"rpc\").Named(\"bootstrap\")).Run(ctx)\n",
     "owner-confirmed gift worker",
 )
+
+
+# Display-only valuation preferences use authenticated native viewer IDs.
+patch_go_file(
+    "cmd/telesrv/main.go",
+    "\tgo router.RunRiseGramGiftPermits(ctx, pool, logger.Named(\"risegram-gift-permit\"))\n",
+    "\trpc.InitRiseGramGiftValuePreferences(pool)\n"
+    "\tgo router.RunRiseGramGiftPermits(ctx, pool, logger.Named(\"risegram-gift-permit\"))\n",
+    "gift value preferences pool",
+)
+patch_go_file(
+    "internal/rpc/payments_star_gift_lifecycle.go",
+    "\tout := &tg.PaymentsUniqueStarGiftValueInfo{Currency: info.Currency, Value: info.Value,\n",
+    "\tinfo = rgDisplayGiftValue(ctx, userID, info)\n"
+    "\tout := &tg.PaymentsUniqueStarGiftValueInfo{Currency: info.Currency, Value: info.Value,\n",
+    "per-viewer gift valuation currency",
+)
