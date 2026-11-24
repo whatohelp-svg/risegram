@@ -22,6 +22,10 @@ async def setup():
         await conn.execute("""CREATE TABLE IF NOT EXISTS risegram_typevirt_shared_receipts(
             update_id bigint PRIMARY KEY,user_id bigint NOT NULL,result jsonb NOT NULL,
             created_at timestamptz NOT NULL DEFAULT now())""")
+        await conn.execute("""CREATE TABLE IF NOT EXISTS risegram_typevirt_hilo(
+            token text PRIMARY KEY,user_id bigint NOT NULL,chat_id bigint NOT NULL,
+            stake bigint NOT NULL CHECK(stake>0),card integer NOT NULL,mult integer NOT NULL,
+            expires_at timestamptz NOT NULL,result jsonb)""")
 
 def response(body,status=200):
     return web.json_response(body,status=status,headers={"Cache-Control":"no-store"})
@@ -116,10 +120,16 @@ async def handle(request):
         action=body.get("action")
         chat=body.get("chat_id")
         mid=body.get("message_id")
-        if type(uid) is not int or not 0<uid<=MAX or action not in ("balance","play","recover"):
+        if type(uid) is not int or not 0<uid<=MAX or action not in ("balance","play","recover","hilo_start","hilo_finish"):
             raise ValueError()
         if action!="balance" and (type(chat) is not int or type(mid) is not int or not 0<mid<=2147483647):
             raise ValueError()
+        if action=="hilo_finish":
+            callback_id=body.get("callback_id","")
+            choice=body.get("choice","")
+            token=body.get("token","")
+            if not isinstance(callback_id,str) or not re.fullmatch(r"-?[0-9]{1,19}",callback_id) or not -2**63<=int(callback_id)<=MAX or choice not in ("high","low") or not isinstance(token,str) or not re.fullmatch(r"[0-9a-f]{24}",token):
+                raise ValueError()
     except (ValueError,TypeError,AttributeError):
         return response({"ok":False,"error":"Некорректный запрос"},400)
     try:
@@ -136,13 +146,50 @@ async def handle(request):
                 row=await (await conn.execute("SELECT balance FROM stars_balances WHERE user_id=%s",(uid,))).fetchone()
                 legacy=await (await conn.execute("SELECT balance FROM risegram_typevirt_wallet WHERE user_id=%s",(uid,))).fetchone()
                 return response({"ok":True,"balance":str(row["balance"] if row else 0),"legacy_reserve":str(legacy["balance"] if legacy else 0)})
+            if action=="hilo_finish":
+                peer_type="user" if chat==uid else "channel"
+                peer_id=uid if chat==uid else -chat-1000000000000
+                if peer_id<=0:
+                    raise ValueError("Неверный чат")
+                proof=await (await conn.execute("""SELECT 1 FROM bot_api_updates WHERE bot_user_id=%s
+                    AND update_kind='callback_query' AND callback_query_id=%s AND callback_user_id=%s
+                    AND peer_type=%s AND peer_id=%s AND message_id=%s AND callback_data=%s
+                    AND created_at>now()-interval '10 minutes'""",
+                    (BOT_ID,int(callback_id),uid,peer_type,peer_id,mid,f"tvhl:{token}:{choice}".encode()))).fetchone()
+                if not proof:
+                    raise ValueError("Выбор не подтверждён сервером")
+                await conn.execute("SELECT pg_advisory_xact_lock(%s)",(uid,))
+                game=await (await conn.execute("SELECT *,expires_at>now() AS active FROM risegram_typevirt_hilo WHERE token=%s AND user_id=%s AND chat_id=%s FOR UPDATE",(token,uid,chat))).fetchone()
+                if not game:
+                    raise ValueError("Это не твоя игра")
+                if game["result"]:
+                    return response(game["result"])
+                if not game["active"]:
+                    raise ValueError("Игра истекла, звёзды не списаны")
+                row=await (await conn.execute("SELECT balance FROM stars_balances WHERE user_id=%s FOR UPDATE",(uid,))).fetchone()
+                balance=int(row["balance"]) if row else 0
+                bet=int(game["stake"])
+                if balance<bet:
+                    raise ValueError("Недостаточно RiseStars. Ставка не списана")
+                card=game["card"]
+                new=RNG.choice([n for n in range(1,21) if n!=card])
+                won=(choice=="high" and new>card) or (choice=="low" and new<card)
+                payout=bet*game["mult"]//100 if won else 0
+                if payout>MAX or balance-bet+payout>MAX:
+                    raise ValueError("Технический предел баланса")
+                await economy.post(conn,"typevirt-hilo:"+token+":stake",[(uid,"stars",-bet)],"TypeVirt: Hi-Lo · ставка")
+                if payout:
+                    await economy.post(conn,"typevirt-hilo:"+token+":payout",[(uid,"stars",payout)],"TypeVirt: Hi-Lo · выплата")
+                out={"ok":True,"balance":str(balance-bet+payout),"stake":str(bet),"payout":str(payout),"net":str(payout-bet),"old":card,"new":new,"won":won}
+                await conn.execute("UPDATE risegram_typevirt_hilo SET result=%s WHERE token=%s",(Jsonb(out),token))
+                return response(out)
             if chat==uid:
                 updates=await (await conn.execute("""SELECT u.id,u.created_at,p.body FROM bot_api_updates u
                     JOIN private_messages p ON p.sender_user_id=%s AND p.recipient_user_id=u.bot_user_id
                     AND p.recipient_box_id=u.message_id
                     WHERE u.bot_user_id=%s AND u.update_kind='message' AND u.peer_type='user'
                     AND u.peer_id=%s AND u.message_id=%s ORDER BY u.id LIMIT 1""",(uid,BOT_ID,uid,mid))).fetchone()
-            elif chat < -1000000000000 and action=="play":
+            elif chat < -1000000000000 and action in ("play","hilo_start"):
                 cid=-chat-1000000000000
                 updates=await (await conn.execute("""SELECT u.id,u.created_at,m.body FROM bot_api_updates u
                     JOIN channel_messages m ON m.channel_id=u.peer_id AND m.id=u.message_id
@@ -165,7 +212,19 @@ async def handle(request):
             row=await (await conn.execute("SELECT balance FROM stars_balances WHERE user_id=%s FOR UPDATE",(uid,))).fetchone()
             balance=int(row["balance"]) if row else 0
             key="typevirt-shared:"+str(update_id)
-            if action=="recover":
+            if action=="hilo_start":
+                parts=updates["body"].lower().split()
+                if len(parts)!=2 or parts[0] not in ("хл","hilo","hi-lo"):
+                    raise ValueError("Пример: хл 100 или хл все")
+                bet=stake(parts[1],balance)
+                card=RNG.randint(2,19)
+                roll=RNG.randrange(100)
+                mult=200 if roll<50 else RNG.randint(110,200) if roll<80 else RNG.randint(210,300) if roll<95 else RNG.randint(310,500)
+                token=secrets.token_hex(12)
+                await conn.execute("""INSERT INTO risegram_typevirt_hilo(token,user_id,chat_id,stake,card,mult,expires_at)
+                    VALUES(%s,%s,%s,%s,%s,%s,now()+interval '10 minutes')""",(token,uid,chat,bet,card,mult))
+                result={"ok":True,"token":token,"stake":str(bet),"card":card,"mult":mult,"balance":str(balance)}
+            elif action=="recover":
                 if not re.fullmatch(r"/recoverstars(?:@typevirtbot)?",updates["body"].strip(),re.I):
                     raise ValueError("Отправь /recoverstars в личном чате")
                 legacy=await (await conn.execute("SELECT balance FROM risegram_typevirt_wallet WHERE user_id=%s FOR UPDATE",(uid,))).fetchone()
