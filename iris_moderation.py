@@ -195,6 +195,48 @@ async def scan_recent_spam(conn):
     return results
 
 
+async def monitor(app):
+    """Run the authoritative flood detector even if Iris polling is unavailable."""
+    import asyncio
+    import os
+    from aiohttp import ClientSession,ClientTimeout
+
+    async def run():
+        base=os.getenv("MTPROTO_BOT_API_URL","http://risegram-mtproto.railway.internal:8081").rstrip("/")
+        # Never send a native bot credential to any other origin.
+        notify=base=="http://risegram-mtproto.railway.internal:8081"
+        async with ClientSession(timeout=ClientTimeout(total=8),trust_env=False) as session:
+            while True:
+                try:
+                    async with economy.transaction() as conn:
+                        await conn.execute("SET LOCAL statement_timeout='8s'")
+                        mutes=await scan_recent_spam(conn)
+                        bot=await (await conn.execute("SELECT token_secret FROM bots WHERE bot_user_id=%s",(BOT,))).fetchone() if mutes and notify else None
+                    for item in mutes:
+                        LOG.info("RG_IRIS_AUTOMUTE duration=%s reason=%s",item["duration"],item["reason"])
+                        if bot and bot["token_secret"]:
+                            try:
+                                text=f"🔇 Автомут: {item['target']}\nСрок: 10 мин.\nПричина: {item['reason']}\nОбжалование: @support"
+                                async with session.post(f"{base}/bot{BOT}:{bot['token_secret']}/sendMessage",json={"chat_id":-1000000000003,"text":text},allow_redirects=False) as response:
+                                    data=await response.json(content_type=None)
+                                    if not data.get("ok"):
+                                        LOG.warning("Iris mute committed; notification not confirmed")
+                            except Exception:
+                                # Do not log exceptions containing the credential-bearing URL.
+                                LOG.warning("Iris mute committed; notification unavailable")
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    LOG.exception("Iris independent moderation scan failed")
+                await asyncio.sleep(3)
+    task=asyncio.create_task(run())
+    try:
+        yield
+    finally:
+        task.cancel()
+        await asyncio.gather(task,return_exceptions=True)
+
+
 async def handle(request):
     auth=request.headers.get("Authorization","")
     if not auth.startswith("Bearer ") or len(auth)>240:
