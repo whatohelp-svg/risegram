@@ -407,7 +407,7 @@ async def grant_channel_username(message: Message):
                     verifier_bot_id=int(matches[0]["BotID"]),
                 )
                 if not revoking:
-                    company = "официальной компанией «RiseGram»" if value == "risegram" else "организацией «Major»"
+                    company = "организацией «RiseGram»" if value == "risegram" else "организацией «Major»"
                     payload["description"] = (
                         f"{entity} верифицирована {company}." if channel_kind == "group"
                         else f"{entity} верифицирован {company}."
