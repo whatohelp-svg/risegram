@@ -156,22 +156,32 @@ async def handle(request):
                 bm=await member(conn,cid,BOT)
                 target=await member(conn,cid,actor)
                 user=await (await conn.execute("SELECT username,first_name,is_bot FROM users WHERE id=%s AND deleted_at IS NULL",(actor,))).fetchone()
-                if not identity or not manager(bm) or not target or target["role"]!="member" or target["status"]!="active" or not user or user["is_bot"] or any(v is True for v in target["banned_rights"].values()):
+                if not identity or not manager(bm) or not target or target["role"]!="member" or target["status"]!="active" or not user or user["is_bot"] or any(target["banned_rights"].get(k) is True for k in SEND_KEYS+["ViewMessages"]):
                     return result({"ok":True,"action":"none"})
                 if await (await conn.execute("SELECT 1 AS ok FROM riseiris_restrictions WHERE channel_id=%s AND user_id=%s",(cid,actor))).fetchone():
                     return result({"ok":True,"action":"none"})
-                # Use original database messages, not worker-provided content.
-                # Require 6 identical substantial messages in 12 seconds.
+                # Confirm live, nonempty text spam from the authoritative message store.
+                # Non-message restrictions (EditRank etc.) do not prevent a mute.
+                if update["created_at"].timestamp()<time.time()-60:
+                    return result({"ok":True,"action":"none"})
                 body=" ".join((update["body"] or "").casefold().split())
-                if len(body)<8 or body.startswith(("/","!")):
+                if not body or body.startswith(("/","!")):
                     return result({"ok":True,"action":"none"})
-                rows=await (await conn.execute("""SELECT body FROM channel_messages WHERE channel_id=%s AND sender_user_id=%s
+                rows=await (await conn.execute("""SELECT body,message_date FROM channel_messages WHERE channel_id=%s AND sender_user_id=%s
                     AND NOT deleted AND id<=%s AND message_date BETWEEN
-                    (SELECT message_date-12 FROM channel_messages WHERE channel_id=%s AND id=%s)
+                    (SELECT message_date-15 FROM channel_messages WHERE channel_id=%s AND id=%s)
                     AND (SELECT message_date FROM channel_messages WHERE channel_id=%s AND id=%s)
-                    ORDER BY id DESC LIMIT 12""",(cid,actor,mid,cid,mid,cid,mid))).fetchall()
-                if sum(" ".join((r["body"] or "").casefold().split())==body for r in rows)<6:
+                    ORDER BY id DESC LIMIT 32""",(cid,actor,mid,cid,mid,cid,mid))).fetchall()
+                if not rows:
                     return result({"ok":True,"action":"none"})
+                latest=rows[0]["message_date"]
+                bodies=[(" ".join((r["body"] or "").casefold().split()),r["message_date"]) for r in rows]
+                bodies=[(t,d) for t,d in bodies if t and not t.startswith(("/","!"))]
+                repeated=sum(t==body and d>=latest-12 for t,d in bodies)>=6
+                burst=len(bodies)>=12
+                if not repeated and not burst:
+                    return result({"ok":True,"action":"none"})
+                reason="1.1 — спам (6 одинаковых сообщений за 12 секунд)" if repeated else "1.1 — флуд (12 сообщений за 15 секунд)"
                 duration=600
                 now=int(time.time())
                 until=now+duration
@@ -182,7 +192,7 @@ async def handle(request):
                 await conn.execute("""INSERT INTO riseiris_restrictions(channel_id,user_id,kind,rights,previous_rights,previous_status,previous_left,expires)
                     VALUES(%s,%s,'mute',%s,%s,%s,%s,%s)""",(cid,actor,Jsonb(rights),Jsonb(target["banned_rights"]),target["status"],target["left_at"],until))
                 await update_member(conn,cid,actor,rights,"active",target["left_at"])
-                out={"ok":True,"action":"mute","duration":duration,"reason":"1.1 — повторяющийся спам (6 одинаковых сообщений за 12 секунд)","target":"@"+user["username"] if user["username"] else user["first_name"] or "Участник"}
+                out={"ok":True,"action":"mute","duration":duration,"reason":reason,"target":"@"+user["username"] if user["username"] else user["first_name"] or "Участник"}
                 await conn.execute("INSERT INTO riseiris_receipts(update_id,result) VALUES(%s,%s)",(key,Jsonb(out)))
                 return result(out)
             action,name,duration,reason=parse(update["body"])
