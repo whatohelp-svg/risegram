@@ -121,6 +121,24 @@ async def parse_target(text: str) -> dict | None:
     return await db.find_user(text)
 
 
+async def native_admin_profile(event, nid: int):
+    from support_console import profile, native_label, sql
+    u = await profile(nid)
+    if not u or u["deleted_at"]:
+        return await show(event,"Аккаунт не найден",kb(home_row()))
+    names = await sql("""SELECT username FROM peer_usernames WHERE peer_type='user'
+        AND peer_id=%s AND active ORDER BY sort_order LIMIT 30""",(nid,))
+    aliases = ", ".join("@"+row["username"] for row in names) or "—"
+    text = ("🤖 <b>" if u["is_bot"] else "👤 <b>")+esc((u["first_name"] or "")+" "+(u["last_name"] or ""))+"</b>"
+    text += "\n"+esc(await native_label(nid))+"\nЮзернеймы: "+esc(aliases)
+    text += "\nSCAM: "+("да" if u["scam"] else "нет")+" · FAKE: "+("да" if u["fake"] else "нет")
+    rows = []
+    if event.from_user.id == config.OWNER_TELEGRAM_ID:
+        rows += [[btn("🏷 Выдать NFT-юзернейм",f"adm:nativemint:{nid}")],
+                 [btn("🔎 Подробности",f"adm:sup:account:{nid}")]]
+    await show(event,text,kb(*rows,home_row()))
+
+
 async def recovery_target(raw: str) -> str:
     raw = raw.strip()
     if raw.startswith("@") or re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{3,31}", raw):
@@ -1138,8 +1156,12 @@ async def on_input(message: Message, state: FSMContext, user: dict):
             exact = await parse_target(text)
             if exact:
                 return await screen_user(message, int(exact["tg_id"]))
+            from support_console import resolve
+            nid = await resolve(text)
+            if nid:
+                return await native_admin_profile(message,nid)
             if text.startswith("@"):
-                return await message.answer("Аккаунт с таким @юзернеймом не найден или не связан с ботом", reply_markup=kb(home_row()))
+                return await message.answer("Аккаунт с таким @юзернеймом не найден", reply_markup=kb(home_row()))
         total = await db.count_users(text)
         rows_db = await db.list_users(PAGE, 0, text)
         out = f"🔎 <b>Поиск «{esc(text)}»</b> ({total})\n\n"
@@ -1150,7 +1172,13 @@ async def on_input(message: Message, state: FSMContext, user: dict):
     if act in ("grant_target", "inv_target", "ban_target", "admin_add"):
         t = await parse_target(text)
         if not t:
-            return await again("❌ Игрок не найден. Ещё раз (@юзернейм, ID или номер):")
+            if act == "inv_target" and message.from_user.id == config.OWNER_TELEGRAM_ID:
+                from support_console import resolve, native_label
+                nid = await resolve(text)
+                if nid:
+                    return await ask(message,state,"native_mint",
+                        "🏷 "+esc(await native_label(nid))+"\nВведите новый NFT-юзернейм (один, от 4 символов)",uid=nid)
+            return await again("❌ Аккаунт не найден или не связан с ботом. Введите @юзернейм:")
         await state.clear()
         if act == "grant_target":
             await message.answer(
@@ -1182,6 +1210,37 @@ async def on_input(message: Message, state: FSMContext, user: dict):
         else:
             await ask_usernames(message, state, t)
         return
+
+    if act == "native_mint":
+        if message.from_user.id != config.OWNER_TELEGRAM_ID:
+            return await done("Только владелец")
+        from support_console import profile, native_label, sql
+        nid = int(data["uid"])
+        try:
+            name = nftnames.normalize(text)
+            u = await profile(nid)
+            if not u or u["deleted_at"]:
+                raise ValueError("Аккаунт не найден")
+            payload = dict(username=name, owner_user_id=str(nid), currency="USD",amount="0",
+                purchase_date=int(time.time()), actor="risegram-owner",
+                reason="Owner-requested native NFT username grant")
+            key = f"rg-admin-native-nft-{message.chat.id}-{message.message_id}"
+            async with nftnames.native_session() as session:
+                for dry in (True,False):
+                    async with session.post(nftnames.base()+"/v1/collectible-usernames/mint",
+                        json={**payload,"command_id":key+("-dry" if dry else ""),"dry_run":dry}) as response:
+                        result=await response.json(content_type=None)
+                        if response.status!=200 or result.get("status")!="completed" or (dry and not result.get("dry_run")):
+                            raise ValueError("Сервер отказал: "+str(result.get("code") or result.get("error") or response.status)[:150])
+            rows=await sql("""SELECT c.id FROM collectible_usernames c JOIN peer_usernames p ON p.collectible_id=c.id
+                WHERE c.username_lower=%s AND c.owner_peer_type='user' AND c.owner_peer_id=%s
+                  AND c.status='owned' AND p.peer_type='user' AND p.peer_id=%s AND p.active""",(name,nid,nid))
+            if not rows:
+                raise ValueError("MTProto не подтвердил активный NFT")
+            await audit(f"Native NFT @{name} выдан {nid}")
+            return await done("✅ NFT @"+esc(name)+" выдан "+esc(await native_label(nid)),kb([btn("Карточка",f"adm:nativeprofile:{nid}")],home_row()))
+        except (ValueError,nftnames.NFTUsernameAdminError,psycopg.Error,ClientError,TimeoutError,OSError) as exc:
+            return await again("❌ "+esc(str(exc)[:180]))
 
     # ── валюта ──
     if act == "g_amount":
@@ -1635,6 +1694,14 @@ async def adm_cb(call: CallbackQuery, state: FSMContext, user: dict):
                [btn("🔎 Найти пользователя", "adm:usearch")], home_row()))
     if route == "users":
         return await screen_users(call, num(parts, 2))
+    if route == "nativeprofile":
+        return await native_admin_profile(call,num(parts,2))
+    if route == "nativemint":
+        if call.from_user.id != config.OWNER_TELEGRAM_ID:
+            return await call.answer("Только владелец",show_alert=True)
+        from support_console import native_label
+        nid=num(parts,2)
+        return await ask(call,state,"native_mint","🏷 "+esc(await native_label(nid))+"\nВведите новый NFT-юзернейм",uid=nid)
     if route == "usearch":
         return await ask(call, state, "usearch", "🔎 Введите @юзернейм или часть имени:", "adm:users:0")
     if route == "u":
