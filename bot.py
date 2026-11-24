@@ -33,6 +33,7 @@ import native_economy as economy
 import donat_native as native_shop
 import psycopg
 from admin import admin_router
+import account_recovery as recovery
 from aiohttp import ClientError
 from api import native_wallet, client_wallet_line, start_api, sync_collectible_usernames, sync_mtproto_verification
 from ui import back_row, btn, cancel_kb, esc, fmt_num, kb, safe_send, show
@@ -98,6 +99,14 @@ class GuardMiddleware(BaseMiddleware):
                 _last_click.clear()
         user = await db.get_or_create_user(tg_user.id, tg_user.full_name or "User", tg_user.username)
         data["user"] = user
+        # A recoverable admin deletion remains attached to the *same* account.
+        # Don't auto-provision a new identity or allow ordinary bot actions while
+        # the server has the account frozen. Pending paid invoices still settle.
+        if (tg_user.id != config.OWNER_TELEGRAM_ID and
+                not (isinstance(event, Message) and event.successful_payment) and
+                await recovery.pending_for_local(int(user["tg_id"]))):
+            await _reply_block(event, "♻️ Аккаунт ожидает удаления. Обратитесь к администрации для восстановления")
+            return
         try:
             wallet = await native_wallet(user)
         except (ClientError, TimeoutError):
@@ -2431,7 +2440,8 @@ async def main():
     runner = await start_api(bot)
     from issuer_marks import bootstrap
     from native_drops import worker
-    recovery = asyncio.create_task(recover_wallet_jobs(bot))
+    recovery_task = asyncio.create_task(recover_wallet_jobs(bot))
+    account_deletion_task = asyncio.create_task(recovery.deletion_worker())
     from owner_replacement_once import run as replace_owner_gifts
     replacement = asyncio.create_task(replace_owner_gifts())
     drop_publisher = asyncio.create_task(worker())
@@ -2444,12 +2454,15 @@ async def main():
         await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
     finally:
         replacement.cancel()
-        recovery.cancel()
+        recovery_task.cancel()
+        account_deletion_task.cancel()
         seasonal.cancel()
         emoji_import.cancel()
         issuer_setup.cancel()
         drop_publisher.cancel()
-        await asyncio.gather(replacement, recovery, seasonal, emoji_import, issuer_setup, drop_publisher, return_exceptions=True)
+        await asyncio.gather(replacement, recovery_task, account_deletion_task,
+                             seasonal, emoji_import, issuer_setup, drop_publisher,
+                             return_exceptions=True)
         if runner:
             await runner.cleanup()
         for t in list(crash_tasks.values()) + list(hl_tasks.values()):
