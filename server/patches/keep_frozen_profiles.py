@@ -87,3 +87,65 @@ new_label = 'accountFrozenMarkDescription       = "Аккаунт заморож
 if label_src.count(old_label) != 1:
     raise SystemExit("Frozen badge description anchor differs from pinned MTProto")
 frozen_labels.write_text(label_src.replace(old_label, new_label, 1))
+
+# The stock Android frozen-account sheet still has an @SpamBot hyperlink
+# baked into the client language. This is NOT a public @spambot username:
+# only while the caller is frozen, resolve that old hyperlink to the actual
+# RiseGram support account @youtube. No global username is registered, and
+# every other user resolves usernames normally.
+contacts_path = Path("internal/rpc/contacts.go")
+contacts_src = contacts_path.read_text()
+contacts_old = '''func (r *Router) onContactsResolveUsername(ctx context.Context, req *tg.ContactsResolveUsernameRequest) (*tg.ContactsResolvedPeer, error) {
+	userID, _, err := r.currentUserID(ctx)
+	if err != nil {
+		return nil, internalErr()
+	}
+	if svc, ok := r.deps.Users.(UserIdentityService); ok {
+		u, found, err := svc.ResolveUsername(ctx, userID, req.Username)'''
+contacts_new = '''func (r *Router) onContactsResolveUsername(ctx context.Context, req *tg.ContactsResolveUsernameRequest) (*tg.ContactsResolvedPeer, error) {
+	userID, _, err := r.currentUserID(ctx)
+	if err != nil {
+		return nil, internalErr()
+	}
+	if req == nil {
+		return nil, usernameNotOccupiedErr()
+	}
+	username := req.Username
+	// legacyFreezeAppealAlias routes only a frozen caller's built-in Telegram
+	// SpamBot link to their designated RiseGram appeal recipient. The actual
+	// profile clearly identifies itself as RiseGram support, not Telegram.
+	if userID != 0 && strings.EqualFold(strings.TrimPrefix(strings.TrimSpace(username), "@"), "spambot") && r.deps.AccountFreeze != nil {
+		freeze, found, freezeErr := r.deps.AccountFreeze.AccountFreeze(ctx, userID)
+		if freezeErr != nil {
+			return nil, internalErr()
+		}
+		if found && freeze.Frozen {
+			username = "youtube"
+		}
+	}
+	if svc, ok := r.deps.Users.(UserIdentityService); ok {
+		u, found, err := svc.ResolveUsername(ctx, userID, username)'''
+if contacts_src.count(contacts_old)!=1:
+    raise SystemExit("Frozen appeal alias patch: contacts handler differs from pinned upstream")
+contacts_src=contacts_src.replace(contacts_old,contacts_new,1)
+# Make sure a stale @SpamBot query can never be reused for channel search.
+method_start=contacts_src.index("func (r *Router) onContactsResolveUsername")
+method_end=contacts_src.index("func (r *Router) onContactsResolvePhone",method_start)
+snippet=contacts_src[method_start:method_end]
+old_search='r.deps.Channels.ResolvePublicUsername(ctx, userID, req.Username)'
+if snippet.count(old_search)!=1:
+    raise SystemExit("Frozen appeal alias patch: channel lookup changed")
+contacts_src=contacts_src[:method_start]+snippet.replace(old_search,"r.deps.Channels.ResolvePublicUsername(ctx, userID, username)",1)+contacts_src[method_end:]
+contacts_path.write_text(contacts_src)
+
+# For new/old freeze overlays, supply an internal protocol deep link rather
+# than sending users into the unrelated Telegram app via https://t.me/YouTube.
+# The client may continue displaying its baked-in @SpamBot wording; the alias
+# above ensures tapping the old username reaches the native support account.
+help_path=Path("internal/app/help/service.go")
+help_src=help_path.read_text()
+help_old='appeal, _ := json.Marshal(freeze.AppealURL)'
+help_new='appeal, _ := json.Marshal("tg://resolve?domain=youtube")'
+if help_src.count(help_old)!=1:
+    raise SystemExit("Frozen appeal URL overlay anchor changed")
+help_path.write_text(help_src.replace(help_old,help_new,1))
