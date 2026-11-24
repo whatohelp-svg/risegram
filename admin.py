@@ -177,7 +177,8 @@ async def home_screen(event, user: dict, page: int = 0):
             [btn("👥 Пользователи","adm:users:0"),btn("📊 Аналитика","adm:stats")],
             [btn("💰 Валюта","adm:grant"),btn("🎁 Подарки","adm:localgifts:0")],
             [btn("☑️ Верификации","adm:vermenu"),btn("🏷 NFT-юзернеймы","adm:nftmenu")],
-            [btn("🔨 Банхаммер","adm:ban"),btn("⚠️ SCAM / FAKE","adm:risks")],
+            [btn("🔨 Банхаммер","adm:ban"),btn("⚠️ Выдать SCAM / FAKE","adm:risks")],
+            [btn("🧹 Снять SCAM / FAKE","adm:riskclear",style="primary")],
             [btn("🛒 Маркет","adm:mkt:0"),btn("🧾 Покупки","adm:buys:0")],
             [btn("♻️ Восстановление","adm:recoverlist"),btn("🗑 Удаление","adm:delphone",style="danger")],
         ]
@@ -1528,7 +1529,7 @@ async def on_input(message: Message, state: FSMContext, user: dict):
         except (native_shop.NativePurchaseError, nftnames.NFTUsernameAdminError, psycopg.Error, ClientError, TimeoutError, OSError, ValueError) as exc:
             return await again("❌ " + esc(str(exc)[:180]))
         await audit(f"{'Выдана' if enabled else 'Снята'} метка {label} {kind} {target}: {reason[:150]}")
-        return await done(f"✅ MTProto подтвердил действие: {label} {'выдана' if enabled else 'снята'} для {esc(target)}")
+        return await done(f"✅ MTProto подтвердил действие: {label} {'выдана' if enabled else 'снята'} для {esc(target)}", kb([btn("🧹 Снять ещё метку","adm:riskclear")],home_row()))
     if act == "tester_add":
         t = await parse_target(text)
         if not t:
@@ -1786,6 +1787,7 @@ async def adm_cb(call: CallbackQuery, state: FSMContext, user: dict):
                  btn("🎭 FAKE канал", "adm:risk:channel:FAKE:on")],
                 [btn("🧹 Снять SCAM / FAKE", "adm:riskclear")], home_row()))
     if route == "riskclear":
+        await state.clear()
         return await show(call,
             "🧹 Снятие меток (каждая операция логируется)",
             kb(
@@ -1803,8 +1805,8 @@ async def adm_cb(call: CallbackQuery, state: FSMContext, user: dict):
         await state.set_data({"act": "risk_label", "risk_kind": parts[2],
                               "risk_label": parts[3], "risk_enabled": parts[4] == "on"})
         question = ("Пришли @юзернейм и причину от 8 символов\nПример: @example выдаёт себя за администрацию" if parts[4]=="on"
-                    else "Пришли @юзернейм для снятия выбранной метки")
-        return await show(call, question, kb(cancel_row("adm:risks")))
+                    else "Пришли @юзернейм или native ID для снятия выбранной метки")
+        return await show(call, question, kb(cancel_row("adm:risks" if parts[4]=="on" else "adm:riskclear")))
 
     if route == "verifychats":
         return await show(call,
