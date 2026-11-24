@@ -33,6 +33,7 @@ import native_economy as economy
 import donat_native as native_shop
 import psycopg
 from admin import admin_router
+from support_console import support_router
 import account_recovery as recovery
 from aiohttp import ClientError
 from api import native_wallet, client_wallet_line, start_api, sync_collectible_usernames, sync_mtproto_verification
@@ -2431,6 +2432,7 @@ async def main():
     dp = Dispatcher(storage=MemoryStorage())
     dp.message.outer_middleware(GuardMiddleware())
     dp.callback_query.outer_middleware(GuardMiddleware())
+    dp.include_router(support_router)  # explicit owner/support staff ACL
     dp.include_router(admin_router)  # панель /admin и владелец /owner обрабатываются раньше общего меню
     dp.include_router(router)
     dp.startup.register(on_startup)
