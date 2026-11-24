@@ -1566,6 +1566,8 @@ async def start_api(bot) -> web.AppRunner | None:
     app.router.add_post("/internal/owner/gift-permit", owner_gift_permit.handle)
     import terms_policy
     app.router.add_get("/terms", terms_policy.page)
+    app.router.add_get("/privacy", terms_policy.page)
+    app.router.add_get("/purchase-terms", terms_policy.page)
     app.add_routes([
         # Public web and Electron clients retired: keep JSON APIs and the
         # bot miniapp only, as they are still used by the native ecosystem.
