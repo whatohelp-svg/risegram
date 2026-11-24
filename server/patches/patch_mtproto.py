@@ -479,3 +479,29 @@ patch_go_file(
     "\tout := &tg.PaymentsUniqueStarGiftValueInfo{Currency: info.Currency, Value: info.Value,\n",
     "per-viewer gift valuation currency",
 )
+
+
+# Preserve ordinary same-collection crafting when the optional AI cross-craft
+# capability is disabled. The native store still validates ownership, readiness,
+# model eligibility and all consumption atomically; do not synthesize chances.
+patch_go_file(
+    "internal/rpc/payments_star_gifts.go",
+    """		if !allowed {
+			for i := range gifts {
+				gift := &gifts[i]
+				if gift.Owner != (domain.Peer{Type: domain.PeerTypeUser, ID: viewerUserID}) {
+					continue
+				}
+				gift.CanCraftAt = 0
+				if gift.Unique != nil {
+					gift.Unique.CraftChancePermille = 0
+				}
+			}
+		} else {
+""",
+    """		// A disabled cross-collection generator must not hide ordinary craft.
+		// Existing CanCraftAt and CraftChancePermille are the native entitlement.
+		if allowed {
+""",
+    "ordinary NFT crafting remains available without optional AI cross-craft",
+)
