@@ -136,7 +136,7 @@ async def h_appeal_post(request: web.Request) -> web.Response:
                     return _page("Ссылка недействительна", "<p>Срок обращения истёк или аккаунт разморожен</p>", 403)
                 # Serialize submissions from one frozen account, including
                 # two simultaneous WebView requests. No account changes.
-                await conn.execute("SELECT pg_advisory_xact_lock(%s, %s)", (718, user_id))
+                await conn.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s::text, 718))", (str(user_id),))
                 row = await (await conn.execute("""
                     SELECT COUNT(*)::int AS cnt, MAX(created_at) AS last_sent
                       FROM risegram_freeze_appeals
