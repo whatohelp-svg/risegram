@@ -111,7 +111,26 @@ async def run():
             if len(assets)+1>512:
                 raise ValueError("pack exceeds native asset count")
             async def animation(path):
-                raw=await get(path)
+                try:
+                    raw=await get(path)
+                except ValueError as exc:
+                    # The CDN index uses typographic apostrophes, but some
+                    # filenames use ASCII apostrophes or omit punctuation.
+                    if "HTTP 404" not in str(exc):
+                        raise
+                    variants=[path.replace("%E2%80%99","%27"),path.replace("%E2%80%99",""),
+                              path.replace("%E2%80%98","%27"),path.replace("%27","%E2%80%99")]
+                    for candidate in dict.fromkeys(variants):
+                        if candidate==path:
+                            continue
+                        try:
+                            raw=await get(candidate)
+                            break
+                        except ValueError as retry:
+                            if "HTTP 404" not in str(retry):
+                                raise
+                    else:
+                        raise exc
                 if raw[:2]!=b"\x1f\x8b":
                     raise ValueError("invalid tgs asset "+path[:150])
                 with gzip.GzipFile(fileobj=io.BytesIO(raw)) as gz:
