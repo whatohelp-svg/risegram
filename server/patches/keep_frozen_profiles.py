@@ -137,15 +137,3 @@ if snippet.count(old_search)!=1:
     raise SystemExit("Frozen appeal alias patch: channel lookup changed")
 contacts_src=contacts_src[:method_start]+snippet.replace(old_search,"r.deps.Channels.ResolvePublicUsername(ctx, userID, username)",1)+contacts_src[method_end:]
 contacts_path.write_text(contacts_src)
-
-# For new/old freeze overlays, supply an internal protocol deep link rather
-# than sending users into the unrelated Telegram app via https://t.me/YouTube.
-# The client may continue displaying its baked-in @SpamBot wording; the alias
-# above ensures tapping the old username reaches the native support account.
-help_path=Path("internal/app/help/service.go")
-help_src=help_path.read_text()
-help_old='appeal, _ := json.Marshal(freeze.AppealURL)'
-help_new='appeal, _ := json.Marshal("tg://resolve?domain=youtube")'
-if help_src.count(help_old)!=1:
-    raise SystemExit("Frozen appeal URL overlay anchor changed")
-help_path.write_text(help_src.replace(help_old,help_new,1))
