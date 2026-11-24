@@ -152,6 +152,10 @@ async def core_request_code(bot, phone: str) -> tuple[int, dict]:
     if not chat_id:
         log.warning("login number has no Telegram delivery chat for Rise ID %s", user.get("rise_id"))
         return 503, {"ok": False, "error": "code_delivery_unavailable"}
+    import terms_policy
+    if not await terms_policy.accepted(int(user["tg_id"])):
+        await terms_policy.prompt(bot,int(user["tg_id"]))
+        return 200, {"ok": True}
     code = await db.issue_auth_code(user["tg_id"])
     delivered = await safe_send(
         bot,
@@ -168,6 +172,10 @@ async def core_request_code(bot, phone: str) -> tuple[int, dict]:
 
 
 async def core_verify(phone: str, code: str, *, native=False) -> tuple[int, dict]:
+    import terms_policy
+    existing=await db.fetchone("SELECT tg_id FROM users WHERE phone_digits=? AND banned=0",(db.digits_of(phone),))
+    if existing and not await terms_policy.accepted(int(existing["tg_id"])):
+        return 401, {"ok":False,"error":"terms_acceptance_required"}
     user = await db.verify_auth_code(phone, code)
     if not user:
         return 401, {"ok": False, "error": "invalid_code"}
@@ -1379,7 +1387,13 @@ async def h_mtproto_otp_delivery(request: web.Request):
         f"Код: <code>{esc(code)}</code>\n\n"
         "Код одноразовый. Никому его не сообщайте"
     )
-    delivered = await safe_send(request.app["bot"], user["tg_id"], message)
+    import terms_policy
+    uid=int(user["tg_id"])
+    async with terms_policy.lock_for(uid):
+        if await terms_policy.accepted(uid):
+            delivered = await safe_send(request.app["bot"], uid, message)
+        else:
+            delivered = await terms_policy.prompt(request.app["bot"],uid,message)
     await db.execute(
         "UPDATE rg_otp_deliveries SET status=?,updated_at=? WHERE delivery_id=?",
         ("sent" if delivered else "failed", db.now(), delivery_id),
@@ -1550,6 +1564,8 @@ async def start_api(bot) -> web.AppRunner | None:
     import owner_gift_permit
     await owner_gift_permit.setup()
     app.router.add_post("/internal/owner/gift-permit", owner_gift_permit.handle)
+    import terms_policy
+    app.router.add_get("/terms", terms_policy.page)
     app.add_routes([
         # Public web and Electron clients retired: keep JSON APIs and the
         # bot miniapp only, as they are still used by the native ecosystem.
