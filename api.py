@@ -1541,6 +1541,9 @@ async def start_api(bot) -> web.AppRunner | None:
     import iris_moderation
     await iris_moderation.setup()
     app.router.add_post("/internal/iris/moderation", iris_moderation.handle)
+    import owner_gift_permit
+    await owner_gift_permit.setup()
+    app.router.add_post("/internal/owner/gift-permit", owner_gift_permit.handle)
     app.add_routes([
         # Public web and Electron clients retired: keep JSON APIs and the
         # bot miniapp only, as they are still used by the native ecosystem.
