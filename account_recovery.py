@@ -230,8 +230,32 @@ async def schedule(phone: str, actor: int, key: str,
             "local_id": local_id}
 
 
-async def _cancel_native_pending(user_id: int) -> bool:
-    """Cancel only a still-live request for the *same* active peer."""
+async def _cancel_native_pending(user_id: int, actor: int) -> bool:
+    """Revoke the deletion requester's session before cancelling its token.
+
+    This mirrors upstream CancelAccountDeletion's auth security semantics, but
+    uses the authenticated admin API for session revocation instead of raw
+    deleting auth tables. Never expose hashes or tokens to the bot UI.
+    """
+    async with await psycopg.AsyncConnection.connect(
+        ledger_dsn(), connect_timeout=8, row_factory=dict_row
+    ) as conn:
+        await conn.execute("SET TRANSACTION READ ONLY")
+        row = await (await conn.execute("""
+            SELECT d.id, d.execute_at, a.hash AS auth_hash
+              FROM account_deletion_requests d
+              LEFT JOIN authorizations a
+                ON a.auth_key_id=d.requester_auth_key_id AND a.user_id=d.user_id
+             WHERE d.user_id=%s AND d.state='pending'
+        """, (user_id,))).fetchone()
+    if not row:
+        return False
+    if row["execute_at"] <= utc_now():
+        raise RecoveryError("Срок восстановления из клиента уже закончился")
+    if row["auth_hash"]:
+        await native_action("revoke-sessions",
+                            "rg-admin-restore-requester-" + str(row["id"]),
+                            actor, {"user_id": user_id, "hash": int(row["auth_hash"])})
     async with await psycopg.AsyncConnection.connect(
         ledger_dsn(), connect_timeout=8, row_factory=dict_row
     ) as conn:
@@ -241,14 +265,13 @@ async def _cancel_native_pending(user_id: int) -> bool:
             """, (user_id,))).fetchone()
             if not user or user["deleted_at"] is not None:
                 raise RecoveryError("Аккаунт уже окончательно удалён на MTProto")
-            row = await (await conn.execute("""
+            updated = await (await conn.execute("""
                 UPDATE account_deletion_requests
                    SET state='cancelled',completed_at=now(),updated_at=now()
-                 WHERE user_id=%s AND state='pending' AND execute_at>now()
+                 WHERE id=%s AND user_id=%s AND state='pending' AND execute_at>now()
              RETURNING id
-            """, (user_id,))).fetchone()
-            return row is not None
-
+            """, (int(row["id"]), user_id))).fetchone()
+            return updated is not None
 
 async def restore(phone: str, actor: int, expected_record_id: int = 0,
                   expected_native_id: int = 0) -> dict:
@@ -284,7 +307,7 @@ async def restore(phone: str, actor: int, expected_record_id: int = 0,
     elif receipt and receipt["status"] == "executing":
         raise RecoveryError("Окончательное удаление уже началось")
     if info["pending"]:
-        cancelled_self = await _cancel_native_pending(native_id)
+        cancelled_self = await _cancel_native_pending(native_id, actor)
         if not cancelled_self:
             raise RecoveryError("Запрос удаления уже исполнен или истёк")
     if not restored_admin and not cancelled_self:
