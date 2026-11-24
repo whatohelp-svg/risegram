@@ -55,6 +55,7 @@ class Flow(StatesGroup):
     gift_target = State()
     verify_channel = State()
     native_chat_target = State()
+    hold_target = State()
     native_chat_username = State()
     scam_target = State()
     scam_reason = State()
@@ -764,9 +765,80 @@ async def cb_verify_hub(call: CallbackQuery):
         call,
         "✅ <b>Верификация</b>\n\nВыберите вид верификации:",
         kb([btn(f"💎 Мажор · {config.VERIFY_PRICE} ⭐", "verify:major", style="primary")],
+           [btn("✦ Hold · 80 ⭐", "verify:hold", icon="6901269596978431599")],
            [btn(f"🟢 RiseGram Club · {config.ACCOUNT_RISEGRAM_CLUB_PRICE} ⭐", "verify:club")],
            [btn("☑️ Официальная галочка · заявка", "verify:official")], back_row("donat:hub")),
     )
+
+
+async def show_hold_offer(event, user, kind, pid, label):
+    import hold_shop
+    balance=await hold_shop.preview(user,kind,pid)
+    token=secrets.token_hex(8)
+    await show(event,f"✦ <b>Hold</b>\n{esc(label)}\n\nЦена: <b>80 RiseStars</b>\nБаланс: {balance} ⭐\nПосле покупки: {balance-80} ⭐\n\nКосметическая метка, не официальная галочка.",
+        kb([btn("Купить · 80 ⭐",f"hold:buy:{kind}:{pid}:{token}",style="success")],back_row("verify:hold")))
+
+
+@router.callback_query(F.data == "verify:hold")
+async def cb_hold_hub(call: CallbackQuery):
+    if not await need_feature(call,"verification"):
+        return
+    await show(call,"✦ <b>Hold · 80 RiseStars</b>\n\nБелая розетка со звездой. Покупка за внутренние звёзды RiseGram.\nСуществующие метки не заменяются.",
+        kb([btn("Мой аккаунт","hold:pick:account")],
+           [btn("Моя группа","hold:pick:group"),btn("Мой канал","hold:pick:channel")],back_row("donat:verify")))
+
+
+@router.callback_query(F.data.startswith("hold:pick:"))
+async def cb_hold_pick(call: CallbackQuery,state: FSMContext,user: dict):
+    if not await need_feature(call,"verification"):
+        return
+    import hold_shop
+    kind=call.data.split(":")[-1]
+    if kind not in hold_shop.KINDS:
+        return
+    if kind=="account":
+        try:
+            uid=await hold_shop.actor(user)
+            return await show_hold_offer(call,user,kind,uid,"Мой аккаунт")
+        except economy.WalletError as exc:
+            return await call.answer(str(exc),show_alert=True)
+    await state.set_state(Flow.hold_target)
+    await state.set_data({"kind":kind})
+    await show(call,"Введите @юзернейм своей группы или канала RiseGram",cancel_kb("verify:hold"))
+
+
+@router.message(StateFilter(Flow.hold_target),F.text)
+async def msg_hold_target(message: Message,state: FSMContext,user: dict):
+    import hold_shop
+    kind=(await state.get_data()).get("kind")
+    if kind not in ("group","channel"):
+        await state.clear()
+        return
+    try:
+        uid=await hold_shop.actor(user)
+        pid=await hold_shop.resolve(uid,kind,message.text)
+        await show_hold_offer(message,user,kind,pid,message.text.strip())
+        await state.clear()
+    except economy.WalletError as exc:
+        await message.answer("❌ "+esc(str(exc)),reply_markup=cancel_kb("verify:hold"))
+
+
+@router.callback_query(F.data.startswith("hold:buy:"))
+async def cb_hold_buy(call: CallbackQuery,user: dict):
+    if not await need_feature(call,"verification"):
+        return
+    import hold_shop
+    m=re.fullmatch(r"hold:buy:(account|group|channel):([1-9][0-9]{0,18}):([0-9a-f]{16})",call.data)
+    if not m:
+        return await call.answer("Устаревший счёт",show_alert=True)
+    try:
+        applied=await hold_shop.purchase(user,m[1],int(m[2]),m[3])
+        await show(call,"✅ Hold приобретён за 80 RiseStars" if applied else "✅ Эта покупка уже проведена. Повторного списания нет.",kb(back_row("donat:verify")))
+    except economy.WalletError as exc:
+        await call.answer(str(exc),show_alert=True)
+    except Exception:
+        log.exception("Hold purchase failed")
+        await call.answer("Покупка не подтверждена. Проверь профиль и баланс.",show_alert=True)
 
 
 @router.callback_query(F.data == "verify:major")
