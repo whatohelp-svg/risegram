@@ -721,27 +721,33 @@ async def scam_decide(call: CallbackQuery, rid: int, approve: bool):
         await call.answer("Заявка уже обработана.", show_alert=True)
         return
     if approve:
+        kind = "user" if req["kind"] == "account" else req["kind"]
+        try:
+            await native_shop.change_risk_label(
+                "@"+req["target"], kind, "SCAM", True, req["reason"],
+                int(call.from_user.id), f"report-{rid}")
+        except (native_shop.NativePurchaseError, psycopg.Error, OSError) as exc:
+            return await call.answer("MTProto не подтвердил метку: " + str(exc)[:130], show_alert=True)
         if not await db.resolve_scam(rid, "approved", config.OWNER_ID):
-            await call.answer("Заявка уже обработана.", show_alert=True)
-            return
-        await audit(f"SCAM #{rid} подтверждена: @{req['target']}")
-        await safe_send(call.bot, req["requester_id"], f"✅ Ваша заявка <b>#{rid}</b>: метка SCAM на @{esc(req['target'])} подтверждена.")
-        note = f"✅ Заявка #{rid} подтверждена."
+            return await call.answer("Заявка уже обработана.", show_alert=True)
+        await audit(f"SCAM #{rid} подтверждена в MTProto: @{req['target']}")
+        await safe_send(call.bot, req["requester_id"],
+            f"✅ Жалоба #{rid}: метка SCAM на @{esc(req['target'])} подтверждена")
+        note = f"✅ Заявка #{rid} подтверждена сервером"
     else:
         if not await db.resolve_scam(rid, "rejected", config.OWNER_ID):
-            await call.answer("Заявка уже обработана.", show_alert=True)
-            return
-        ok, err = await refund_stars(call.bot, req["requester_id"], req["charge_id"] or "")
+            return await call.answer("Заявка уже обработана.", show_alert=True)
         if req["charge_id"]:
-            await db.execute("UPDATE purchases SET status=? WHERE charge_id=?", ("refunded" if ok else "failed", req["charge_id"]))
-        await audit(f"SCAM #{rid} отклонена, возврат {'ок' if ok else 'ОШИБКА ' + err}")
-        await safe_send(
-            call.bot,
-            req["requester_id"],
-            f"❌ Заявка <b>#{rid}</b> на @{esc(req['target'])} отклонена модерацией. "
-            + ("Звёзды вернулись на ваш счёт." if ok else "Возврат звёзд не прошёл автоматически, мы вернём их вручную."),
-        )
-        note = f"❌ Заявка #{rid} отклонена. " + ("⭐ возвращены." if ok else f"⚠️ Возврат не прошёл: {esc(err)}")
+            ok, err = await refund_stars(call.bot, req["requester_id"], req["charge_id"])
+            await db.execute("UPDATE purchases SET status=? WHERE charge_id=?",
+                             ("refunded" if ok else "failed", req["charge_id"]))
+            await audit(f"SCAM #{rid} отклонена, возврат {'ok' if ok else err}")
+            note = "Заявка отклонена — " + ("⭐ возвращены" if ok else "возврат требует проверки")
+        else:
+            await audit(f"Бесплатная жалоба SCAM #{rid} отклонена")
+            note = f"Заявка #{rid} отклонена"
+        await safe_send(call.bot, req["requester_id"],
+                        f"ℹ️ Ваша жалоба #{rid} отклонена модерацией")
     try:
         await call.message.edit_text(note, reply_markup=kb([btn("⚠️ К заявкам", "adm:scam:0")], home_row()))
     except TelegramBadRequest:
