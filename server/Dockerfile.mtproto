@@ -17,6 +17,8 @@ RUN git init /src \
     && git -C /src checkout --detach FETCH_HEAD
 COPY server/patches/patch_mtproto.py /tmp/patch_mtproto.py
 RUN python3 /tmp/patch_mtproto.py
+COPY server/patches/recoverable_account_deletion.py /tmp/recoverable_account_deletion.py
+RUN python3 /tmp/recoverable_account_deletion.py
 COPY server/patches/channel-lookup.patch /tmp/channel-lookup.patch
 RUN git apply /tmp/channel-lookup.patch
 COPY server/patches/profile-wallet.patch /tmp/profile-wallet.patch
