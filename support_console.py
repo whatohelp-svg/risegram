@@ -120,11 +120,20 @@ async def cmd_staff(message: Message):
     if not owner(message):
         return await message.answer("Только владелец")
     parts = (message.text or "").split()
-    if len(parts) != 3 or parts[1] not in ("add", "remove") or not parts[2].isdigit():
-        return await message.answer("Формат: /supportstaff add|remove ID аккаунта из бота")
-    uid = int(parts[2])
-    if not await db.get_user(uid) or uid == int(config.OWNER_ID):
-        return await message.answer("Укажи существующий ID сотрудника, не владельца")
+    if len(parts) != 3 or parts[1] not in ("add", "remove"):
+        return await message.answer("Формат: /supportstaff add|remove @username")
+    try:
+        if parts[2].isdigit():
+            local = await db.get_user(int(parts[2]))
+        else:
+            nid = await resolve(parts[2])
+            local = await local_for_native(nid) if nid else None
+    except Exception:
+        log.exception("Cannot resolve support staff identity")
+        return await message.answer("Не удалось проверить сотрудника на сервере")
+    if not local or int(local["tg_id"]) == int(config.OWNER_ID):
+        return await message.answer("Укажи @username сотрудника с подтверждённой привязкой к боту, не владельца")
+    uid = int(local["tg_id"])
     staff = set(filter(None, (await db.get_meta("support_staff", "") or "").split(",")))
     if parts[1] == "add":
         staff.add(str(uid))
@@ -173,6 +182,15 @@ async def resolve(query):
     return int(rows[0]["id"]) if len(rows)==1 else None
 
 
+async def native_label(nid):
+    rows = await sql("""SELECT username FROM peer_usernames WHERE peer_type='user'
+        AND peer_id=%s AND active ORDER BY sort_order,username_lower LIMIT 1""", (nid,))
+    if rows:
+        return "@"+rows[0]["username"]
+    u = await profile(nid)
+    return "@"+u["username"] if u and u["username"] else "Аккаунт без @username"
+
+
 async def profile(nid):
     rows = await sql("""SELECT id,first_name,last_name,username,verified,support,scam,fake,
       is_bot,created_at,premium_expires_at,deleted_at FROM users WHERE id=%s""", (nid,))
@@ -183,13 +201,13 @@ async def account(event,nid):
     u = await profile(nid)
     if not u or u["deleted_at"]:
         return await show(event,"Аккаунт не найден",kb(back()))
-    name = (u["first_name"]+" "+u["last_name"]).strip()
+    name = ((u["first_name"] or "")+" "+(u["last_name"] or "")).strip()
     rows = [
         [button("👤 Профиль","profile",nid),button("🔐 Безопасность","security",nid)],
         [button("💎 NFT и валюта","assets",nid),button("⚖️ Модерация","moderation",nid)],
         [button("📨 Тикеты аккаунта","usertickets",nid)],back()
     ]
-    await show(event, "👤 <b>"+esc(name)+"</b>\nNative ID: <code>"+str(nid)+"</code>\n"+("@" +esc(u["username"]) if u["username"] else "NFT / без обычного username"), kb(*rows))
+    await show(event, "👤 <b>"+esc(name)+"</b>\n"+esc(await native_label(nid)), kb(*rows))
 
 
 GROUPS = {
@@ -223,8 +241,8 @@ async def ask(event,state,key,ident=None):
     await state.set_state(Work.text)
     await state.set_data({"support_action":key,"ident":ident})
     prompts = {
-        "finduser":"Введите @username, native ID или local:ID из бота",
-        "findticket":"Введите номер тикета",
+        "finduser":"Введите @юзернейм RiseGram (обычный или NFT)",
+        "findticket":"Введите @юзернейм пользователя или номер обращения",
         "reply":"Введите текст ответа пользователю (до 3000 символов)",
         "note":"Введите внутреннюю заметку (до 1000 символов)",
         "reason":"Укажите причину действия (минимум 10 символов). Сотрудник: начните с номера открытого тикета и пробела",
@@ -241,7 +259,10 @@ async def ticket(event,tid):
             [button("🚨 Приоритет","priority",tid),button("👤 Назначить себе","assign",tid)],
             [button("✅ Закрыть","close",tid),button("♻️ Переоткрыть","reopen",tid)],
             [button("👤 Аккаунт заявителя","ticketuser",tid)],back()]
-    text = ("<b>Тикет #"+str(tid)+"</b> · "+esc(t["status"])+"\nID бота: "+str(t["tg_id"])+
+    nid = await native_for_local(int(t["tg_id"]))
+    local = await db.get_user(int(t["tg_id"]))
+    label = await native_label(nid) if nid else (db.shown_username(local) if local else "Аккаунт без @username")
+    text = ("<b>Тикет #"+str(tid)+"</b> · "+esc(t["status"])+"\nПользователь: "+esc(label)+
             "\nПриоритет: "+("высокий" if m.get("priority") else "обычный")+
             "\nНазначен: "+str(m.get("assigned_to") or "—")+"\n\n"+esc(t["message"][:2300])+
             "\n\nЗаметка: "+esc((m.get("note") or "—")[:500]))
@@ -352,7 +373,13 @@ async def input_text(message: Message,state:FSMContext):
                 return await message.answer("Аккаунт не найден однозначно",reply_markup=kb(back()))
             return await account(message,nid)
         if key=="findticket":
-            return await ticket(message,int(value)) if value.isdigit() and len(value)<=12 else await message.answer("Неверный ID",reply_markup=kb(back()))
+            if value.isdigit() and len(value)<=12:
+                return await ticket(message,int(value))
+            nid=await resolve(value)
+            local=await local_for_native(nid) if nid else None
+            if not local:
+                return await message.answer("Пользователь не найден или не связан с ботом",reply_markup=kb(back()))
+            return await tickets(message,"usertickets",int(local["tg_id"]),nid)
         if key in ("reply","note"):
             tid=int(ident)
             await setup()
@@ -383,7 +410,7 @@ async def input_text(message: Message,state:FSMContext):
                 if _pending[old][0]<now:
                     _pending.pop(old,None)
             _pending[token]=(now+180,message.from_user.id,action,nid,value)
-            return await show(message,"⚠️ <b>Подтверждение</b>\n"+esc(dict(revoke="Завершить ВСЕ сессии",invalidate="Аннулировать коды",freeze="Заморозить на 24 часа",unfreeze="Разморозить")[action])+"\nNative ID: "+str(nid)+"\nПричина: "+esc(value)+"\nАккаунт и NFT не удаляются",kb([button("Подтвердить","confirm",token)],back()))
+            return await show(message,"⚠️ <b>Подтверждение</b>\n"+esc(dict(revoke="Завершить ВСЕ сессии",invalidate="Аннулировать коды",freeze="Заморозить на 24 часа",unfreeze="Разморозить")[action])+"\nАккаунт: "+esc(await native_label(nid))+"\nПричина: "+esc(value)+"\nАккаунт и NFT не удаляются",kb([button("Подтвердить","confirm",token)],back()))
     except Exception:
         log.exception("Support input failed")
         await message.answer("Не удалось выполнить действие. Проверьте данные и сервер",reply_markup=kb(back()))
@@ -426,7 +453,12 @@ async def callback(call:CallbackQuery,state:FSMContext,user:dict):
         if key=="staff":
             if not owner(call):
                 return await call.answer("Только владелец",show_alert=True)
-            return await show(call,"👥 Сотрудники: "+esc(await db.get_meta("support_staff","") or "нет")+"\n<code>/supportstaff add ID</code>\n<code>/supportstaff remove ID</code>",kb(back()))
+            names=[]
+            for uid in (await db.get_meta("support_staff","") or "").split(","):
+                if uid.isdigit():
+                    nid=await native_for_local(int(uid))
+                    names.append(await native_label(nid) if nid else "Аккаунт без подтверждённой связи")
+            return await show(call,"👥 Сотрудники: "+esc(", ".join(names) or "нет")+"\n<code>/supportstaff add @username</code>\n<code>/supportstaff remove @username</code>",kb(back()))
         if key=="appeals":
             rows=await sql("SELECT id,user_id,status,created_at FROM risegram_freeze_appeals ORDER BY id DESC LIMIT 20")
             return await show(call,"❄️ <b>Старые апелляции</b>\n"+render(rows),kb(back()))
@@ -463,7 +495,7 @@ async def callback(call:CallbackQuery,state:FSMContext,user:dict):
             return await show(call,"Аккаунт не найден",kb(back()))
         if key in GROUPS:
             rows=[[button(label,action,ident)] for label,action in GROUPS[key]]
-            return await show(call,"<b>"+dict(security="🔐 Безопасность",assets="💎 Активы",moderation="⚖️ Модерация")[key]+"</b>\nNative ID: "+str(ident),kb(*rows,[button("👤 Аккаунт","account",ident)],back()))
+            return await show(call,"<b>"+dict(security="🔐 Безопасность",assets="💎 Активы",moderation="⚖️ Модерация")[key]+"</b>\n"+esc(await native_label(ident)),kb(*rows,[button("👤 Аккаунт","account",ident)],back()))
         if key in ("revoke","invalidate","freeze","unfreeze"):
             if await protected(ident):
                 return await show(call,"Защищённый аккаунт или не подтверждён владелец",kb(back()))
