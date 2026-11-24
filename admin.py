@@ -1732,7 +1732,9 @@ async def adm_cb(call: CallbackQuery, state: FSMContext, user: dict):
     if route == "dbmenu":
         if call.from_user.id!=config.OWNER_TELEGRAM_ID:
             return await call.answer("Только владелец",show_alert=True)
-        return await show(call,"💾 Диагностика базы: /dbspace",kb(back_row("adm:home:1")))
+        await call.answer()
+        if isinstance(call.message, Message):
+            return await owner_database_space(call.message)
     if route == "stats":
         return await screen_stats(call)
     if route == "gifts":
