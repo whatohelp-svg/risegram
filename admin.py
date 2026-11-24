@@ -298,6 +298,19 @@ def native_action_error(status: int, result: dict) -> str:
     return f"MTProto HTTP {status} — сервер не выполнил операцию."
 
 
+@admin_router.message(Command("grantrole","revokerole"), OwnerOnly())
+async def role_verification(message: Message):
+    import role_marks
+    parts=(message.text or "").split()
+    if len(parts)!=3 or not parts[1].startswith("@") or parts[2].lower() not in role_marks.ROLES:
+        return await message.answer("/grantrole @username developer|tester|admin|headadmin|support|hold\n/revokerole @username тип")
+    try:
+        description=await role_marks.mark(parts[1],parts[2].lower(),parts[0].split("@")[0].lower()=="/revokerole")
+        await message.answer("✅ Метка обновлена: "+esc(parts[1])+"\n"+esc(description))
+        await audit("Role mark changed "+parts[1]+" "+parts[2])
+    except (ValueError,ClientError,TimeoutError,psycopg.Error) as exc:
+        await message.answer("❌ "+esc(str(exc)[:180]))
+
 @admin_router.message(Command("grantnft", "grantverify", "revokeverify"))
 async def grant_channel_username(message: Message):
     """Mint usernames or grant/revoke native channel and supergroup verification.
