@@ -147,6 +147,44 @@ async def handle(request):
             old=await (await conn.execute("SELECT result FROM riseiris_receipts WHERE update_id=%s",(key,))).fetchone()
             if old:
                 return result(old["result"])
+            if data.get("action")=="auto":
+                # Conservative automation is limited to the official @chat (native ID 3).
+                # Never infer insults, intent, scam, personal data or illegal content.
+                if cid!=3:
+                    return result({"ok":True,"action":"none"})
+                identity=await (await conn.execute("SELECT 1 AS ok FROM peer_usernames WHERE peer_type='channel' AND peer_id=%s AND username_lower='chat' AND active",(cid,))).fetchone()
+                bm=await member(conn,cid,BOT)
+                target=await member(conn,cid,actor)
+                user=await (await conn.execute("SELECT username,first_name,is_bot FROM users WHERE id=%s AND deleted_at IS NULL",(actor,))).fetchone()
+                if not identity or not manager(bm) or not target or target["role"]!="member" or target["status"]!="active" or not user or user["is_bot"] or any(v is True for v in target["banned_rights"].values()):
+                    return result({"ok":True,"action":"none"})
+                if await (await conn.execute("SELECT 1 AS ok FROM riseiris_restrictions WHERE channel_id=%s AND user_id=%s",(cid,actor))).fetchone():
+                    return result({"ok":True,"action":"none"})
+                # Use original database messages, not worker-provided content.
+                # Require 6 identical substantial messages in 12 seconds.
+                body=" ".join((update["body"] or "").casefold().split())
+                if len(body)<8 or body.startswith(("/","!")):
+                    return result({"ok":True,"action":"none"})
+                rows=await (await conn.execute("""SELECT body FROM channel_messages WHERE channel_id=%s AND sender_user_id=%s
+                    AND NOT deleted AND id<=%s AND message_date BETWEEN
+                    (SELECT message_date-12 FROM channel_messages WHERE channel_id=%s AND id=%s)
+                    AND (SELECT message_date FROM channel_messages WHERE channel_id=%s AND id=%s)
+                    ORDER BY id DESC LIMIT 12""",(cid,actor,mid,cid,mid,cid,mid))).fetchall()
+                if sum(" ".join((r["body"] or "").casefold().split())==body for r in rows)<6:
+                    return result({"ok":True,"action":"none"})
+                duration=600
+                now=int(time.time())
+                until=now+duration
+                rights=dict(target["banned_rights"])
+                rights.update({k:True for k in SEND_KEYS})
+                rights["ViewMessages"]=False
+                rights["UntilDate"]=until
+                await conn.execute("""INSERT INTO riseiris_restrictions(channel_id,user_id,kind,rights,previous_rights,previous_status,previous_left,expires)
+                    VALUES(%s,%s,'mute',%s,%s,%s,%s,%s)""",(cid,actor,Jsonb(rights),Jsonb(target["banned_rights"]),target["status"],target["left_at"],until))
+                await update_member(conn,cid,actor,rights,"active",target["left_at"])
+                out={"ok":True,"action":"mute","duration":duration,"reason":"1.1 — повторяющийся спам (6 одинаковых сообщений за 12 секунд)","target":"@"+user["username"] if user["username"] else user["first_name"] or "Участник"}
+                await conn.execute("INSERT INTO riseiris_receipts(update_id,result) VALUES(%s,%s)",(key,Jsonb(out)))
+                return result(out)
             action,name,duration,reason=parse(update["body"])
             bot_member=await member(conn,cid,BOT)
             actor_member=await member(conn,cid,actor)
