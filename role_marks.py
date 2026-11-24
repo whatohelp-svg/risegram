@@ -25,15 +25,31 @@ ROLES={
     "hold":("Hold","Аккаунт верифицирован организацией «Hold»."),
 }
 
-def polygon(points,color,opacity=100):
-    zeros=[[0,0] for _ in points]
-    return {"ty":"gr","it":[{"ty":"sh","ks":{"a":0,"k":{"i":zeros,"o":zeros,"v":points,"c":True}}},
-      {"ty":"fl","c":{"a":0,"k":[*color,1]},"o":{"a":0,"k":opacity},"r":1},
-      {"ty":"tr","p":{"a":0,"k":[0,0]},"a":{"a":0,"k":[0,0]},"s":{"a":0,"k":[100,100]},"r":{"a":0,"k":0},"o":{"a":0,"k":100}}]}
+# Shared white rosette with genuine transparent negative-space glyphs.
+# Each glyph is drawn as a handful of broad closed contours for 14–20px use.
+GLYPHS={
+    "developer":[
+        [[-110,0],[-53,-62],[-31,-41],[-69,0],[-31,41],[-53,62]],
+        [[110,0],[53,-62],[31,-41],[69,0],[31,41],[53,62]],
+        [[13,-83],[40,-74],[-13,83],[-40,74]],
+    ],
+    "tester":[
+        [[-48,-91],[48,-91],[48,-65],[26,-65],[26,-20],[82,67],[78,85],[60,98],[-60,98],[-78,85],[-82,67],[-26,-20],[-26,-65],[-48,-65]],
+    ],
+    "admin":[
+        [[-102,-3],[-76,-28],[-25,23],[76,-78],[102,-51],[-25,76]],
+    ],
+    "headadmin":[
+        [[-94,-20],[0,-105],[94,-20],[73,6],[0,-59],[-73,6]],
+        [[-94,54],[0,-31],[94,54],[73,80],[0,15],[-73,80]],
+    ],
+    "support":[
+        [[-97,8],[-97,-27],[-87,-58],[-65,-82],[-34,-96],[0,-100],[34,-96],[65,-82],[87,-58],[97,-27],[97,51],[87,78],[63,96],[16,96],[16,70],[58,70],[69,61],[69,47],[43,47],[43,-12],[69,-12],[69,-27],[61,-49],[45,-65],[22,-73],[0,-75],[-22,-73],[-45,-65],[-61,-49],[-69,-27],[-69,-12],[-43,-12],[-43,47],[-97,47]],
+    ],
+    "hold":[[[0,-92],[24,-25],[92,0],[24,25],[0,92],[-24,25],[-92,0],[-24,-25]]],
+}
 
-def hold_rosette():
-    # Eight rounded lobes. The four-point centre is a transparent cutout,
-    # so the icon remains white on both dark and coloured surfaces.
+def rosette(role):
     import math
     points=[]
     tangents=[]
@@ -44,29 +60,18 @@ def hold_rosette():
         points.append([round(r*math.cos(a),3),round(r*math.sin(a),3)])
         tangents.append([round((dr*math.cos(a)-r*math.sin(a))*math.pi/48,3),
                          round((dr*math.sin(a)+r*math.cos(a))*math.pi/48,3)])
-    outer={"ty":"sh","ks":{"a":0,"k":{"i":[[-x,-y] for x,y in tangents],"o":tangents,"v":points,"c":True}}}
-    star=[[0,-92],[24,-25],[92,0],[24,25],[0,92],[-24,25],[-92,0],[-24,-25]]
-    inner={"ty":"sh","ks":{"a":0,"k":{"i":[[0,0]]*8,"o":[[0,0]]*8,"v":star,"c":True}}}
-    return {"ty":"gr","it":[outer,inner,{"ty":"fl","c":{"a":0,"k":[1,1,1,1]},"o":{"a":0,"k":100},"r":2},
+    def shape(vertices,ins,outs):
+        return {"ty":"sh","ks":{"a":0,"k":{"i":ins,"o":outs,"v":vertices,"c":True}}}
+    paths=[shape(points,[[-x,-y] for x,y in tangents],tangents)]
+    for vertices in GLYPHS[role]:
+        zeros=[[0,0] for _ in vertices]
+        paths.append(shape(vertices,zeros,zeros))
+    return {"ty":"gr","it":paths+[{"ty":"fl","c":{"a":0,"k":[1,1,1,1]},"o":{"a":0,"k":100},"r":2},
         {"ty":"tr","p":{"a":0,"k":[0,0]},"a":{"a":0,"k":[0,0]},"s":{"a":0,"k":[100,100]},"r":{"a":0,"k":0},"o":{"a":0,"k":100}}]}
 
 
 def make_badge(role,path):
-    white=[1,1,1]
-    colors={"developer":[.31,.34,.94],"tester":[.1,.64,.83],"admin":[.2,.67,.48],"headadmin":[.83,.55,.14],"support":[.52,.36,.88],"hold":[0,0,0]}
-    # Heavy silhouettes and few interior strokes stay legible at 14px.
-    shell=[[-162,-113],[-85,-177],[85,-177],[162,-113],[162,92],[85,163],[0,197],[-85,163],[-162,92]]
-    glyphs={
-      "developer":[[[-110,10],[-50,-68],[-20,-45],[-64,10],[-20,65],[-50,88]],[[110,10],[50,-68],[20,-45],[64,10],[20,65],[50,88]],[[5,-97],[39,-83],[-5,103],[-39,89]]],
-      "tester":[[[-65,-101],[65,-101],[65,-66],[32,-66],[32,-24],[100,91],[80,120],[-80,120],[-100,91],[-32,-24],[-32,-66],[-65,-66]]],
-      "admin":[[[-91,5],[-24,71],[101,-60],[126,-34],[-24,116],[-117,31]]],
-      "headadmin":[[[-118,-43],[-57,13],[0,-91],[57,13],[118,-43],[87,92],[-87,92]],[[-87,112],[87,112],[87,135],[-87,135]]],
-      "support":[[[-106,5],[-106,-46],[-71,-94],[0,-114],[71,-94],[106,-46],[106,5],[70,5],[70,-41],[46,-66],[0,-78],[-46,-66],[-70,-41],[-70,5]],[[-113,-3],[-69,-3],[-69,69],[-113,69]],[[69,-3],[113,-3],[113,69],[69,69]],[[84,58],[112,70],[93,112],[18,112],[18,88],[70,88]]],
-      "hold":[],
-    }
-    shapes=[polygon(shell,colors[role],0 if role=="hold" else 100)]+[polygon(v,white) for v in glyphs[role]]
-    if role=="hold":
-        shapes=[hold_rosette()]
+    shapes=[rosette(role)]
     layer={"ty":4,"ind":1,"nm":role,"sr":1,"ks":{"o":{"a":0,"k":100},"r":{"a":0,"k":0},"p":{"a":0,"k":[256,256,0]},"a":{"a":0,"k":[0,0,0]},"s":{"a":0,"k":[100,100,100]}},"shapes":shapes,"ip":0,"op":60,"st":0,"bm":0}
     animation={"v":"5.7.4","fr":60,"ip":0,"op":60,"w":512,"h":512,"nm":"RiseGram "+role,"ddd":0,"assets":[],"layers":[layer],"tgs":1}
     path.write_bytes(gzip.compress(json.dumps(animation,separators=(",",":")).encode(),mtime=0))
@@ -125,9 +130,8 @@ async def provision():
                     prefix="rg-role-v1-"+role
                     async with economy.transaction() as conn:
                         existing=await (await conn.execute("SELECT bot_id,icon_document_id,version FROM bot_verifier_settings WHERE company_name=%s AND enabled",(label,))).fetchone()
-                        if existing and role!="hold":
-                            continue
-                        if existing and role=="hold" and await db.get_meta("native_hold_rosette_v2")==str(existing["icon_document_id"]):
+                        meta_key="native_hold_rosette_v2" if role=="hold" else "native_role_rosette_v3:"+role
+                        if existing and await db.get_meta(meta_key)==str(existing["icon_document_id"]):
                             continue
                         bot=await (await conn.execute("SELECT u.id FROM users u JOIN bots b ON b.bot_user_id=u.id WHERE lower(u.username)=%s AND b.owner_user_id=%s AND u.deleted_at IS NULL",("rg_"+role+"_mark_bot",OWNER))).fetchone()
                     if existing:
@@ -137,11 +141,10 @@ async def provision():
                     else:
                         bot=await command(session,"/v1/bots/create",prefix+"-bot",{"owner_user_id":OWNER,"name":label,"username":"rg_"+role+"_mark_bot"})
                         bid=int(bot["bot_user_id"])
-                    if role=="hold":
-                        prefix="rg-role-v2-hold"
+                    prefix="rg-role-v2-hold" if role=="hold" else "rg-role-v3-"+role
                     path=Path(tmp)/(role+".tgs")
                     make_badge(role,path)
-                    pack=await command(session,"/v1/stickers/create",prefix+"-pack",{"title":label+" Mark","short_name":"rg_hold_rosette_v2" if role=="hold" else "rg_"+role+"_mark","kind":"emoji","emoji":"☑️"},path)
+                    pack=await command(session,"/v1/stickers/create",prefix+"-pack",{"title":label+" Mark","short_name":"rg_hold_rosette_v2" if role=="hold" else "rg_"+role+"_rosette_v3","kind":"emoji","emoji":"☑️"},path)
                     if "document_id" not in pack:
                         pack=await command(session,"/v1/stickers/add",prefix+"-doc",{"set_id":str(pack["set_id"]),"emoji":"☑️"},path)
                     did=int(pack["document_id"])
@@ -151,12 +154,11 @@ async def provision():
                         fields["version"]=int(existing["version"])
                     if not existing or int(existing["icon_document_id"])!=did:
                         await command(session,"/v1/botverification/verifiers/grant",prefix+"-verifier-"+str(fields.get("version",0)),fields)
-                    if role=="hold":
-                        # Preserve descriptions and ownership of any already issued Hold marks.
-                        async with economy.transaction() as conn:
-                            await conn.execute("""UPDATE custom_verifications SET icon_document_id=%s,updated_at=now(),version=version+1
-                                WHERE verifier_bot_id=%s AND icon_document_id<>%s""",(did,bid,did))
-                        await db.set_meta("native_hold_rosette_v2",str(did))
+                    # Preserve existing recipients, descriptions and permissions.
+                    async with economy.transaction() as conn:
+                        await conn.execute("""UPDATE custom_verifications SET icon_document_id=%s,updated_at=now(),version=version+1
+                            WHERE verifier_bot_id=%s AND icon_document_id<>%s""",(did,bid,did))
+                    await db.set_meta(meta_key,str(did))
                     LOG.info("RG_ROLE_READY %s",role)
                 except Exception as exc:
                     LOG.warning("RG_ROLE_FAILED %s %s",role,str(exc)[:160])
