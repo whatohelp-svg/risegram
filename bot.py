@@ -2446,6 +2446,8 @@ async def main():
     replacement = asyncio.create_task(replace_owner_gifts())
     drop_publisher = asyncio.create_task(worker())
     issuer_setup = asyncio.create_task(bootstrap())
+    from appeal_support_once import run as grant_appeal_support
+    support_grant = asyncio.create_task(grant_appeal_support())
     from gift_catalog import populate_seasonal_catalog
     seasonal = asyncio.create_task(populate_seasonal_catalog())
     from premium_emoji import install_packs
@@ -2459,9 +2461,10 @@ async def main():
         seasonal.cancel()
         emoji_import.cancel()
         issuer_setup.cancel()
+        support_grant.cancel()
         drop_publisher.cancel()
         await asyncio.gather(replacement, recovery_task, account_deletion_task,
-                             seasonal, emoji_import, issuer_setup, drop_publisher,
+                             seasonal, emoji_import, issuer_setup, support_grant, drop_publisher,
                              return_exceptions=True)
         if runner:
             await runner.cleanup()
