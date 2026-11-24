@@ -115,6 +115,86 @@ async def expire(conn):
             continue
         await restore(conn,cid,uid,r,m)
 
+async def auto_check(conn,cid,mid,actor,update):
+    key=update["id"]
+    old=await (await conn.execute("SELECT 1 AS ok FROM riseiris_receipts WHERE update_id=%s",(key,))).fetchone()
+    if old:
+        return {"ok":True,"action":"none"}
+    # Conservative automation is limited to the official @chat (native ID 3).
+    # Never infer insults, intent, scam, personal data or illegal content.
+    if cid!=3:
+        return {"ok":True,"action":"none"}
+    identity=await (await conn.execute("SELECT 1 AS ok FROM peer_usernames WHERE peer_type='channel' AND peer_id=%s AND username_lower='chat' AND active",(cid,))).fetchone()
+    bm=await member(conn,cid,BOT)
+    target=await member(conn,cid,actor)
+    user=await (await conn.execute("SELECT username,first_name,is_bot FROM users WHERE id=%s AND deleted_at IS NULL",(actor,))).fetchone()
+    if not identity or not manager(bm) or not target or target["role"]!="member" or target["status"]!="active" or not user or user["is_bot"] or any(target["banned_rights"].get(k) is True for k in SEND_KEYS+["ViewMessages"]):
+        return {"ok":True,"action":"none"}
+    if await (await conn.execute("SELECT 1 AS ok FROM riseiris_restrictions WHERE channel_id=%s AND user_id=%s",(cid,actor))).fetchone():
+        return {"ok":True,"action":"none"}
+    # Confirm live, nonempty text spam from the authoritative message store.
+    # Non-message restrictions (EditRank etc.) do not prevent a mute.
+    if update["created_at"].timestamp()<time.time()-60:
+        return {"ok":True,"action":"none"}
+    body=" ".join((update["body"] or "").casefold().split())
+    if not body or body.startswith(("/","!")):
+        return {"ok":True,"action":"none"}
+    rows=await (await conn.execute("""SELECT body,message_date FROM channel_messages WHERE channel_id=%s AND sender_user_id=%s
+        AND NOT deleted AND id<=%s AND message_date BETWEEN
+        (SELECT message_date-15 FROM channel_messages WHERE channel_id=%s AND id=%s)
+        AND (SELECT message_date FROM channel_messages WHERE channel_id=%s AND id=%s)
+        ORDER BY id DESC LIMIT 32""",(cid,actor,mid,cid,mid,cid,mid))).fetchall()
+    if not rows:
+        return {"ok":True,"action":"none"}
+    latest=rows[0]["message_date"]
+    bodies=[(" ".join((r["body"] or "").casefold().split()),r["message_date"]) for r in rows]
+    bodies=[(t,d) for t,d in bodies if t and not t.startswith(("/","!"))]
+    repeated=sum(t==body and d>=latest-12 for t,d in bodies)>=6
+    burst=len(bodies)>=12
+    if not repeated and not burst:
+        return {"ok":True,"action":"none"}
+    reason="1.1 — спам (6 одинаковых сообщений за 12 секунд)" if repeated else "1.1 — флуд (12 сообщений за 15 секунд)"
+    duration=600
+    now=int(time.time())
+    until=now+duration
+    rights=dict(target["banned_rights"])
+    rights.update({k:True for k in SEND_KEYS})
+    rights["ViewMessages"]=False
+    rights["UntilDate"]=until
+    await conn.execute("""INSERT INTO riseiris_restrictions(channel_id,user_id,kind,rights,previous_rights,previous_status,previous_left,expires)
+        VALUES(%s,%s,'mute',%s,%s,%s,%s,%s)""",(cid,actor,Jsonb(rights),Jsonb(target["banned_rights"]),target["status"],target["left_at"],until))
+    await update_member(conn,cid,actor,rights,"active",target["left_at"])
+    out={"ok":True,"action":"mute","duration":duration,"reason":reason,"target":"@"+user["username"] if user["username"] else user["first_name"] or "Участник"}
+    await conn.execute("INSERT INTO riseiris_receipts(update_id,result) VALUES(%s,%s)",(key,Jsonb(out)))
+    return out
+
+async def scan_recent_spam(conn):
+    # Fallback when polling has a conflict or a worker restarts. Inspect only
+    # recent messages actually delivered to RiseIris in the official group.
+    # Channel lock serializes this with manual moderation and live auto checks.
+    c=await (await conn.execute("SELECT id FROM channels WHERE id=3 AND megagroup AND NOT deleted FOR UPDATE")).fetchone()
+    if not c:
+        return []
+    rows=await (await conn.execute("""SELECT u.id,u.created_at,m.id AS mid,m.sender_user_id AS actor,m.body
+        FROM bot_api_updates u JOIN channel_messages m ON m.channel_id=u.peer_id AND m.id=u.message_id
+        JOIN channel_members cm ON cm.channel_id=m.channel_id AND cm.user_id=m.sender_user_id
+        WHERE u.bot_user_id=%s AND u.update_kind='message' AND u.peer_type='channel' AND u.peer_id=3
+          AND u.created_at>now()-interval '30 seconds' AND m.message_date>=extract(epoch from now())::bigint-30
+          AND NOT m.deleted AND cm.role='member' AND cm.status='active'
+          AND NOT EXISTS(SELECT 1 FROM riseiris_receipts r WHERE r.update_id=u.id)
+        ORDER BY u.id DESC LIMIT 48""",(BOT,))).fetchall()
+    results=[]
+    for row in rows:
+        try:
+            async with conn.transaction():
+                out=await auto_check(conn,3,int(row["mid"]),int(row["actor"]),row)
+                if out.get("action")=="mute":
+                    results.append(out)
+        except Exception:
+            LOG.exception("Iris fallback scan failed for update %s",row["id"])
+    return results
+
+
 async def handle(request):
     auth=request.headers.get("Authorization","")
     if not auth.startswith("Bearer ") or len(auth)>240:
@@ -128,7 +208,7 @@ async def handle(request):
                 return result({"ok":False,"error":"Unauthorized"},401)
             if data.get("action")=="expire":
                 await expire(conn)
-                return result({"ok":True})
+                return result({"ok":True,"auto_mutes":await scan_recent_spam(conn)})
             chat,mid,actor=data.get("chat_id"),data.get("message_id"),data.get("user_id")
             if type(chat) is not int or chat>=-1000000000000 or type(mid) is not int or not 0<mid<=2147483647 or type(actor) is not int or actor<=0:
                 raise ValueError("Команда доступна в супергруппе RiseGram")
@@ -146,55 +226,9 @@ async def handle(request):
             key=update["id"]
             old=await (await conn.execute("SELECT result FROM riseiris_receipts WHERE update_id=%s",(key,))).fetchone()
             if old:
-                return result(old["result"])
+                return result({"ok":True,"action":"none"} if data.get("action")=="auto" else old["result"])
             if data.get("action")=="auto":
-                # Conservative automation is limited to the official @chat (native ID 3).
-                # Never infer insults, intent, scam, personal data or illegal content.
-                if cid!=3:
-                    return result({"ok":True,"action":"none"})
-                identity=await (await conn.execute("SELECT 1 AS ok FROM peer_usernames WHERE peer_type='channel' AND peer_id=%s AND username_lower='chat' AND active",(cid,))).fetchone()
-                bm=await member(conn,cid,BOT)
-                target=await member(conn,cid,actor)
-                user=await (await conn.execute("SELECT username,first_name,is_bot FROM users WHERE id=%s AND deleted_at IS NULL",(actor,))).fetchone()
-                if not identity or not manager(bm) or not target or target["role"]!="member" or target["status"]!="active" or not user or user["is_bot"] or any(target["banned_rights"].get(k) is True for k in SEND_KEYS+["ViewMessages"]):
-                    return result({"ok":True,"action":"none"})
-                if await (await conn.execute("SELECT 1 AS ok FROM riseiris_restrictions WHERE channel_id=%s AND user_id=%s",(cid,actor))).fetchone():
-                    return result({"ok":True,"action":"none"})
-                # Confirm live, nonempty text spam from the authoritative message store.
-                # Non-message restrictions (EditRank etc.) do not prevent a mute.
-                if update["created_at"].timestamp()<time.time()-60:
-                    return result({"ok":True,"action":"none"})
-                body=" ".join((update["body"] or "").casefold().split())
-                if not body or body.startswith(("/","!")):
-                    return result({"ok":True,"action":"none"})
-                rows=await (await conn.execute("""SELECT body,message_date FROM channel_messages WHERE channel_id=%s AND sender_user_id=%s
-                    AND NOT deleted AND id<=%s AND message_date BETWEEN
-                    (SELECT message_date-15 FROM channel_messages WHERE channel_id=%s AND id=%s)
-                    AND (SELECT message_date FROM channel_messages WHERE channel_id=%s AND id=%s)
-                    ORDER BY id DESC LIMIT 32""",(cid,actor,mid,cid,mid,cid,mid))).fetchall()
-                if not rows:
-                    return result({"ok":True,"action":"none"})
-                latest=rows[0]["message_date"]
-                bodies=[(" ".join((r["body"] or "").casefold().split()),r["message_date"]) for r in rows]
-                bodies=[(t,d) for t,d in bodies if t and not t.startswith(("/","!"))]
-                repeated=sum(t==body and d>=latest-12 for t,d in bodies)>=6
-                burst=len(bodies)>=12
-                if not repeated and not burst:
-                    return result({"ok":True,"action":"none"})
-                reason="1.1 — спам (6 одинаковых сообщений за 12 секунд)" if repeated else "1.1 — флуд (12 сообщений за 15 секунд)"
-                duration=600
-                now=int(time.time())
-                until=now+duration
-                rights=dict(target["banned_rights"])
-                rights.update({k:True for k in SEND_KEYS})
-                rights["ViewMessages"]=False
-                rights["UntilDate"]=until
-                await conn.execute("""INSERT INTO riseiris_restrictions(channel_id,user_id,kind,rights,previous_rights,previous_status,previous_left,expires)
-                    VALUES(%s,%s,'mute',%s,%s,%s,%s,%s)""",(cid,actor,Jsonb(rights),Jsonb(target["banned_rights"]),target["status"],target["left_at"],until))
-                await update_member(conn,cid,actor,rights,"active",target["left_at"])
-                out={"ok":True,"action":"mute","duration":duration,"reason":reason,"target":"@"+user["username"] if user["username"] else user["first_name"] or "Участник"}
-                await conn.execute("INSERT INTO riseiris_receipts(update_id,result) VALUES(%s,%s)",(key,Jsonb(out)))
-                return result(out)
+                return result(await auto_check(conn,cid,mid,actor,update))
             action,name,duration,reason=parse(update["body"])
             bot_member=await member(conn,cid,BOT)
             actor_member=await member(conn,cid,actor)
