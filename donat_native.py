@@ -237,7 +237,7 @@ async def change_risk_label(target: str, kind: str, label: str,
     # Only after native confirms do we update the bot's display cache.
     # For numerical ID targets there is no stable username key to store.
     if target.startswith("@"):
-        name = ensure_name(target)
+        name = db.norm_username(target)
         if enabled:
             await db.set_risk_label(name, label, actor, reason)
             other = "FAKE" if label == "SCAM" else "SCAM"
