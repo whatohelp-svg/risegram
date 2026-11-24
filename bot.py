@@ -399,34 +399,55 @@ async def cb_help(call: CallbackQuery):
     await show(call, HELP_TEXT, kb(back_row()))
 
 
+GIFT_VALUE_MODES={"stars":"Stars ⭐","telegram":"Как в Telegram · ₽","real":"Настоящие рубли · ₽"}
+
+async def sync_gift_value_mode(user,mode):
+    from support_console import native_for_local
+    nid=await native_for_local(int(user["tg_id"]))
+    if not nid:
+        raise economy.WalletError("Сначала войдите в клиент RiseGram по своему номеру")
+    async with economy.transaction() as conn:
+        await conn.execute("""INSERT INTO risegram_gift_value_preferences(user_id,mode)
+            VALUES(%s,%s) ON CONFLICT(user_id) DO UPDATE SET mode=excluded.mode,updated_at=now()""",(nid,mode))
+
 async def settings_screen(event, user: dict):
-    mode = user.get("gift_mode") or "real"
-    cur = "Настоящие рубли" if mode == "real" else "Как в Telegram"
-    text = (
+    mode=user.get("gift_mode") or "stars"
+    if mode not in GIFT_VALUE_MODES:
+        mode="stars"
+    cur=GIFT_VALUE_MODES[mode]
+    text=(
         "⚙️ <b>Настройки</b>\n\n"
         f"<b>Ценность подарков</b>\nСейчас: <b>{cur}</b>\n\n"
+        "Stars: цена в RiseStars ⭐\n"
         f"Как в Telegram: 100 ⭐ ≈ {fmt_num(config.TG_RUB_PER_100_STARS)} ₽\n"
-        f"Настоящие рубли: 100 ⭐ = {fmt_num(config.REAL_RUB_PER_100_STARS, 2)} ₽\n\n"
-        "Выбор действует на всех ваших аккаунтах. Новая цена появится в подарке примерно через 15 секунд, "
-        "откройте его заново."
+        f"Настоящие рубли: 100 ⭐ ≈ {fmt_num(config.REAL_RUB_PER_100_STARS,2)} ₽\n\n"
+        "Настройка применяется к оценке подарков, которые вы просматриваете в своём аккаунте. "
+        "Цены покупки и балансы не меняются. Рублёвые значения расчётные, не сумма вывода.\n"
+        "Закройте и откройте окно ценности подарка заново."
     )
-    mark = lambda m, t: btn(("✓ " if mode == m else "") + t, f"set:gift:{m}", style="primary" if mode == m else None)
-    await show(event, text, kb([mark("telegram", "Как в Telegram"), mark("real", "Настоящие рубли")], back_row()))
+    mark=lambda m:btn(("✓ " if mode==m else "")+GIFT_VALUE_MODES[m],f"set:gift:{m}",style="primary" if mode==m else None)
+    await show(event,text,kb([mark("stars")],[mark("telegram"),mark("real")],back_row()))
 
-
-@router.callback_query(F.data == "menu:settings")
-async def cb_settings(call: CallbackQuery, user: dict):
-    await settings_screen(call, user)
-
+@router.callback_query(F.data=="menu:settings")
+async def cb_settings(call:CallbackQuery,user:dict):
+    try:
+        await sync_gift_value_mode(user,user.get("gift_mode") if user.get("gift_mode") in GIFT_VALUE_MODES else "stars")
+    except (economy.WalletError,psycopg.Error,ClientError,TimeoutError):
+        await call.answer("Синхронизация настройки пока недоступна")
+    await settings_screen(call,user)
 
 @router.callback_query(F.data.startswith("set:gift:"))
-async def cb_set_gift(call: CallbackQuery, user: dict):
-    mode = call.data.split(":")[2]
-    if mode not in ("telegram", "real"):
+async def cb_set_gift(call:CallbackQuery,user:dict):
+    mode=call.data.split(":")[-1]
+    if mode not in GIFT_VALUE_MODES:
         return
-    await db.set_gift_mode(user["tg_id"], mode)
-    user["gift_mode"] = mode
-    await settings_screen(call, user)
+    try:
+        await sync_gift_value_mode(user,mode)
+        await db.set_gift_mode(user["tg_id"],mode)
+    except (economy.WalletError,psycopg.Error,ClientError,TimeoutError) as exc:
+        return await call.answer("Не удалось синхронизировать. Войдите в клиент и повторите.",show_alert=True)
+    user["gift_mode"]=mode
+    await settings_screen(call,user)
 
 
 # ─── «Ещё» и профиль ────────────────────────────────────────────────────────
