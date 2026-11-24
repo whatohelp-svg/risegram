@@ -30,6 +30,7 @@ import config
 import database as db
 import gift_drops
 import native_economy as economy
+import donat_native as native_shop
 from admin import admin_router
 from aiohttp import ClientError
 from api import native_wallet, client_wallet_line, start_api, sync_collectible_usernames, sync_mtproto_verification
@@ -50,6 +51,8 @@ class Flow(StatesGroup):
     custom_stars = State()
     gift_target = State()
     verify_channel = State()
+    native_chat_target = State()
+    native_chat_username = State()
     scam_target = State()
     scam_reason = State()
     number_custom = State()
@@ -431,10 +434,12 @@ async def donat_hub(event):
         f"💎 <b>Донат {config.BRAND}</b>\n\n"
         "Оплата звёздами Telegram, выдача — сразу после оплаты.\n\n"
         f"⭐ {config.CURRENCY_NAME} — пополнение баланса\n"
-        "✅ Верификация — Мажор для аккаунта или канала\n"
-        "⚠️ Метка SCAM — пометить мошенника\n"
+        "💠 Major — платный статус аккаунта\n"
+        "📣 Каналы и группы — NFT-юзернеймы и платные метки\n"
+        "☑️ Официальная галочка RiseGram — только после проверки\n"
+        "⚠️ SCAM/FAKE — бесплатное обращение в модерацию\n"
         "📞 Номера +888 — анонимный номер\n"
-        "🏷 NFT-юзернеймы — коллекционный @username\n\n"
+        "🏷 NFT-юзернеймы аккаунта — коллекционное @имя\n\n"
         "<i>Покупки действуют внутри RiseGram, не в официальном Telegram.</i>"
     )
     await show(
@@ -442,7 +447,8 @@ async def donat_hub(event):
         text,
         kb(
             [btn(f"⭐ {config.CURRENCY_NAME}", "rs:self"), btn("✅ Верификация", "donat:verify")],
-            [btn("⚠️ Метка SCAM", "donat:scam"), btn("📞 Номера +888", "donat:numbers")],
+            [btn("📣 Для групп и каналов", "donat:chats"), btn("📞 Номера +888", "donat:numbers")],
+            [btn("⚠️ Сообщить о SCAM/FAKE", "donat:scam")],
             [btn("🏷 NFT-юзернеймы", "donat:nft")],
             [webapp_button("primary")],
             back_row(),
@@ -604,7 +610,8 @@ async def cb_verify_hub(call: CallbackQuery):
     await show(
         call,
         "✅ <b>Верификация</b>\n\nВыберите вид верификации:",
-        kb([btn(f"💎 Мажор · от {config.VERIFY_PRICE} ⭐", "verify:major", style="primary")], back_row("donat:hub")),
+        kb([btn(f"💎 Мажор · {config.VERIFY_PRICE} ⭐", "verify:major", style="primary")],
+           [btn("☑️ Официальная галочка · заявка", "verify:official")], back_row("donat:hub")),
     )
 
 
@@ -619,7 +626,7 @@ async def cb_verify_major(call: CallbackQuery):
         "Действует внутри экосистемы, в официальном Telegram галочки не будет.\n\nВыберите, что верифицировать:",
         kb(
             [btn(f"👤 Аккаунт · {p} ⭐", "verify:account", style="success")],
-            [btn(f"📣 Канал или группа · {p} ⭐", "verify:channel")],
+            [btn(f"📣 Канал или группа · {p} ⭐", "donat:chats")],
             back_row("donat:verify"),
         ),
     )
@@ -697,8 +704,8 @@ async def cb_scam_hub(call: CallbackQuery):
     p = config.SCAM_PRICE
     await show(
         call,
-        "⚠️ <b>Метка SCAM</b>\n\nПометить аккаунт или канал мошенника. Заявку проверяет модерация: "
-        "если метку не подтвердят, звёзды вернутся автоматически.",
+        "⚠️ <b>Пожаловаться на SCAM</b>\n\nЗаявка бесплатна и требует фактической причины. "
+        "Решение принимает модерация RiseGram. Метки SCAM и FAKE нельзя купить.",
         kb(
             [btn(f"👤 Аккаунт · {p} ⭐", "scam:account", style="danger")],
             [btn(f"📣 Канал или группа · {p} ⭐", "scam:channel", style="danger")],
@@ -752,16 +759,12 @@ async def msg_scam_reason(message: Message, state: FSMContext, user: dict):
     if not target:
         await message.answer("Сессия устарела, начните заново: /shop")
         return
-    rid = await db.create_scam_request(user["tg_id"], kind, target, reason, config.SCAM_PRICE)
-    await send_stars_invoice(
-        message.bot,
-        user["tg_id"],
-        title="Метка SCAM",
-        description=f"Заявка #{rid}: пометить @{target}. Если модерация откажет, звёзды вернутся.",
-        payload=f"sc:{kind[0]}:{rid}",
-        stars=config.SCAM_PRICE,
-        label=f"SCAM · @{target}"[:32],
-    )
+    rid = await db.create_scam_request(user["tg_id"], kind, target, reason, 0)
+    await db.execute("UPDATE scam_requests SET status='pending' WHERE id=? AND status='unpaid'", (rid,))
+    await message.answer(f"✅ Жалоба #{rid} на @{esc(target)} передана в модерацию бесплатно",
+                         reply_markup=kb([btn("💎 Донат", "donat:hub")]))
+    await safe_send(message.bot, config.OWNER_ID,
+        f"⚠️ Новая жалоба #{rid} на @{esc(target)}: {esc(reason)}")
 
 
 # ═══════════════════════════ номера +888 ════════════════════════════════════
@@ -989,8 +992,13 @@ async def expected_price(payload: str) -> int | None:
             return int(a[0])
         if kind == "vm":
             return config.VERIFY_PRICE
+        if kind == "cg":
+            return config.CHANNEL_NFT_PRICE
+        if kind == "vb":
+            return (config.CHANNEL_MAJOR_PRICE if a[0] == "major"
+                    else config.CHANNEL_RISEGRAM_PRICE if a[0] == "risegram" else None)
         if kind == "sc":
-            return config.SCAM_PRICE
+            return None  # warning marks cannot be bought
         if kind == "nm":
             return number_price(a[0])
         if kind == "nu":
@@ -1009,8 +1017,9 @@ async def validate_order(uid: int, payload: str, total: int) -> str | None:
     if exp is None or exp != total:
         return "Счёт устарел. Откройте магазин заново: /shop"
     kind, *a = payload.split(":")
-    if kind in ("rs", "vm", "sc", "nm", "nu") and not await db.is_feature_on(
-        {"rs": "store", "vm": "verification", "sc": "scam_labels", "nm": "auth_numbers", "nu": "nft_usernames"}[kind]
+    if kind in ("rs", "vm", "sc", "nm", "nu", "cg", "vb") and not await db.is_feature_on(
+        {"rs": "store", "vm": "verification", "sc": "scam_labels", "nm": "auth_numbers", "nu": "nft_usernames",
+         "cg": "nft_usernames", "vb": "verification"}[kind]
     ):
         return "Раздел временно отключён."
     try:
@@ -1018,10 +1027,17 @@ async def validate_order(uid: int, payload: str, total: int) -> str | None:
             if not await db.get_user(int(a[1])):
                 return "Получатель не найден."
         elif kind == "vm":
-            if a[0] == "a" and user.get("verified"):
-                return "Аккаунт уже верифицирован."
-            if a[0] == "c" and await db.fetchone("SELECT 1 AS x FROM verified_entities WHERE target=?", (a[1],)):
-                return "Этот чат уже верифицирован."
+            if a[0] != "a":
+                return "Старый счёт канала недоступен. Выберите покупку заново."
+            if user.get("verified_major"):
+                return "У аккаунта уже есть метка Major."
+        elif kind in ("cg", "vb"):
+            peer_kind, peer_id = a[0], int(a[1]) if kind == "cg" else int(a[1])
+            await native_shop.validate_chat_owner(uid, peer_kind, str(peer_id))
+            if kind == "cg":
+                await native_shop.check_chat_username(a[2])
+            elif a[2] not in ("major", "risegram"):
+                return "Неверная метка"
         elif kind == "sc":
             req = await db.get_scam_request(int(a[1]))
             if not req or req["status"] != "unpaid" or req["requester_id"] != uid:
@@ -1034,6 +1050,8 @@ async def validate_order(uid: int, payload: str, total: int) -> str | None:
                 return "Юзернейм уже занят."
     except (IndexError, ValueError):
         return "Счёт повреждён."
+    except (native_shop.NativePurchaseError, OSError) as exc:
+        return str(exc)[:180]
     return None
 
 
@@ -1071,6 +1089,20 @@ async def deliver_order(bot: Bot, uid: int, payload: str, stars: int, charge: st
         await safe_send(bot, target, f"🎁 {esc(db.shown_username(me))} подарил(а) вам <b>{fmt_num(amount)} {config.CURRENCY_NAME}</b>!")
         return True, "risestars", f"{fmt_num(amount)} {config.CURRENCY_NAME} → {db.shown_username(t)}", (
             f"✅ Оплата прошла успешно! {esc(db.shown_username(t))} получил(а) <b>{fmt_num(amount)} {config.CURRENCY_NAME}</b>."
+        )
+    if kind == "cg":
+        peer_kind, peer_id, name = a[0], int(a[1]), a[2]
+        await native_shop.issue_chat_username(uid, peer_kind, peer_id, name, charge)
+        return True, "native_chat_username", f"NFT @{name} · {peer_kind} {peer_id}", (
+            f"✅ NFT @{esc(name)} выдан чату <code>{peer_id}</code> в RiseGram"
+        )
+    if kind == "vb":
+        peer_kind, peer_id, issuer = a[0], int(a[1]), a[2]
+        await native_shop.native_chat_issuer(uid, peer_kind, peer_id, issuer, charge)
+        label = "Major" if issuer == "major" else "RiseGram"
+        return True, "native_chat_label", f"Платная метка {label} · {peer_id}", (
+            f"✅ Коммерческая метка {label} назначена чату <code>{peer_id}</code> "
+            "(не официальная верификация)"
         )
     if kind == "vm":
         if a[0] == "a":
