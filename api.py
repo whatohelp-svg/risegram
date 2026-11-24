@@ -26,6 +26,7 @@ from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError, Teleg
 
 import config
 import database as db
+import freeze_appeals
 import risegram_bot_api as bot_api
 import native_bot_proxy
 import gift_drops as local_gifts
@@ -1585,6 +1586,8 @@ async def start_api(bot) -> web.AppRunner | None:
         web.post("/internal/mtproto/otp", h_mtproto_otp_delivery),
         web.get("/api/profiles/{peer}/verification", h_profile_verification),
         web.get("/health", h_health),
+        web.get("/appeal", freeze_appeals.h_appeal_get),
+        web.post("/appeal", freeze_appeals.h_appeal_post),
         web.get("/{username}", h_public_link),
     ])
     runner = web.AppRunner(app)
