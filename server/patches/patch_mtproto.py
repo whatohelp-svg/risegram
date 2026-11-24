@@ -452,3 +452,13 @@ patch_go_file(
 
 print("RiseGram MTProto reconnect and sign-in retry fixes patched.")
 
+
+
+# Fixed, owner-confirmed gift order worker. No auth-key/session export.
+patch_go_file(
+    "cmd/telesrv/main.go",
+    "\tgo rpc.NewBootstrapUpdateDispatcher(router, logger.Named(\"rpc\").Named(\"bootstrap\")).Run(ctx)\n",
+    "\tgo router.RunRiseGramGiftPermits(ctx, pool, logger.Named(\"risegram-gift-permit\"))\n"
+    "\tgo rpc.NewBootstrapUpdateDispatcher(router, logger.Named(\"rpc\").Named(\"bootstrap\")).Run(ctx)\n",
+    "owner-confirmed gift worker",
+)
