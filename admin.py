@@ -1864,9 +1864,18 @@ async def cmd_support_reply(message: Message):
     if int(message.from_user.id) != int(config.OWNER_TELEGRAM_ID):
         return await message.answer("❌ Только владелец может отвечать на обращения")
     parts = (message.text or "").split(maxsplit=2)
-    if len(parts) != 3 or not parts[1].isdigit() or not parts[2].strip():
-        return await message.answer("Формат: /reply ID текст ответа")
-    ticket = await db.get_support_ticket(int(parts[1]))
+    if len(parts) != 3 or not parts[2].strip():
+        return await message.answer("Формат: /reply @username текст ответа (или номер тикета)")
+    if parts[1].isdigit():
+        ticket = await db.get_support_ticket(int(parts[1]))
+    else:
+        target = await parse_target(parts[1])
+        if not target:
+            return await message.answer("Пользователь не найден однозначно")
+        rows = await db.fetchall("SELECT * FROM support_tickets WHERE tg_id=? AND status='open' ORDER BY id DESC LIMIT 2",(int(target["tg_id"]),))
+        if len(rows)>1:
+            return await message.answer("У пользователя несколько обращений. Выберите нужное в панели /supportpanel → Найти тикет")
+        ticket = rows[0] if rows else None
     if not ticket:
         return await message.answer("Обращение не найдено")
     if ticket["status"] != "open":
