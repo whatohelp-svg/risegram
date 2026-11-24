@@ -171,10 +171,14 @@ async def preview(phone: str) -> dict:
     return dict(phone=phone, local=local, native=peer, pending=pending, receipt=receipt)
 
 
-async def schedule(phone: str, actor: int, key: str) -> dict:
+async def schedule(phone: str, actor: int, key: str,
+                   expected_native_id: int = 0, expected_local_id: int = 0) -> dict:
     info = await preview(phone)
     local = info["local"]
     peer = info["native"]
+    if (expected_native_id and (not peer or int(peer["id"]) != expected_native_id)
+            or expected_local_id and (not local or int(local["tg_id"]) != expected_local_id)):
+        raise RecoveryError("Владелец номера изменился после подтверждения")
     if info["pending"]:
         raise RecoveryError("Удаление уже ожидает выполнения на MTProto — используй восстановление")
     if info["receipt"] and info["receipt"]["status"] in ACTIVE:
