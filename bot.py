@@ -166,6 +166,8 @@ async def badges(user: dict) -> str:
         parts.append("☑️ Верификация RiseGram")
     if user.get("verified_major"):
         parts.append("💠 Верификация Major")
+    if await db.fetchone("SELECT 1 AS x FROM purchased_profile_marks WHERE tg_id=? AND issuer='risegramclub'", (user["tg_id"],)):
+        parts.append("🟢 RiseGram Club · платная метка")
     role = await db.account_role(int(user["tg_id"]))
     if role:
         parts.append("🛡 " + role)
@@ -718,6 +720,24 @@ async def msg_native_chat_username(message: Message, state: FSMContext, user: di
     await message.answer(f"✅ Счёт на NFT @{esc(name)} отправлен")
 
 
+@router.callback_query(F.data == "verify:club")
+async def cb_verify_club(call: CallbackQuery, user: dict):
+    if not await need_feature(call, "verification"):
+        return
+    if await db.fetchone("SELECT 1 FROM purchased_profile_marks WHERE tg_id=? AND issuer='risegramclub'", (user["tg_id"],)):
+        return await call.answer("RiseGram Club уже приобретён", show_alert=True)
+    if not await db.get_meta("native_issuer:risegramclub"):
+        return await call.answer("Метка пока готовится на сервере", show_alert=True)
+    target = await db.telegram_chat_id(user["tg_id"])
+    if target is None:
+        return await call.answer("Сначала свяжи Telegram с ботом", show_alert=True)
+    await send_stars_invoice(call.bot, target, title="RiseGram Club · аккаунт",
+        description="Платная косметическая метка RiseGram Club. Не официальная верификация",
+        payload=f"vc:a:{user['tg_id']}",
+        stars=config.ACCOUNT_RISEGRAM_CLUB_PRICE, label="RiseGram Club")
+    await call.answer("Счёт отправлен")
+
+
 @router.callback_query(F.data == "verify:official")
 async def official_verification_application(call: CallbackQuery):
     await show(call, "☑️ <b>Официальная галочка RiseGram</b>\n\n"
@@ -734,6 +754,7 @@ async def cb_verify_hub(call: CallbackQuery):
         call,
         "✅ <b>Верификация</b>\n\nВыберите вид верификации:",
         kb([btn(f"💎 Мажор · {config.VERIFY_PRICE} ⭐", "verify:major", style="primary")],
+           [btn(f"🟢 RiseGram Club · {config.ACCOUNT_RISEGRAM_CLUB_PRICE} ⭐", "verify:club")],
            [btn("☑️ Официальная галочка · заявка", "verify:official")], back_row("donat:hub")),
     )
 
@@ -1108,6 +1129,8 @@ async def expected_price(payload: str) -> int | None:
             return int(a[0])
         if kind == "vm":
             return config.VERIFY_PRICE
+        if kind == "vc":
+            return config.ACCOUNT_RISEGRAM_CLUB_PRICE if len(a)==2 and a[0]=="a" else None
         if kind == "cg":
             return config.CHANNEL_NFT_PRICE
         if kind == "vb":
@@ -1133,8 +1156,8 @@ async def validate_order(uid: int, payload: str, total: int) -> str | None:
     if exp is None or exp != total:
         return "Счёт устарел. Откройте магазин заново: /shop"
     kind, *a = payload.split(":")
-    if kind in ("rs", "vm", "sc", "nm", "nu", "cg", "vb") and not await db.is_feature_on(
-        {"rs": "store", "vm": "verification", "sc": "scam_labels", "nm": "auth_numbers", "nu": "nft_usernames",
+    if kind in ("rs", "vm", "vc", "sc", "nm", "nu", "cg", "vb") and not await db.is_feature_on(
+        {"rs": "store", "vm": "verification", "vc": "verification", "sc": "scam_labels", "nm": "auth_numbers", "nu": "nft_usernames",
          "cg": "nft_usernames", "vb": "verification"}[kind]
     ):
         return "Раздел временно отключён."
@@ -1142,6 +1165,13 @@ async def validate_order(uid: int, payload: str, total: int) -> str | None:
         if kind == "rs":
             if not await db.get_user(int(a[1])):
                 return "Получатель не найден."
+        elif kind == "vc":
+            if a[0] != "a" or int(a[1]) != uid:
+                return "Некорректный владелец метки"
+            if await db.fetchone("SELECT 1 AS x FROM purchased_profile_marks WHERE tg_id=? AND issuer='risegramclub'", (uid,)):
+                return "Метка RiseGram Club уже приобретена"
+            if not await db.get_meta("native_issuer:risegramclub"):
+                return "Метка ещё не настроена на сервере"
         elif kind == "vm":
             if a[0] != "a":
                 return "Старый счёт канала недоступен. Выберите покупку заново."
@@ -1208,6 +1238,13 @@ async def deliver_order(bot: Bot, uid: int, payload: str, stars: int, charge: st
         await safe_send(bot, target, f"🎁 {esc(db.shown_username(me))} подарил(а) вам <b>{fmt_num(amount)} {config.CURRENCY_NAME}</b>!")
         return True, "risestars", f"{fmt_num(amount)} {config.CURRENCY_NAME} → {db.shown_username(t)}", (
             f"✅ Оплата прошла успешно! {esc(db.shown_username(t))} получил(а) <b>{fmt_num(amount)} {config.CURRENCY_NAME}</b>."
+        )
+    if kind == "vc":
+        if a[0] != "a" or int(a[1]) != uid:
+            return False, "verify", "Некорректная метка", ""
+        await native_shop.issue_profile_club(uid, charge)
+        return True, "profile_club", "RiseGram Club · аккаунт", (
+            "✅ Выдана платная косметическая метка RiseGram Club (не официальная верификация)"
         )
     if kind == "cg":
         peer_kind, peer_id, name = a[0], int(a[1]), a[2]
