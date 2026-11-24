@@ -30,7 +30,7 @@ import database as db
 import gift_admin
 import native_economy as economy
 from api import client_wallet_line, sync_mtproto_verification
-from ui import btn, esc, fmt_num, kb, safe_send, show
+from ui import back_row, btn, esc, fmt_num, kb, safe_send, show
 
 log = logging.getLogger("risegram.admin")
 
@@ -1320,7 +1320,7 @@ async def on_input(message: Message, state: FSMContext, user: dict):
         try:
             await native_shop.change_risk_label(target, kind, label, enabled, reason,
                 int(message.from_user.id), f"{message.chat.id}-{message.message_id}")
-        except (native_shop.NativePurchaseError, psycopg.Error, OSError) as exc:
+        except (native_shop.NativePurchaseError, nftnames.NFTUsernameAdminError, psycopg.Error, ClientError, TimeoutError, OSError, ValueError) as exc:
             return await again("❌ " + esc(str(exc)[:180]))
         await audit(f"{'Выдана' if enabled else 'Снята'} метка {label} {kind} {target}: {reason[:150]}")
         return await done(f"✅ MTProto подтвердил действие: {label} {'выдана' if enabled else 'снята'} для {esc(target)}")
@@ -1842,22 +1842,23 @@ async def cmd_support_reply(message: Message):
 @admin_router.message(Command("markfake", "markscam", "unmarkfake", "unmarkscam"))
 async def cmd_risk_mark(message: Message):
     if int(message.from_user.id) != int(config.OWNER_TELEGRAM_ID):
-        return await message.answer("❌ Метки может выдавать только владелец")
+        return await message.answer("❌ Метки может менять только владелец")
     parts = (message.text or "").split(maxsplit=2)
     cmd = parts[0].split("@")[0].lstrip("/").lower()
     label = "FAKE" if cmd.endswith("fake") else "SCAM"
-    if len(parts) < 2 or not re.fullmatch(r"@[A-Za-z][A-Za-z0-9_]{3,31}", parts[1]):
+    enabled = not cmd.startswith("unmark")
+    if len(parts) < 2:
         return await message.answer("Формат: /markfake @username причина или /unmarkfake @username (аналогично для scam)")
-    if cmd.startswith("unmark"):
-        count = await db.remove_risk_label(parts[1], label)
-        await audit(f"Метка {label} снята с {parts[1]}")
-        return await message.answer("✅ Метка снята" if count else "ℹ️ Метка не найдена")
-    if len(parts) < 3 or len(parts[2].strip()) < 8:
+    reason = parts[2].strip() if len(parts) == 3 else ""
+    if enabled and len(reason) < 8:
         return await message.answer("Укажите конкретную причину длиной от 8 символов")
-    await db.set_risk_label(parts[1], label, int(config.OWNER_ID), parts[2])
-    await audit(f"Метка {label} установлена для {parts[1]}")
-    await message.answer(f"✅ Метка {label} назначена для {esc(parts[1])} внутри RiseGram")
-
+    try:
+        await native_shop.change_risk_label(parts[1], "user", label, enabled, reason,
+            int(message.from_user.id), f"cmd-{message.chat.id}-{message.message_id}")
+    except (native_shop.NativePurchaseError, nftnames.NFTUsernameAdminError, psycopg.Error, ClientError, TimeoutError, OSError, ValueError) as exc:
+        return await message.answer("❌ " + esc(str(exc)[:180]))
+    await audit(f"Метка {label} {'установлена' if enabled else 'снята'} для {parts[1]}")
+    await message.answer(f"✅ MTProto подтвердил: {label} {'выдана' if enabled else 'снята'} для {esc(parts[1])}")
 
 @admin_router.message(Command("tickets"))
 async def cmd_support_tickets(message: Message):
