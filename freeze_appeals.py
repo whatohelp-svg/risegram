@@ -161,7 +161,9 @@ async def h_appeal_post(request: web.Request) -> web.Response:
                 f"RiseGram ID: <code>{user_id}</code>\n"
                 f"<b>Текст:</b>\n{html.escape(message)}\n\n"
                 "Ответьте пользователю из внутреннего аккаунта поддержки @youtube")
-        await safe_send(request.app["bot"], config.OWNER_TELEGRAM_ID, text)
+        notified = await safe_send(request.app["bot"], config.OWNER_ID, text)
+        if not notified:
+            log.warning("Appeal %s saved, owner Telegram delivery link unavailable", appeal_id)
     except Exception:
         # The durable support inbox in Neon remains authoritative.
         log.exception("Appeal saved, staff Telegram notification failed")
