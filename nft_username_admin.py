@@ -15,7 +15,7 @@ from aiohttp import ClientSession, ClientTimeout
 import config
 import database as db
 
-USERNAME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]{3,31}$")
+USERNAME_RE = re.compile(r"^(?:[a-z][a-z0-9_]{0,31}|[а-яё][а-яё0-9_]{0,31})$")
 NATIVE_URL = "/v1/collectible-usernames"
 TYPES = {"user", "group", "channel"}
 HTTP_TIMEOUT = ClientTimeout(total=23, connect=7)
@@ -28,7 +28,7 @@ class NFTUsernameAdminError(Exception):
 def normalize(username: str) -> str:
     name = username.strip().lstrip("@").lower()
     if not USERNAME_RE.fullmatch(name):
-        raise NFTUsernameAdminError("NFT-юзернейм должен состоять из 4–32 латинских букв, цифр и _.")
+        raise NFTUsernameAdminError("NFT-юзернейм: 1–32 символа, латиница или кириллица (не смешивать), цифры и _ после первой буквы.")
     return name
 
 
