@@ -301,7 +301,7 @@ async def role_verification(message: Message, *, menu_args=None):
     import role_marks
     parts=menu_args if menu_args is not None else (message.text or "").split()
     if len(parts)!=3 or not parts[1].startswith("@") or parts[2].lower() not in role_marks.ROLES:
-        return await message.answer("/grantrole @username developer|tester|admin|headadmin|support|hold\n/revokerole @username тип")
+        return await message.answer("/grantrole @username developer|tester|moderator|admin|headadmin|support|hold\n/revokerole @username тип")
     try:
         description=await role_marks.mark(parts[1],parts[2].lower(),parts[0].split("@")[0].lower()=="/revokerole")
         await message.answer("✅ Метка обновлена: "+esc(parts[1])+"\n"+esc(description))
@@ -1707,7 +1707,8 @@ async def adm_cb(call: CallbackQuery, state: FSMContext, user: dict):
               [btn("Синяя галочка",f"adm:verinput:{mode}:official")]]
         if call.from_user.id==config.OWNER_TELEGRAM_ID:
             rows += [[btn("Hold",f"adm:verinput:{mode}:hold"),btn("Разработчик",f"adm:verinput:{mode}:developer")],
-                     [btn("Тестер",f"adm:verinput:{mode}:tester"),btn("Админ",f"adm:verinput:{mode}:admin")],
+                     [btn("Тестер",f"adm:verinput:{mode}:tester"),btn("Модератор",f"adm:verinput:{mode}:moderator")],
+                     [btn("Админ",f"adm:verinput:{mode}:admin")],
                      [btn("Гл. админ",f"adm:verinput:{mode}:headadmin"),btn("Поддержка",f"adm:verinput:{mode}:support")]]
         return await show(call,"Выберите вид верификации",kb(*rows,back_row("adm:vermenu")))
     if route == "verinput":
