@@ -195,3 +195,13 @@ if part.count('"messages.sendMessage"') != 3:
     raise SystemExit("Frozen appeal patch: session-gate test changed")
 test_src=test_src[:start_test]+part.replace('"messages.sendMessage"', '"messages.sendMedia"')+test_src[end_test:]
 tests_path.write_text(test_src)
+
+# Describe the synthetic snowflake badge in the user's language. The badge is
+# a viewer-scoped projection and never overwrites a real username or verification.
+frozen_labels = Path("internal/rpc/bot_verification_projection.go")
+label_src = frozen_labels.read_text()
+old_label = 'accountFrozenMarkDescription       = "The account was frozen"'
+new_label = 'accountFrozenMarkDescription       = "❄️ Аккаунт временно заморожен в RiseGram"'
+if label_src.count(old_label) != 1:
+    raise SystemExit("Frozen badge description anchor differs from pinned MTProto")
+frozen_labels.write_text(label_src.replace(old_label, new_label, 1))
