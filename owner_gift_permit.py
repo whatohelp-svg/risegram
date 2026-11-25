@@ -54,7 +54,7 @@ async def handle(request):
             if not proof:
                 return reply({"ok":False,"error":"Отправь /giftpermit заново из @owner"},403)
             if await (await conn.execute("""SELECT 1 FROM risegram_owner_gift_permits
-                WHERE status='running' OR (status='pending' AND expires_at>now()) LIMIT 1""")).fetchone():
+                WHERE status='running' OR (status IN ('pending','pending_delayed') AND expires_at>now()) LIMIT 1""")).fetchone():
                 return reply({"ok":False,"error":"Уже есть незавершённое разрешение. Проверь /giftstatus"},409)
             if await (await conn.execute("SELECT 1 FROM risegram_owner_gift_permits WHERE request_message_id=%s",(mid,))).fetchone():
                 return reply({"ok":False,"error":"Эта команда уже использована. Отправь /giftpermit заново"},409)
@@ -70,7 +70,7 @@ async def handle(request):
             if catalog.get("Mini Oscars",(0,0))[0]!=8000 or catalog.get("Precious Peaches",(0,0))[0]!=6666 or catalog["Mini Oscars"][1]<2 or catalog["Precious Peaches"][1]<3:
                 return reply({"ok":False,"error":"Цена или наличие подарков изменились. Разрешение не создано"},409)
             token=secrets.token_hex(16)
-            await conn.execute("INSERT INTO risegram_owner_gift_permits(token,request_message_id) VALUES(%s,%s)",(token,mid))
+            await conn.execute("INSERT INTO risegram_owner_gift_permits(token,request_message_id,status) VALUES(%s,%s,'pending_delayed')",(token,mid))
             return reply({"ok":True,"token":token,"total":35998})
     except Exception:
         LOG.exception("Gift consent failed")
