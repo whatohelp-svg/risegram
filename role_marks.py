@@ -80,7 +80,7 @@ def rosette(role):
 
 def make_badge(role,path):
     shapes=[rosette(role)]
-    layer={"ty":4,"ind":1,"nm":role,"sr":1,"ks":{"o":{"a":0,"k":100},"r":{"a":0,"k":0},"p":{"a":0,"k":[256,256,0]},"a":{"a":0,"k":[0,0,0]},"s":{"a":0,"k":[100,100,100]}},"shapes":shapes,"ip":0,"op":60,"st":0,"bm":0}
+    layer={"ty":4,"ind":1,"nm":role,"sr":1,"ks":{"o":{"a":0,"k":100},"r":{"a":0,"k":0},"p":{"a":0,"k":[256,256,0]},"a":{"a":0,"k":[0,0,0]},"s":{"a":0,"k":[125,125,100]}},"shapes":shapes,"ip":0,"op":60,"st":0,"bm":0}
     animation={"v":"5.7.4","fr":60,"ip":0,"op":60,"w":512,"h":512,"nm":"RiseGram "+role,"ddd":0,"assets":[],"layers":[layer],"tgs":1}
     path.write_bytes(gzip.compress(json.dumps(animation,separators=(",",":")).encode(),mtime=0))
 
@@ -138,7 +138,7 @@ async def provision():
                     prefix="rg-role-v1-"+role
                     async with economy.transaction() as conn:
                         existing=await (await conn.execute("SELECT bot_id,icon_document_id,version FROM bot_verifier_settings WHERE company_name=%s AND enabled",(label,))).fetchone()
-                        meta_key="native_hold_rosette_v2" if role=="hold" else "native_role_rosette_v3:"+role
+                        meta_key="native_role_rosette_v4:"+role
                         if existing and await db.get_meta(meta_key)==str(existing["icon_document_id"]):
                             continue
                         bot=await (await conn.execute("SELECT u.id FROM users u JOIN bots b ON b.bot_user_id=u.id WHERE lower(u.username)=%s AND b.owner_user_id=%s AND u.deleted_at IS NULL",("rg_"+role+"_mark_bot",OWNER))).fetchone()
@@ -149,10 +149,10 @@ async def provision():
                     else:
                         bot=await command(session,"/v1/bots/create",prefix+"-bot",{"owner_user_id":OWNER,"name":label,"username":"rg_"+role+"_mark_bot"})
                         bid=int(bot["bot_user_id"])
-                    prefix="rg-role-v2-hold" if role=="hold" else "rg-role-v3-"+role
+                    prefix="rg-role-v4-"+role
                     path=Path(tmp)/(role+".tgs")
                     make_badge(role,path)
-                    pack=await command(session,"/v1/stickers/create",prefix+"-pack",{"title":label+" Mark","short_name":"rg_hold_rosette_v2" if role=="hold" else "rg_"+role+"_rosette_v3","kind":"emoji","emoji":"☑️"},path)
+                    pack=await command(session,"/v1/stickers/create",prefix+"-pack",{"title":label+" Mark","short_name":"rg_"+role+"_rosette_v4","kind":"emoji","emoji":"☑️"},path)
                     if "document_id" not in pack:
                         pack=await command(session,"/v1/stickers/add",prefix+"-doc",{"set_id":str(pack["set_id"]),"emoji":"☑️"},path)
                     did=int(pack["document_id"])
