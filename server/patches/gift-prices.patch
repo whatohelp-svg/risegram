@@ -15,7 +15,7 @@
  	// advertised under that key in help.getAppConfig. It is deliberately flat: a
  	// floor derived from the cheapest listing only ever ratchets up.
  	MinStarGiftResaleStars int64 = 125
-+	MaxStarGiftResaleStars int64 = 1_000_000
++	MaxStarGiftResaleStars int64 = 999_000_000_000
  )
  
  // Star gift sentinel errors (the rpc layer maps them to tgerr via errors.Is).
@@ -47,7 +47,7 @@
  		StarGiftDropOriginalDetailsStars: int64(envIntOr("TELESRV_STARGIFT_DROP_DETAILS_STARS", 25)),
  		StarGiftOfferMinStars:            envIntOr("TELESRV_STARGIFT_OFFER_MIN_STARS", 1),
 -		StarGiftStarsProceedsPermille:    envIntOr("TELESRV_STARGIFT_STARS_PROCEEDS_PERMILLE", 1000),
-+		StarGiftStarsProceedsPermille:    envIntOr("TELESRV_STARGIFT_STARS_PROCEEDS_PERMILLE", 750),
++		StarGiftStarsProceedsPermille:    envIntOr("TELESRV_STARGIFT_STARS_PROCEEDS_PERMILLE", 900),
  		StarGiftTONProceedsPermille:      envIntOr("TELESRV_STARGIFT_TON_PROCEEDS_PERMILLE", 1000),
  		StarGiftExportDelay:              envDurationOr("TELESRV_STARGIFT_EXPORT_DELAY", 0),
  		StarGiftTransferDelay:            envDurationOr("TELESRV_STARGIFT_TRANSFER_DELAY", 0),
@@ -63,10 +63,10 @@
 -const defaultAppConfigHash = 37 // must be incremented when the default app config content changes, otherwise caching clients only receive notModified.
 +	return `,"stars_stargift_resale_amount_min":` + strconv.FormatInt(domain.MinStarGiftResaleStars, 10) +
 +		`,"stars_stargift_resale_amount_max":` + strconv.FormatInt(domain.MaxStarGiftResaleStars, 10) +
-+		`,"stars_stargift_resale_commission_permille":750,"stars_paid_message_commission_permille":1000`
++		`,"stars_stargift_resale_commission_permille":900,"stars_paid_message_commission_permille":1000`
 +}
 +
-+const defaultAppConfigHash = 38 // must be incremented when the default app config content changes, otherwise caching clients only receive notModified.
++const defaultAppConfigHash = 39 // must be incremented when the default app config content changes, otherwise caching clients only receive notModified.
  
  // Service provides the client startup config and the country dialing-code catalog.
  //
@@ -77,7 +77,7 @@
  		// The Stars resale floor enforced on payments.updateStarGiftPrice.
  		{Key: "stars_stargift_resale_amount_min", Value: &tg.JSONNumber{Value: float64(domain.MinStarGiftResaleStars)}},
 +		{Key: "stars_stargift_resale_amount_max", Value: &tg.JSONNumber{Value: float64(domain.MaxStarGiftResaleStars)}},
-+		{Key: "stars_stargift_resale_commission_permille", Value: &tg.JSONNumber{Value: 750}},
++		{Key: "stars_stargift_resale_commission_permille", Value: &tg.JSONNumber{Value: 900}},
 +		{Key: "stars_paid_message_commission_permille", Value: &tg.JSONNumber{Value: 1000}},
  		{Key: "giveaway_gifts_purchase_available", Value: &tg.JSONBool{Value: true}},
  		{Key: "giveaway_boosts_per_premium", Value: &tg.JSONNumber{Value: 4}},
@@ -161,7 +161,7 @@
 +import "testing"
 +
 +func TestRiseGramResaleBoundaries(t *testing.T) {
-+	for amount, want := range map[int64]bool{124: false, 125: true, 1000000: true, 1000001: false} {
++	for amount, want := range map[int64]bool{124: false, 125: true, 999000000000: true, 999000000001: false} {
 +		price := StarGiftAmount{Currency: StarGiftCurrencyStars, Amount: amount}
 +		if got := price.WithinResaleRange(); got != want {
 +			t.Fatalf("price %d accepted=%v, want %v", amount, got, want)
