@@ -13,6 +13,7 @@ from aiohttp.test_utils import TestClient, TestServer
 import api
 import config
 import database as db
+import terms_policy
 
 
 class MtprotoOtpWebhookTests(unittest.IsolatedAsyncioTestCase):
@@ -31,6 +32,7 @@ class MtprotoOtpWebhookTests(unittest.IsolatedAsyncioTestCase):
             (self.user["tg_id"],),
         )
         self.user = await db.get_user(self.user["tg_id"])
+        await terms_policy.accept(self.user["tg_id"])
 
         app = web.Application()
         app["bot"] = object()
