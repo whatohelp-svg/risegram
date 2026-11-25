@@ -74,6 +74,8 @@ def make(item):
         # TL availableReaction uses a shared flag for center_icon and around_animation.
         # Both fields must be present or neither may be encoded.
         row["around_animation"]=row["effect_animation"]
+        # Keep a stable visible WebP in message bubbles after the animated effect.
+        row["center_icon"]=row["static_icon"]
         return row
     except Exception as exc:
         print("Noto reaction unavailable",emoji,type(exc).__name__,str(exc)[:120],flush=True)
