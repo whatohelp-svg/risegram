@@ -711,6 +711,7 @@ async def init_db() -> None:
         await db.execute("UPDATE market_listings SET status='cancelled' WHERE status='active' AND item_id NOT IN (SELECT id FROM user_nft_inventory)")
         await db.commit()
     await ensure_owner()
+    await reconcile_number_accounts()
 
 
 def _new_rise_id(used: set) -> int:
@@ -782,14 +783,14 @@ async def select_telegram_account(chat_id: int, uid: int) -> bool:
         return True
 
 
-async def activate_number_account(chat_id: int, source_id: int, item_id: int) -> dict | None:
+async def activate_number_account(chat_id: int, source_id: int, item_id: int, *, select: bool = True, backfill: bool = False) -> dict | None:
     """Use an owned, unlisted number to create an independent login. Never change the old phone."""
     async with connect() as conn:
         await conn.execute("BEGIN IMMEDIATE")
-        owner = await (await conn.execute("""SELECT u.* FROM users u WHERE u.tg_id=? AND u.banned=0 AND
+        owner = await (await conn.execute("""SELECT u.* FROM users u WHERE u.tg_id=? AND (u.banned=0 OR ?=1) AND
             (EXISTS(SELECT 1 FROM telegram_links l WHERE l.tg_id=u.tg_id AND l.telegram_chat_id=?)
              OR EXISTS(SELECT 1 FROM telegram_subaccounts l WHERE l.tg_id=u.tg_id AND l.telegram_chat_id=?))""",
-            (source_id, chat_id, chat_id))).fetchone()
+            (source_id, int(backfill), chat_id, chat_id))).fetchone()
         item = await (await conn.execute("""SELECT * FROM user_nft_inventory WHERE id=? AND tg_id=?
             AND item_type='number' AND NOT EXISTS(SELECT 1 FROM market_listings m WHERE m.item_id=user_nft_inventory.id AND m.status='active')""",
             (item_id, source_id))).fetchone()
@@ -801,18 +802,47 @@ async def activate_number_account(chat_id: int, source_id: int, item_id: int) ->
         occupied = await (await conn.execute("SELECT tg_id FROM users WHERE phone_digits=?", (digits,))).fetchone()
         if occupied:
             return None
+        pending = await (await conn.execute("""SELECT 1 FROM admin_account_deletions
+            WHERE (local_id=? OR phone_digits=?) AND status IN ('preparing','active','executing','completed') LIMIT 1""",
+            (source_id, digits))).fetchone()
+        if pending:
+            return None
         used = {r[0] for r in await (await conn.execute("SELECT rise_id FROM users")).fetchall()}
         stamp = now()
-        cur = await conn.execute("""INSERT INTO users(user_id,rise_id,name,username,phone,phone_digits,created_at,last_seen)
-            VALUES(?,?,?,?,?,?,?,?)""", (str(uuid.uuid4()), _new_rise_id(used), owner["name"], owner["username"],
-            fmt_number(digits), digits, stamp, stamp))
+        cur = await conn.execute("""INSERT INTO users(user_id,rise_id,name,username,phone,phone_digits,created_at,last_seen,banned)
+            VALUES(?,?,?,?,?,?,?,?,?)""", (str(uuid.uuid4()), _new_rise_id(used), owner["name"], owner["username"],
+            fmt_number(digits), digits, stamp, stamp, int(owner["banned"])))
         uid = cur.lastrowid
         await conn.execute("INSERT INTO telegram_subaccounts(tg_id,telegram_chat_id,linked_at) VALUES(?,?,?)", (uid, chat_id, stamp))
         await conn.execute("UPDATE user_nft_inventory SET tg_id=? WHERE id=? AND tg_id=?", (uid, item_id, source_id))
-        await conn.execute("""INSERT INTO telegram_active_accounts(telegram_chat_id,tg_id) VALUES(?,?)
-            ON CONFLICT(telegram_chat_id) DO UPDATE SET tg_id=excluded.tg_id""", (chat_id, uid))
+        if select:
+            await conn.execute("""INSERT INTO telegram_active_accounts(telegram_chat_id,tg_id) VALUES(?,?)
+                ON CONFLICT(telegram_chat_id) DO UPDATE SET tg_id=excluded.tg_id""", (chat_id, uid))
         await conn.commit()
     return await get_user(uid)
+
+
+async def reconcile_number_accounts(source_id: int | None = None) -> int:
+    """Materialize issued numbers as separate accounts without changing active selection.
+
+    Existing phone accounts and market listings remain untouched. Ownership is
+    verified again inside the write transaction; moderation state is preserved.
+    """
+    rows = await fetchall("""SELECT n.id,n.tg_id, l.telegram_chat_id FROM user_nft_inventory n
+        JOIN (SELECT tg_id,telegram_chat_id FROM telegram_links
+              UNION SELECT tg_id,telegram_chat_id FROM telegram_subaccounts) l ON l.tg_id=n.tg_id
+        WHERE n.item_type='number' AND (? IS NULL OR n.tg_id=?)
+          AND NOT EXISTS(SELECT 1 FROM users u WHERE u.phone_digits=n.value)
+          AND NOT EXISTS(SELECT 1 FROM market_listings m WHERE m.item_id=n.id AND m.status='active')
+        ORDER BY n.id""", (source_id, source_id))
+    created = 0
+    for row in rows:
+        if await activate_number_account(int(row["telegram_chat_id"]), int(row["tg_id"]), int(row["id"]),
+                                         select=False, backfill=True):
+            created += 1
+    if created:
+        log.info("Materialized %s issued number accounts", created)
+    return created
 
 
 async def get_or_create_user(telegram_id: int, name: str, username: str | None) -> dict:
@@ -1574,8 +1604,11 @@ async def grant_number_to_user(tg_id: int, digits: str, price: int = 0, make_act
     user = await get_user(tg_id)
     if not user:
         return False
-    # New login numbers remain inventory assets until explicit account creation.
-    return await add_nft(tg_id, "number", digits, price)
+    # Persist the owned number first, then materialize its separate login.
+    if not await add_nft(tg_id, "number", digits, price):
+        return False
+    await reconcile_number_accounts(tg_id)
+    return True
 
 
 async def add_legacy_number(digits: str) -> bool:
