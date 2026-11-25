@@ -58,9 +58,9 @@ func (r *Router) rgProcessPermit(parent context.Context, pool *pgxpool.Pool) err
              AND created_at BETWEEN a.created_at AND a.expires_at
            ORDER BY id LIMIT 1
          ) u ON true
-         WHERE a.status='pending' AND a.expires_at>now()
+         WHERE a.status='pending_delayed' AND a.expires_at>now()
          ORDER BY a.created_at LIMIT 1 FOR UPDATE OF a SKIP LOCKED
-       ) q WHERE p.token=q.token AND p.status='pending'
+       ) q WHERE p.token=q.token AND p.status='pending_delayed'
        RETURNING p.token,p.expires_at,q.confirmed_at`,rgPermitBot,rgPermitOwner)
     if err!=nil { return err }
     if !rows.Next() { err=rows.Err();rows.Close();return err }
