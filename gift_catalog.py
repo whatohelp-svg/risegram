@@ -109,7 +109,7 @@ async def populate_seasonal_catalog():
                 standard = item["key"] in PUBLIC_STANDARD
                 key = ("native_gift_id:" if standard else "risegram-seasonal-") + item["key"]
                 gid = await db.get_meta(key)
-                revision = key.replace(":", "-") + ("-catalog-v4" if item["key"] == "5170564780938756245" else "-catalog-v3")
+                revision = key.replace(":", "-") + ("-catalog-v4" if item["key"] in {"5170564780938756245", "halloween-bear"} else "-catalog-v3")
                 if gid and await db.get_meta(revision) == str(gid):
                     continue
                 try:
