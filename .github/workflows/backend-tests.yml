@@ -2,7 +2,7 @@ name: RiseGram backend tests
 
 on:
   push:
-    branches: [feature/market-economy-sync, fix/independent-number-accounts]
+    branches: [feature/market-economy-sync, fix/independent-number-accounts, fix/backfill-issued-number-accounts]
   pull_request:
     branches: [feature/market-economy-sync]
 
