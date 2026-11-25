@@ -505,3 +505,39 @@ patch_go_file(
 """,
     "ordinary NFT crafting remains available without optional AI cross-craft",
 )
+
+
+# A versioned, idempotent reaction asset replacement: import the new catalog
+# even when the old Noto catalog is present. Do not delete message reactions.
+patch_go_file(
+    "internal/app/files/seed.go",
+    """	// reactions
+	if n, err := s.media.CountAvailableReactions(ctx); err != nil {
+		return stats, err
+	} else if n == 0 {
+""",
+    """	// reactions
+	reactionSeedVersion := "risegram-telegram-assets-v1"
+	reactionSeedReady, err := s.seedStateMatches(ctx, "risegram_reaction_assets", reactionSeedVersion)
+	if err != nil {
+		return stats, err
+	}
+	if n, err := s.media.CountAvailableReactions(ctx); err != nil {
+		return stats, err
+	} else if n == 0 || !reactionSeedReady {
+""",
+    "versioned Telegram reaction asset import",
+)
+patch_go_file(
+    "internal/app/files/seed.go",
+    """	s.logSeedPhase("reactions", phaseStarted, phaseBefore, stats)
+""",
+    """	if stats.Reactions > phaseBefore.Reactions {
+		if err := s.putSeedState(ctx, "risegram_reaction_assets", reactionSeedVersion); err != nil {
+			return stats, err
+		}
+	}
+	s.logSeedPhase("reactions", phaseStarted, phaseBefore, stats)
+""",
+    "record completed reaction asset import",
+)
