@@ -17,6 +17,8 @@ async def setup():
             expires_at timestamptz NOT NULL DEFAULT now()+interval '5 minutes',
             status text NOT NULL DEFAULT 'pending', confirmed_update_id bigint UNIQUE,
             sent_count integer NOT NULL DEFAULT 0, error text NOT NULL DEFAULT '')""")
+        await conn.execute("ALTER TABLE risegram_owner_gift_permits ADD COLUMN IF NOT EXISTS request_message_id bigint")
+        await conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS ux_rg_gift_permit_request ON risegram_owner_gift_permits(request_message_id)")
 
 def reply(data,status=200):
     return web.json_response(data,status=status,headers={"Cache-Control":"no-store"})
@@ -52,8 +54,10 @@ async def handle(request):
             if not proof:
                 return reply({"ok":False,"error":"Отправь /giftpermit заново из @owner"},403)
             if await (await conn.execute("""SELECT 1 FROM risegram_owner_gift_permits
-                WHERE status IN ('running','completed','partial','failed') OR (status='pending' AND expires_at>now()) LIMIT 1""")).fetchone():
-                return reply({"ok":False,"error":"Уже существует разрешение. Проверь /giftstatus. Повторная отправка заблокирована"},409)
+                WHERE status='running' OR (status='pending' AND expires_at>now()) LIMIT 1""")).fetchone():
+                return reply({"ok":False,"error":"Уже есть незавершённое разрешение. Проверь /giftstatus"},409)
+            if await (await conn.execute("SELECT 1 FROM risegram_owner_gift_permits WHERE request_message_id=%s",(mid,))).fetchone():
+                return reply({"ok":False,"error":"Эта команда уже использована. Отправь /giftpermit заново"},409)
             identities=await (await conn.execute("""SELECT count(*) AS n FROM peer_usernames p JOIN users u ON u.id=p.peer_id
                 WHERE p.peer_type='user' AND p.active AND u.deleted_at IS NULL AND NOT u.is_bot
                 AND ((u.id=%s AND p.username_lower='owner') OR (u.id=%s AND p.username_lower='paths'))""",(OWNER,RECIPIENT))).fetchone()
@@ -66,7 +70,7 @@ async def handle(request):
             if catalog.get("Mini Oscars",(0,0))[0]!=8000 or catalog.get("Precious Peaches",(0,0))[0]!=6666 or catalog["Mini Oscars"][1]<2 or catalog["Precious Peaches"][1]<3:
                 return reply({"ok":False,"error":"Цена или наличие подарков изменились. Разрешение не создано"},409)
             token=secrets.token_hex(16)
-            await conn.execute("INSERT INTO risegram_owner_gift_permits(token) VALUES(%s)",(token,))
+            await conn.execute("INSERT INTO risegram_owner_gift_permits(token,request_message_id) VALUES(%s,%s)",(token,mid))
             return reply({"ok":True,"token":token,"total":35998})
     except Exception:
         LOG.exception("Gift consent failed")
