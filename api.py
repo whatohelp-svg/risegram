@@ -1005,10 +1005,15 @@ async def sync_mtproto_verification(user_id: int, force: bool = False) -> dict:
                     # The MTProto peer can appear after this bot update. Retry shortly.
                     _verification_sync_last[int(user_id)] = time.monotonic() - 270
                     return {"configured": True, "synced": False, "pending_account": True}
-                await db.execute(
-                    "INSERT OR REPLACE INTO verified_peer_links(peer_id,account_id,phone_digits) VALUES(?,?,?)",
-                    (int(resolved["user_id"]), user_id, digits),
-                )
+                # Never rebind an existing peer to another local identity or move flags to a new phone.
+                native_id = int(resolved["user_id"])
+                async with db.connect() as conn:
+                    await conn.execute("BEGIN IMMEDIATE")
+                    links = await (await conn.execute("SELECT * FROM verified_peer_links WHERE peer_id=? OR account_id=?", (native_id, user_id))).fetchall()
+                    if any(int(link["peer_id"]) != native_id or int(link["account_id"]) != user_id or link["phone_digits"] != digits for link in links):
+                        return {"configured": True, "synced": False, "identity_conflict": True}
+                    await conn.execute("INSERT OR IGNORE INTO verified_peer_links(peer_id,account_id,phone_digits) VALUES(?,?,?)", (native_id,user_id,digits))
+                    await conn.commit()
                 payload = {
                     "command_id": f"risegram-verified-{int(user_id)}-{time.time_ns()}",
                     "actor": "risegram-bot",
