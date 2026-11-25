@@ -1,0 +1,42 @@
+name: RiseGram Web beta build
+on:
+  push:
+    branches: [risegram/platform-portal]
+    paths: ['web-client/**', '.github/workflows/web-beta.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: iamxvbaba/gramsrv-telegram-tt
+          ref: 003316a04a173983d1df8f0fb9d8113708a1c582
+          path: web-upstream
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: python3 web-client/configure.py web-upstream
+      - name: Build full Web A client
+        working-directory: web-upstream
+        env:
+          APP_NAME: RiseGram
+          APP_TITLE: RiseGram
+          BASE_URL: https://whatohelp-svg.github.io/risegram/web/
+          TELESRV_WEB_DC_HOST: risegram-risegram.up.railway.app
+          TELESRV_WEB_DC_PORT: '443'
+          TELEGRAM_API_ID: ${{ vars.RISEGRAM_WEB_API_ID }}
+          TELEGRAM_API_HASH: ${{ vars.RISEGRAM_WEB_API_HASH }}
+        run: |
+          test -n "$TELEGRAM_API_ID" && test -n "$TELEGRAM_API_HASH"
+          npm ci
+          npm run build:production
+      - uses: actions/upload-artifact@v4
+        with:
+          name: RiseGram-Web-experimental
+          path: web-upstream/dist/
+          if-no-files-found: error

@@ -1547,6 +1547,8 @@ async def start_api(bot) -> web.AppRunner | None:
     # API_SECRET is intentionally not required by a public APK.
     app = web.Application(client_max_size=26 * 1024 * 1024)
     app["bot"] = bot
+    import web_mtproto_proxy
+    web_mtproto_proxy.install(app)
     # Route the public Bot API to the native MTProto identity store used by Android.
     # The legacy SQLite bot registry remains for data migration, not public bot tokens.
     app.on_startup.append(native_bot_proxy.install)
