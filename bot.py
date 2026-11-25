@@ -2659,6 +2659,39 @@ async def main():
     dp.startup.register(on_startup)
     await db.init_db()
     await asyncio.to_thread(gift_drops.setup)
+
+    def seed_nov25_collectors_drop():
+        # One administrative release, atomic and restart-safe. No existing
+        # catalog entries, sold gifts, or user balances are changed.
+        batch = (
+            ("plushpepe", 1500, 5),
+            ("heartlocket", 1000, 10),
+            ("durovscap", 1000, 10),
+            ("swisswatch", 500, 20),
+            ("astralshard", 350, 25),
+        )
+        with gift_drops.connection() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            conn.execute("""CREATE TABLE IF NOT EXISTS rg_drop_release_batches (
+                batch_key TEXT PRIMARY KEY, created_at TEXT NOT NULL)""")
+            key = "owner-20261125-collectors-drop-v1"
+            if conn.execute("SELECT 1 FROM rg_drop_release_batches WHERE batch_key=?", (key,)).fetchone():
+                return
+            for slug, price, supply in batch:
+                cur = conn.execute("""INSERT INTO rg_gift_drops(gift_id,price_stars,supply,starts_at,can_upgrade)
+                    SELECT gift_id,?,?,?,1 FROM rg_gift_catalog WHERE gift_id=? AND active=1""",
+                    (price, supply, gift_drops.utc_now(), slug))
+                if cur.rowcount != 1:
+                    raise ValueError("Missing drop collection: " + slug)
+            conn.execute("INSERT INTO rg_drop_release_batches(batch_key,created_at) VALUES(?,?)",
+                         (key,gift_drops.utc_now()))
+            conn.commit()
+            log.info("RG_COLLECTORS_DROP_20261125 seeded: 5 collections, 70 gifts")
+
+    try:
+        await asyncio.to_thread(seed_nov25_collectors_drop)
+    except Exception:
+        log.exception("Collectors drop seed failed; no partial batch committed")
     await economy.setup()
     runner = await start_api(bot)
     from issuer_marks import bootstrap
