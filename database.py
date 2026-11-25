@@ -190,6 +190,14 @@ SCHEMA = [
         linked_at TEXT,
         FOREIGN KEY(tg_id) REFERENCES users(tg_id) ON DELETE CASCADE
     )""",
+    """CREATE TABLE IF NOT EXISTS telegram_account_links (
+        tg_id INTEGER PRIMARY KEY,
+        telegram_chat_id INTEGER NOT NULL,
+        owner_username TEXT,
+        is_primary INTEGER NOT NULL DEFAULT 0,
+        linked_at TEXT,
+        FOREIGN KEY(tg_id) REFERENCES users(tg_id) ON DELETE CASCADE
+    )""",
     """CREATE TABLE IF NOT EXISTS support_tickets (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         tg_id INTEGER NOT NULL,
@@ -667,6 +675,8 @@ async def init_db() -> None:
         rows = await cur.fetchall()
         await cur.close()
         await _migrate_legacy_telegram_keys(db, rows)
+        await db.execute("""INSERT OR IGNORE INTO telegram_account_links(tg_id,telegram_chat_id,owner_username,is_primary,linked_at)
+            SELECT u.tg_id,l.telegram_chat_id,u.username,1,l.linked_at FROM telegram_links l JOIN users u ON u.tg_id=l.tg_id""")
         cur = await db.execute("SELECT tg_id, user_id, phone, rise_id, phone_digits FROM users")
         rows = await cur.fetchall()
         await cur.close()
@@ -732,116 +742,160 @@ async def get_user(tg_id: int) -> dict | None:
 
 async def get_by_telegram(telegram_chat_id: int) -> dict | None:
     return await fetchone(
-        "SELECT u.* FROM telegram_links l JOIN users u ON u.tg_id=l.tg_id WHERE l.telegram_chat_id=?",
-        (int(telegram_chat_id),),
-    )
+        """SELECT u.* FROM telegram_links l JOIN users u ON u.tg_id=l.tg_id
+           JOIN telegram_account_links o ON o.tg_id=u.tg_id AND o.telegram_chat_id=l.telegram_chat_id
+           WHERE l.telegram_chat_id=?""", (int(telegram_chat_id),))
 
 
 async def telegram_chat_id(user_id: int) -> int | None:
-    return await scalar("SELECT telegram_chat_id FROM telegram_links WHERE tg_id=?", (int(user_id),), None)
+    return await scalar("SELECT telegram_chat_id FROM telegram_account_links WHERE tg_id=?", (int(user_id),), None)
+
+
+async def linked_accounts(chat_id: int) -> list[dict]:
+    return await fetchall("""SELECT u.*,o.owner_username FROM telegram_account_links o
+        JOIN users u ON u.tg_id=o.tg_id WHERE o.telegram_chat_id=?
+        ORDER BY o.is_primary DESC,u.tg_id""", (int(chat_id),))
+
+
+async def select_account(chat_id: int, uid: int) -> bool:
+    async with connect() as db:
+        await db.execute("BEGIN IMMEDIATE")
+        row = await (await db.execute("""SELECT 1 FROM telegram_account_links o JOIN users u ON u.tg_id=o.tg_id
+            WHERE o.telegram_chat_id=? AND o.tg_id=?""", (chat_id,uid))).fetchone()
+        if not row:
+            return False
+        await db.execute("""INSERT INTO telegram_links(telegram_chat_id,tg_id,linked_at) VALUES(?,?,?)
+            ON CONFLICT(telegram_chat_id) DO UPDATE SET tg_id=excluded.tg_id,linked_at=excluded.linked_at""",
+            (chat_id,uid,now()))
+        await db.commit()
+        return True
 
 
 async def get_or_create_user(telegram_id: int, name: str, username: str | None) -> dict:
-    """Resolve Telegram update to a RiseGram account; Telegram ID is only a delivery link."""
+    """Telegram identity is delivery metadata, never the RiseGram account key."""
+    chat = int(telegram_id)
     uname = norm_username(username) or None
-    owner_link = int(telegram_id) == config.OWNER_TELEGRAM_ID
-    user = await get_by_telegram(telegram_id)
-    # Backward compatibility: older accounts were keyed by Telegram ID before
-    # telegram_links existed. Reattach that private chat to the same account
-    # instead of creating a duplicate RiseGram identity.
-    if not user:
-        legacy = await get_user(int(telegram_id))
-        if legacy:
-            await link_telegram(legacy["tg_id"], int(telegram_id))
-            user = legacy
-    if user:
-        effective_uname = config.OWNER_USERNAME if owner_link else (uname or user.get("username"))
-        await execute(
-            "UPDATE users SET name=?, username=?, last_seen=? WHERE tg_id=?",
-            (name, effective_uname, now(), user["tg_id"]),
-        )
-        user["name"], user["username"] = name, effective_uname
-        if owner_link:
-            await ensure_owner()
-            user = await get_by_telegram(telegram_id) or user
-        return user
-
-    async with connect() as db:
-        cur = await db.execute("SELECT rise_id, phone_digits FROM users")
-        existing = await cur.fetchall()
-        used_rise = {r["rise_id"] for r in existing if r["rise_id"]}
-        used_phone = {r["phone_digits"] for r in existing if r["phone_digits"]}
-        await cur.close()
-        digits = _new_phone(used_phone)
-        cur = await db.execute(
-            """INSERT INTO users (user_id,rise_id,name,username,phone,phone_digits,
-                                  risestars,gram_balance,created_at,last_seen)
-               VALUES (?,?,?,?,?,?,0,0,?,?)""",
-            (str(uuid.uuid4()), _new_rise_id(used_rise), name,
-             config.OWNER_USERNAME if owner_link else uname, fmt_number(digits), digits, now(), now()),
-        )
-        internal_id = cur.lastrowid
-        await db.execute(
-            "INSERT INTO telegram_links (telegram_chat_id,tg_id,linked_at) VALUES (?,?,?)",
-            (int(telegram_id), internal_id, now()),
-        )
-        await db.commit()
-    if owner_link:
+    if chat == config.OWNER_TELEGRAM_ID:
         await ensure_owner()
-    return await get_user(internal_id)
+    async with connect() as db:
+        await db.execute("BEGIN IMMEDIATE")
+        row = await (await db.execute("""SELECT u.tg_id,o.is_primary FROM telegram_links l
+            JOIN users u ON u.tg_id=l.tg_id JOIN telegram_account_links o ON o.tg_id=u.tg_id
+            AND o.telegram_chat_id=l.telegram_chat_id WHERE l.telegram_chat_id=?""", (chat,))).fetchone()
+        if not row:
+            row = await (await db.execute("""SELECT u.tg_id,o.is_primary FROM telegram_account_links o
+                JOIN users u ON u.tg_id=o.tg_id WHERE o.telegram_chat_id=?
+                ORDER BY o.is_primary DESC,u.tg_id LIMIT 1""", (chat,))).fetchone()
+        if row:
+            uid = int(row["tg_id"])
+            await db.execute("UPDATE users SET name=?,last_seen=? WHERE tg_id=?", (name,now(),uid))
+            if row["is_primary"]:
+                await db.execute("UPDATE users SET username=COALESCE(?,username) WHERE tg_id=?",
+                    (config.OWNER_USERNAME if chat==config.OWNER_TELEGRAM_ID else uname,uid))
+            await db.execute("UPDATE telegram_account_links SET owner_username=COALESCE(?,owner_username) WHERE telegram_chat_id=?",(uname,chat))
+        else:
+            existing = await (await db.execute("SELECT rise_id,phone_digits FROM users")).fetchall()
+            digits = _new_phone({r["phone_digits"] for r in existing} | {r[0] for r in await (await db.execute("SELECT value FROM user_nft_inventory WHERE item_type='number' UNION SELECT phone_digits FROM legacy_numbers")).fetchall()})
+            cur = await db.execute("""INSERT INTO users(user_id,rise_id,name,username,phone,phone_digits,created_at,last_seen)
+                VALUES(?,?,?,?,?,?,?,?)""",(str(uuid.uuid4()),_new_rise_id({r["rise_id"] for r in existing}),name,uname,fmt_number(digits),digits,now(),now()))
+            uid = int(cur.lastrowid)
+            await db.execute("INSERT INTO telegram_account_links(tg_id,telegram_chat_id,owner_username,is_primary,linked_at) VALUES(?,?,?,1,?)",(uid,chat,uname,now()))
+        await db.execute("""INSERT INTO telegram_links(telegram_chat_id,tg_id,linked_at) VALUES(?,?,?)
+            ON CONFLICT(telegram_chat_id) DO UPDATE SET tg_id=excluded.tg_id,linked_at=excluded.linked_at""",(chat,uid,now()))
+        await db.commit()
+    return await get_user(uid)
 
 
 async def link_telegram(user_id: int, telegram_id: int) -> None:
-    """Attach the private bot chat to an existing RiseGram account."""
+    """Explicit account link; refuse moving an account to a different owner."""
     async with connect() as db:
-        await db.execute(
-            "INSERT INTO telegram_links (telegram_chat_id,tg_id,linked_at) VALUES (?,?,?) "
-            "ON CONFLICT(telegram_chat_id) DO UPDATE SET tg_id=excluded.tg_id, linked_at=excluded.linked_at",
-            (int(telegram_id), int(user_id), now()),
-        )
+        await db.execute("BEGIN IMMEDIATE")
+        row = await (await db.execute("SELECT telegram_chat_id FROM telegram_account_links WHERE tg_id=?", (user_id,))).fetchone()
+        if row and int(row[0]) != int(telegram_id):
+            raise ValueError("account already linked")
+        if not await (await db.execute("SELECT 1 FROM users WHERE tg_id=?", (user_id,))).fetchone():
+            raise ValueError("account not found")
+        await db.execute("INSERT OR IGNORE INTO telegram_account_links(tg_id,telegram_chat_id,linked_at) VALUES(?,?,?)",(user_id,telegram_id,now()))
+        await db.execute("""INSERT INTO telegram_links(telegram_chat_id,tg_id,linked_at) VALUES(?,?,?)
+            ON CONFLICT(telegram_chat_id) DO UPDATE SET tg_id=excluded.tg_id,linked_at=excluded.linked_at""",(telegram_id,user_id,now()))
         await db.commit()
+
+
+async def create_number_account(source_id: int, digits: str, price: int = 0, *, inventory_id=None, legacy=False) -> dict | None:
+    """Allocate a fresh local account without inheriting identity, assets or privileges."""
+    digits = digits_of(digits)
+    if not 7 <= len(digits) <= 15:
+        return None
+    import account_recovery as recovery
+    if await recovery.native_info(digits):
+        return None
+    async with connect() as db:
+        await db.execute("BEGIN IMMEDIATE")
+        source = await (await db.execute("""SELECT u.name,o.telegram_chat_id,o.owner_username FROM users u
+            JOIN telegram_account_links o ON o.tg_id=u.tg_id WHERE u.tg_id=? AND u.banned=0""",(source_id,))).fetchone()
+        if not source or await (await db.execute("SELECT 1 FROM users WHERE phone_digits=?",(digits,))).fetchone():
+            return None
+        old = await (await db.execute("SELECT id,tg_id FROM user_nft_inventory WHERE item_type='number' AND value=?",(digits,))).fetchone()
+        if inventory_id is not None:
+            if not old or int(old["id"]) != int(inventory_id) or int(old["tg_id"]) != int(source_id):
+                return None
+            if await (await db.execute("SELECT 1 FROM market_listings WHERE item_id=? AND status='active'",(inventory_id,))).fetchone():
+                return None
+        elif old:
+            return None
+        reserved = await (await db.execute("SELECT claimed_by FROM legacy_numbers WHERE phone_digits=?",(digits,))).fetchone()
+        if reserved and (not legacy or reserved["claimed_by"] is not None):
+            return None
+        if legacy and not reserved:
+            return None
+        used = {r[0] for r in await (await db.execute("SELECT rise_id FROM users")).fetchall()}
+        cur = await db.execute("""INSERT INTO users(user_id,rise_id,name,phone,phone_digits,created_at,last_seen,
+            verified,verified_risegram,verified_major) VALUES(?,?,?,?,?,?,?,0,0,0)""",
+            (str(uuid.uuid4()),_new_rise_id(used),source["name"],fmt_number(digits),digits,now(),now()))
+        uid = int(cur.lastrowid)
+        await db.execute("INSERT INTO telegram_account_links(tg_id,telegram_chat_id,owner_username,is_primary,linked_at) VALUES(?,?,?,0,?)",
+            (uid,source["telegram_chat_id"],source["owner_username"],now()))
+        if old:
+            await db.execute("UPDATE user_nft_inventory SET tg_id=? WHERE id=?",(uid,inventory_id))
+        else:
+            await db.execute("INSERT INTO user_nft_inventory(tg_id,item_type,value,price_stars,created_at) VALUES(?,'number',?,?,?)",(uid,digits,price,now()))
+        if legacy:
+            await db.execute("UPDATE legacy_numbers SET claimed_by=? WHERE phone_digits=?",(uid,digits))
+        await db.commit()
+    return await get_user(uid)
 
 
 async def find_user(query: str) -> dict | None:
     q = (query or "").strip()
     if not q:
         return None
+    if q.startswith("+"):
+        return await fetchone("SELECT * FROM users WHERE phone_digits=?", (digits_of(q),))
     if q.startswith("@") or any(ch.isalpha() for ch in q) or not digits_of(q):
-        return await fetchone(
-            "SELECT * FROM users WHERE lower(replace(username,'@',''))=? OR lower(replace(active_username,'@',''))=? "
-            "OR tg_id IN (SELECT tg_id FROM user_nft_inventory WHERE item_type='username' AND is_active=1 AND value=?) LIMIT 1",
-            (norm_username(q), norm_username(q), norm_username(q)),
-        )
-    d = digits_of(q)
-    if len(d) <= 12:
-        row = await fetchone("SELECT * FROM users WHERE tg_id=?", (int(d),))
-        if row:
-            return row
-        row = await fetchone("SELECT * FROM users WHERE rise_id=?", (int(d),))
-        if row:
-            return row
-    return await fetchone("SELECT * FROM users WHERE phone_digits=?", (d,))
+        n=norm_username(q)
+        rows = await fetchall("""SELECT DISTINCT u.* FROM users u
+            LEFT JOIN telegram_account_links o ON o.tg_id=u.tg_id
+            WHERE lower(replace(u.username,'@',''))=? OR lower(replace(u.active_username,'@',''))=?
+            OR lower(o.owner_username)=? OR u.tg_id IN (SELECT tg_id FROM user_nft_inventory WHERE item_type='username' AND is_active=1 AND value=?)""",(n,n,n,n))
+        return rows[0] if len(rows)==1 else None
+    digits=digits_of(q)
+    matches=await fetchall("SELECT * FROM users WHERE phone_digits=? OR CAST(tg_id AS TEXT)=? OR CAST(rise_id AS TEXT)=?",(digits,digits,digits))
+    return matches[0] if len(matches)==1 else None
 
 
 async def count_users(search: str = "") -> int:
-    if search:
-        like = f"%{norm_username(search)}%"
-        return await scalar(
-            "SELECT COUNT(*) FROM users WHERE lower(COALESCE(username,'')) LIKE ? OR lower(COALESCE(name,'')) LIKE ?",
-            (like, f"%{search.lower()}%"),
-        )
-    return await scalar("SELECT COUNT(*) FROM users")
+    return len(await list_users(limit=-1,search=search)) if search else await scalar("SELECT COUNT(*) FROM users")
 
 
 async def list_users(limit: int = 8, offset: int = 0, search: str = "") -> list[dict]:
+    sql="SELECT u.*,o.owner_username FROM users u LEFT JOIN telegram_account_links o ON o.tg_id=u.tg_id"
+    params=[]
     if search:
-        like = f"%{norm_username(search)}%"
-        return await fetchall(
-            """SELECT * FROM users WHERE lower(COALESCE(username,'')) LIKE ? OR lower(COALESCE(name,'')) LIKE ?
-               ORDER BY created_at DESC, tg_id DESC LIMIT ? OFFSET ?""",
-            (like, f"%{search.lower()}%", limit, offset),
-        )
-    return await fetchall("SELECT * FROM users ORDER BY created_at DESC, tg_id DESC LIMIT ? OFFSET ?", (limit, offset))
+        like=f"%{norm_username(search)}%"
+        phone=digits_of(search)
+        sql+=" WHERE lower(COALESCE(u.username,'')) LIKE ? OR lower(COALESCE(u.name,'')) LIKE ? OR lower(COALESCE(o.owner_username,'')) LIKE ? OR (? != '' AND u.phone_digits=?)"
+        params=[like,like,like,phone,phone]
+    return await fetchall(sql+" ORDER BY u.created_at DESC,u.tg_id DESC LIMIT ? OFFSET ?",(*params,limit,offset))
 
 
 async def all_user_ids(only_active: bool = True) -> list[int]:
@@ -884,7 +938,7 @@ async def delete_user(tg_id: int, *, expected_phone: str) -> None:
             raise ValueError("account changed")
         await db.execute("UPDATE market_listings SET status='cancelled' WHERE seller_id=? AND status='active'", (tg_id,))
         for table, col in [
-            ("admins", "tg_id"), ("telegram_links", "tg_id"), ("verified_peer_links", "account_id"),
+            ("admins", "tg_id"), ("telegram_links", "tg_id"), ("telegram_account_links", "tg_id"), ("verified_peer_links", "account_id"),
             ("user_nft_inventory", "tg_id"),
             ("task_claims", "tg_id"), ("auth_codes", "tg_id"), ("sessions", "tg_id"),
             ("reservations", "tg_id"), ("games", "tg_id"), ("testers", "tg_id"), ("users", "tg_id"),
@@ -894,17 +948,9 @@ async def delete_user(tg_id: int, *, expected_phone: str) -> None:
 
 
 async def set_phone(tg_id: int, digits: str) -> bool:
-    """Меняет текущий номер. False — номер занят другим."""
-    digits = digits_of(digits)
-    try:
-        async with connect() as db:
-            cur = await db.execute(
-                "UPDATE users SET phone=?, phone_digits=? WHERE tg_id=?", (fmt_number(digits), digits, tg_id)
-            )
-            await db.commit()
-            return cur.rowcount > 0
-    except sqlite3.IntegrityError:
-        return False
+    # Repointing a local identity to another number leaks marks/assets.
+    row=await get_user(tg_id)
+    return bool(row and row["phone_digits"]==digits_of(digits))
 
 
 # ─────────────────────────────── баланс ─────────────────────────────────────
@@ -1486,19 +1532,7 @@ async def set_nft_username_active(tg_id: int, item_id: int, active: bool) -> tup
 
 
 async def grant_number_to_user(tg_id: int, digits: str, price: int = 0, make_active: bool = True) -> bool:
-    """Записывает номер в инвентарь и (по желанию) делает текущим. Старый номер остаётся у пользователя."""
-    digits = digits_of(digits)
-    user = await get_user(tg_id)
-    if not user:
-        return False
-    old = user.get("phone_digits")
-    if not await add_nft(tg_id, "number", digits, price):
-        return False
-    if old and old != digits:
-        await add_nft(tg_id, "number", old, 0)  # вернуть старый можно в «Мои NFT и номера»
-    if make_active:
-        return await set_phone(tg_id, digits)
-    return True
+    return bool(await create_number_account(tg_id,digits,price))
 
 
 async def add_legacy_number(digits: str) -> bool:
@@ -1510,18 +1544,7 @@ async def add_legacy_number(digits: str) -> bool:
 
 
 async def claim_legacy_number(digits: str, tg_id: int) -> bool:
-    d = digits_of(digits)
-    async with connect() as db:
-        cur = await db.execute(
-            "UPDATE legacy_numbers SET claimed_by=? WHERE phone_digits=? AND claimed_by IS NULL", (tg_id, d)
-        )
-        await db.commit()
-        if cur.rowcount == 0:
-            return False
-    ok = await grant_number_to_user(tg_id, d, 0, True)
-    if not ok:
-        await execute("UPDATE legacy_numbers SET claimed_by=NULL WHERE phone_digits=?", (d,))
-    return ok
+    return bool(await create_number_account(tg_id,digits,legacy=True))
 
 
 async def list_legacy(limit: int = 20) -> list[dict]:
@@ -1696,30 +1719,8 @@ async def claim_daily_bonus(tg_id: int) -> tuple[bool, str]:
 
 
 async def claim_dox_bonus(tg_id: int, digits: str) -> bool:
-    """/doxnumber: выдаёт синтетический номер +1 и бонус RiseStars — один раз на аккаунт."""
-    peer = await economy.account(await get_user(tg_id))
-    key = f"number-bonus:{tg_id}"
-    digits = digits_of(digits)
-    async with connect() as db:
-        await db.execute("BEGIN IMMEDIATE")
-        old = await (await db.execute("SELECT phone_digits FROM users WHERE tg_id=? AND dox_claimed=0",
-                                      (tg_id,))).fetchone()
-        if not old:
-            return False
-        try:
-            await db.execute("INSERT INTO user_nft_inventory(tg_id,item_type,value,created_at) VALUES(?,'number',?,?)",
-                             (tg_id,digits,now()))
-            await db.execute("UPDATE users SET dox_claimed=1,phone=?,phone_digits=? WHERE tg_id=?",
-                             (fmt_number(digits),digits,tg_id))
-        except sqlite3.IntegrityError:
-            return False
-        if old["phone_digits"] and old["phone_digits"] != digits:
-            await db.execute("INSERT OR IGNORE INTO user_nft_inventory(tg_id,item_type,value,created_at) VALUES(?,'number',?,?)",
-                             (tg_id,old["phone_digits"],now()))
-        await economy.queue(db, key, [(peer,"stars",economy.units("stars",config.DOXNUMBER_BONUS))], "Бонус за номер")
-        await db.commit()
-    await economy.deliver(key)
-    return True
+    # Disabled until separate-account bonus/anti-abuse migration is tested.
+    return False
 
 
 # ─────────────────────────────── топ и статистика ───────────────────────────
@@ -1833,11 +1834,10 @@ async def ensure_owner() -> None:
                 (oid, str(uuid.uuid4()), owner_rise_id, "RiseGram Owner", config.OWNER_USERNAME,
                  "+70000000000", "70000000000", 0, 0, now(), now()),
             )
-        await db.execute(
-            "INSERT INTO telegram_links (telegram_chat_id,tg_id,linked_at) VALUES (?,?,?) "
-            "ON CONFLICT(telegram_chat_id) DO UPDATE SET tg_id=excluded.tg_id, linked_at=excluded.linked_at",
-            (config.OWNER_TELEGRAM_ID, oid, now()),
-        )
+        await db.execute("INSERT OR IGNORE INTO telegram_account_links(tg_id,telegram_chat_id,owner_username,is_primary,linked_at) VALUES(?,?,?,1,?)",
+            (oid,config.OWNER_TELEGRAM_ID,config.OWNER_USERNAME,now()))
+        await db.execute("INSERT OR IGNORE INTO telegram_links(telegram_chat_id,tg_id,linked_at) VALUES(?,?,?)",
+            (config.OWNER_TELEGRAM_ID,oid,now()))
         await db.execute(
             "UPDATE users SET verified=CASE WHEN verified_risegram=1 OR verified_major=1 THEN 1 ELSE 0 END, rise_id=?, username=? WHERE tg_id=?",
             (owner_rise_id, config.OWNER_USERNAME, oid),
