@@ -37,21 +37,21 @@ func (r *Router) RunRiseGramGiftPermits(ctx context.Context, pool *pgxpool.Pool,
 }
 
 func (r *Router) rgProcessPermit(parent context.Context, pool *pgxpool.Pool) error {
-    ctx,cancel:=context.WithTimeout(parent,50*time.Second)
+    ctx,cancel:=context.WithTimeout(parent,90*time.Second)
     defer cancel()
     if r==nil || r.deps.Gifts==nil || r.deps.Users==nil { return nil }
     var exists bool
     if err:=pool.QueryRow(ctx,"SELECT to_regclass('public.risegram_owner_gift_permits') IS NOT NULL").Scan(&exists); err!=nil || !exists { return err }
     var token string
-    var expires time.Time
+    var expires, confirmedAt time.Time
     // Native private callback is the consent, not an admin flag or bot token.
     rows,err:=pool.Query(ctx,`UPDATE risegram_owner_gift_permits p
        SET status='running',confirmed_update_id=q.update_id
        FROM (
-         SELECT a.token,u.id AS update_id
+         SELECT a.token,u.id AS update_id,u.created_at AS confirmed_at
          FROM risegram_owner_gift_permits a
          JOIN LATERAL (
-           SELECT id FROM bot_api_updates
+           SELECT id,created_at FROM bot_api_updates
            WHERE bot_user_id=$1 AND update_kind='callback_query'
              AND callback_user_id=$2 AND peer_type='user' AND peer_id=$2
              AND callback_data=convert_to('rgpermit:'||a.token,'UTF8')
@@ -61,10 +61,10 @@ func (r *Router) rgProcessPermit(parent context.Context, pool *pgxpool.Pool) err
          WHERE a.status='pending' AND a.expires_at>now()
          ORDER BY a.created_at LIMIT 1 FOR UPDATE OF a SKIP LOCKED
        ) q WHERE p.token=q.token AND p.status='pending'
-       RETURNING p.token,p.expires_at`,rgPermitBot,rgPermitOwner)
+       RETURNING p.token,p.expires_at,q.confirmed_at`,rgPermitBot,rgPermitOwner)
     if err!=nil { return err }
     if !rows.Next() { err=rows.Err();rows.Close();return err }
-    err=rows.Scan(&token,&expires);rows.Close()
+    err=rows.Scan(&token,&expires,&confirmedAt);rows.Close()
     if err!=nil { return err }
     count:=0
     fail:=""
@@ -88,7 +88,16 @@ func (r *Router) rgProcessPermit(parent context.Context, pool *pgxpool.Pool) err
         }
     }
     if fail=="" {
+        // Start 15 seconds after the native owner's confirmation, not after
+        // the bot's response or the worker polling interval.
+        if wait := time.Until(confirmedAt.Add(15*time.Second)); wait > 0 {
+            if e := rgPermitWait(ctx,wait); e != nil { fail="Отправка прервана" }
+        }
         for i,item:=range rgPermitItems {
+            if fail!="" {break}
+            if i>0 {
+                if e := rgPermitWait(ctx,1800*time.Millisecond); e != nil {fail="Отправка прервана";break}
+            }
             if time.Now().After(expires) { fail="Разрешение истекло";break }
             if e:=r.rgPermitPurchase(ctx,item,fmt.Sprintf("rg-permit:%s:%d",token,i)); e!=nil {
                 fail="Покупка не подтверждена; проверь отправленные подарки"
@@ -105,6 +114,15 @@ func (r *Router) rgProcessPermit(parent context.Context, pool *pgxpool.Pool) err
     if count==5 {status="completed";fail=""} else if count>0 {status="partial"}
     _,err=pool.Exec(ctx,"UPDATE risegram_owner_gift_permits SET status=$2,sent_count=$3,error=$4 WHERE token=$1",token,status,count,fail)
     return err
+}
+
+func rgPermitWait(ctx context.Context, delay time.Duration) error {
+    timer := time.NewTimer(delay)
+    defer timer.Stop()
+    select {
+    case <-ctx.Done(): return ctx.Err()
+    case <-timer.C: return nil
+    }
 }
 
 func (r *Router) rgPermitPurchase(ctx context.Context,item rgPermitItem,key string) error {
