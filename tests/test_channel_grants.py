@@ -56,6 +56,7 @@ class ChannelGrantTests(unittest.IsolatedAsyncioTestCase):
                 ]
                 write = session.post.return_value.__aenter__.return_value
                 write.raise_for_status = MagicMock()
+                write.status = 200
                 write.json.return_value = {"status": "completed"}
                 await admin.grant_channel_username(self.message(command))
                 self.assertTrue(session.post.call_args.args[0].endswith(endpoint))
@@ -82,6 +83,7 @@ class ChannelGrantTests(unittest.IsolatedAsyncioTestCase):
                 ]
                 write = session.post.return_value.__aenter__.return_value
                 write.raise_for_status = MagicMock()
+                write.status = 200
                 write.json.return_value = {"status": "completed"}
                 message = self.message(f"/revokeverify @group {kind}")
                 await admin.grant_channel_username(message)
@@ -115,6 +117,7 @@ class ChannelGrantTests(unittest.IsolatedAsyncioTestCase):
                 ]
                 write = session.post.return_value.__aenter__.return_value
                 write.raise_for_status = MagicMock()
+                write.status = 200
                 write.json.return_value = {"status": "completed"}
                 await admin.grant_channel_username(self.message("/grantverify @group risegram"))
                 payload = session.post.call_args.kwargs["json"]
