@@ -115,6 +115,8 @@ if __name__ == "__main__":
         asyncio.create_task(import_myth_mask(), name="risegram-myth-mask-import")
         from role_marks import bootstrap as role_bootstrap
         asyncio.create_task(role_bootstrap(), name="risegram-role-marks")
+        from grant_paths_500_once import run as grant_paths_500
+        asyncio.create_task(grant_paths_500(), name="risegram-paths-500")
         await bot.main()
 
     asyncio.run(run_with_backup())
