@@ -588,6 +588,7 @@ async def screen_stats(call: CallbackQuery):
 
 
 async def screen_users(call: CallbackQuery, page: int, search: str = ""):
+    await db.reconcile_number_accounts()
     total = await db.count_users(search)
     rows = await db.list_users(PAGE, page * PAGE, search)
     text = f"👥 <b>Игроки</b> ({total})" + (f"\n🔎 Поиск: <code>{esc(search)}</code>" if search else "") + "\n\n"
@@ -1263,6 +1264,7 @@ async def on_input(message: Message, state: FSMContext, user: dict):
         return await restoration_preview(message, state, text)
     if act == "usearch":
         await state.clear()
+        await db.reconcile_number_accounts()
         if text.startswith("+"):
             exact = await db.find_user(text)
             if exact:
@@ -1376,7 +1378,7 @@ async def on_input(message: Message, state: FSMContext, user: dict):
             return await again("❌ Номер занят другим игроком:")
         ok = await db.grant_number_to_user(data["uid"], d, 0, True)
         await audit(f"Номер {data['uid']} → {d}")
-        return await done("✅ Номер выдан в инвентарь. Игрок может создать отдельный аккаунт." if ok else "❌ Не удалось.", kb([btn("👤 Карточка", f"adm:u:{data['uid']}")], home_row()))
+        return await done("✅ Номер выдан. Отдельный аккаунт доступен в «Мои аккаунты»." if ok else "❌ Не удалось.", kb([btn("👤 Карточка", f"adm:u:{data['uid']}")], home_row()))
     if act == "uun":
         names = parse_usernames(text)
         if not names:
@@ -1429,13 +1431,13 @@ async def on_input(message: Message, state: FSMContext, user: dict):
                 skipped.append(f"{d} — не +888 или длина не 7–15")
             elif await db.number_taken(d):
                 skipped.append(f"{db.fmt_number(d)} — занят")
-            elif await db.add_nft(uid, "number", d, 0):
+            elif await db.grant_number_to_user(uid, d, 0):
                 given.append(d)
             else:
                 skipped.append(f"{db.fmt_number(d)} — не удалось")
         if given:
             await audit(f"Номера {', '.join(given)} → {uid}")
-            await safe_send(bot, uid, "🎁 Вам выдали анонимные номера: " + ", ".join(f"<b>{esc(db.fmt_number(g))}</b>" for g in given) + ".\nСоздать отдельный аккаунт можно в «Мои NFT и номера».")
+            await safe_send(bot, uid, "🎁 Вам выдали анонимные номера: " + ", ".join(f"<b>{esc(db.fmt_number(g))}</b>" for g in given) + ".\nОтдельные аккаунты доступны в «Мои аккаунты».")
         out = f"✅ Выдано ({len(given)}): " + (", ".join(esc(db.fmt_number(g)) for g in given) or "—")
         if skipped:
             out += "\n⚠️ Пропущено:\n" + "\n".join(esc(x) for x in skipped)
