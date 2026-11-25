@@ -145,6 +145,16 @@ async def worker():
                 await asyncio.sleep(60)
                 continue
             try:
+                # Only remove sold-out limited catalog offers. Gift revisions
+                # and purchased collectibles remain available to their owners.
+                import native_economy
+                async with native_economy.transaction() as conn:
+                    await conn.execute("""UPDATE star_gift_catalog g SET enabled=false,updated_at=now()
+                        FROM star_gift_catalog_revisions r WHERE r.id=g.active_revision_id
+                        AND g.enabled AND r.limited AND g.availability_remains=0""")
+            except Exception:
+                log.exception("Sold-out gift visibility update failed")
+            try:
                 await refresh_private_editions(session, assets)
             except Exception as exc:
                 log.warning("Legacy collectible pool pending: %s", str(exc)[:200])
