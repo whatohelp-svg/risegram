@@ -109,6 +109,35 @@ class IdentityMigrationTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual({x["value"] for x in active}, {"aliastwo"})
 
+    async def test_separate_number_identity(self):
+        from unittest.mock import AsyncMock, patch
+        first=await db.get_or_create_user(123456789,"Player","sameowner")
+        await db.set_verification(first["tg_id"],"risegram",True)
+        await db.set_verification(first["tg_id"],"major",True)
+        await db.add_nft(first["tg_id"],"username","firstasset")
+        with patch("account_recovery.native_info",new=AsyncMock(return_value=None)):
+            second=await db.create_number_account(first["tg_id"],"8881234567")
+        self.assertIsNotNone(second)
+        self.assertNotEqual(first["tg_id"],second["tg_id"])
+        self.assertNotEqual(first["rise_id"],second["rise_id"])
+        self.assertNotEqual(first["user_id"],second["user_id"])
+        self.assertFalse(second["verified_risegram"])
+        self.assertFalse(second["verified_major"])
+        self.assertEqual(await db.list_nft(second["tg_id"],"username"),[])
+        self.assertEqual(await db.telegram_chat_id(second["tg_id"]),123456789)
+        self.assertEqual(await db.telegram_chat_id(first["tg_id"]),123456789)
+        self.assertFalse(await db.select_account(987654321,second["tg_id"]))
+        self.assertTrue(await db.select_account(123456789,second["tg_id"]))
+        self.assertEqual((await db.get_or_create_user(123456789,"Player","sameowner"))["tg_id"],second["tg_id"])
+        self.assertEqual((await db.find_user("+8881234567"))["tg_id"],second["tg_id"])
+        self.assertIsNone(await db.find_user("@sameowner"))
+        self.assertFalse(await db.set_phone(first["tg_id"],"8881234567"))
+        self.assertEqual((await db.get_user(first["tg_id"]))["phone_digits"],first["phone_digits"])
+        self.assertTrue((await db.get_user(first["tg_id"]))["verified_risegram"])
+        await db.init_db()
+        self.assertEqual(len(await db.linked_accounts(123456789)),2)
+        self.assertEqual((await db.get_by_telegram(123456789))["tg_id"],second["tg_id"])
+
     async def test_starter_nfts_are_owner_inventory_assets(self):
         owner = await db.get_user(config.OWNER_ID)
         items = await db.list_nft(owner["tg_id"])

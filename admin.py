@@ -97,7 +97,9 @@ async def audit(text: str):
 
 def user_line(u: dict) -> str:
     flags = ("🚫" if u.get("banned") else "") + ("☑️" if u.get("verified_risegram") else "") + ("💠" if u.get("verified_major") else "")
-    return f"{esc(db.shown_username(u))} · <code>{u['tg_id']}</code> {flags}".strip()
+    owner=u.get("owner_username") or u.get("username")
+    label=f"@{owner}" if owner else db.shown_username(u)
+    return f"<code>{esc(u.get('phone') or '—')}</code> ({esc(label)}) · ID <code>{u['tg_id']}</code> {flags}".strip()
 
 
 async def parse_target(text: str) -> dict | None:
@@ -106,6 +108,9 @@ async def parse_target(text: str) -> dict | None:
         from support_console import resolve, local_for_native
         try:
             nid = await resolve(text)
+            name=db.norm_username(text)
+            if await db.scalar("SELECT COUNT(*) FROM telegram_account_links WHERE lower(owner_username)=?",(name,))>1:
+                return None
             if nid:
                 return await local_for_native(nid)
             # No native alias: allow unique bot-side name, never an ambiguous match.
@@ -591,7 +596,7 @@ async def screen_users(call: CallbackQuery, page: int, search: str = ""):
     buttons = []
     for u in rows:
         text += f"• {user_line(u)}\n"
-        buttons.append([btn(f"{db.shown_username(u)} · {u['tg_id']}", f"adm:u:{u['tg_id']}")])
+        buttons.append([btn(f"{u['phone']} (@{u.get('owner_username') or u.get('username') or '—'})",f"adm:u:{u['tg_id']}")])
     if not rows:
         text += "Никого не найдено."
     await show(call, text, kb(*buttons, pager("adm:users", page, total), [btn("🔎 Поиск", "adm:usearch")], home_row()))
@@ -626,7 +631,7 @@ async def screen_user(event, uid: int, note: str = ""):
         [btn("⭐ RiseStars ±", f"adm:g:{uid}:stars"), btn("💎 Gram ±", f"adm:g:{uid}:gram")],
         [btn(ban_label, f"adm:uban:{uid}", style="success" if u["banned"] else "danger")],
         [btn(rise_label, f"adm:uverrise:{uid}:{0 if u.get('verified_risegram') else 1}"), btn(major_label, f"adm:uvermajor:{uid}:{0 if u.get('verified_major') else 1}")],
-        [btn("📞 Сменить номер", f"adm:unum:{uid}"), btn("🏷 Выдать юзернейм", f"adm:uun:{uid}")],
+        [btn("📞 Новый аккаунт", f"adm:unum:{uid}"), btn("🏷 Выдать юзернейм", f"adm:uun:{uid}")],
         [btn("📞 Выдать +888", f"adm:uph:{uid}"), btn("🗂 NFT/номера", f"adm:nfts:{uid}")],
         [btn("🔑 Выдать код входа", f"adm:ucode:{uid}"), btn("✉️ Написать", f"adm:umsg:{uid}")],
         [btn("🗑 Удалить игрока", f"adm:udel:{uid}", style="danger")],
@@ -692,13 +697,12 @@ async def remove_nft(item_id: int, *, force: bool = False) -> str:
     if it["item_type"] == "number" and not force:
         return "Анонимные номера нельзя удалять: они связаны с входом и привязкой аккаунта."
     uid = it["tg_id"]
-    await db.delete_nft(item_id)
     u = await db.get_user(uid)
+    if it["item_type"] == "number" and u and u.get("phone_digits")==it["value"]:
+        return "Активный номер не отзывается автоматически: требуется проверка аккаунта и безопасное восстановление."
+    await db.delete_nft(item_id)
     if it["item_type"] == "username" and u and db.norm_username(u.get("active_username")) == it["value"]:
         await db.set_active_username(uid, None)
-    if it["item_type"] == "number" and u and u.get("phone_digits") == it["value"]:
-        await fresh_phone(uid)
-        return "Номер отозван, игроку выдан новый."
     return "Удалено."
 
 
@@ -1364,7 +1368,7 @@ async def on_input(message: Message, state: FSMContext, user: dict):
             return await again("❌ Номер занят другим игроком:")
         ok = await db.grant_number_to_user(data["uid"], d, 0, True)
         await audit(f"Номер {data['uid']} → {d}")
-        return await done("✅ Номер изменён." if ok else "❌ Не удалось.", kb([btn("👤 Карточка", f"adm:u:{data['uid']}")], home_row()))
+        return await done("✅ Создан отдельный аккаунт; старый сохранён." if ok else "❌ Не удалось.", kb([btn("👤 Карточка", f"adm:u:{data['uid']}")], home_row()))
     if act == "uun":
         names = parse_usernames(text)
         if not names:
@@ -1417,13 +1421,13 @@ async def on_input(message: Message, state: FSMContext, user: dict):
                 skipped.append(f"{d} — не +888 или длина не 7–15")
             elif await db.number_taken(d):
                 skipped.append(f"{db.fmt_number(d)} — занят")
-            elif await db.add_nft(uid, "number", d, 0):
+            elif await db.create_number_account(uid,d):
                 given.append(d)
             else:
                 skipped.append(f"{db.fmt_number(d)} — не удалось")
         if given:
             await audit(f"Номера {', '.join(given)} → {uid}")
-            await safe_send(bot, uid, "🎁 Вам выдали анонимные номера: " + ", ".join(f"<b>{esc(db.fmt_number(g))}</b>" for g in given) + ".\nВыбрать текущий можно в «Мои NFT и номера».")
+            await safe_send(bot, uid, "🎁 Вам выдали анонимные номера: " + ", ".join(f"<b>{esc(db.fmt_number(g))}</b>" for g in given) + ".\nКаждый номер — отдельный аккаунт в «Мои аккаунты».")
         out = f"✅ Выдано ({len(given)}): " + (", ".join(esc(db.fmt_number(g)) for g in given) or "—")
         if skipped:
             out += "\n⚠️ Пропущено:\n" + "\n".join(esc(x) for x in skipped)
@@ -1888,7 +1892,7 @@ async def adm_cb(call: CallbackQuery, state: FSMContext, user: dict):
                 call, state, "uph",
                 f"📞 Номера +888 для {user_line(u)}:\n\nПришлите один или несколько (до 30) через пробел, запятую или с новой строки, "
                 "например <code>8881234 8880001</code> или <code>+888 0123 4567</code> (один номер в строке, если с пробелами). "
-                "Номера попадут в «Мои NFT и номера»; сделать текущим игрок может сам.",
+                "Каждый номер создаст отдельный аккаунт в «Мои аккаунты».",
                 back, uid=uid,
             )
         if route == "unum":

@@ -1005,10 +1005,16 @@ async def sync_mtproto_verification(user_id: int, force: bool = False) -> dict:
                     # The MTProto peer can appear after this bot update. Retry shortly.
                     _verification_sync_last[int(user_id)] = time.monotonic() - 270
                     return {"configured": True, "synced": False, "pending_account": True}
-                await db.execute(
-                    "INSERT OR REPLACE INTO verified_peer_links(peer_id,account_id,phone_digits) VALUES(?,?,?)",
-                    (int(resolved["user_id"]), user_id, digits),
-                )
+                peer_id=int(resolved["user_id"])
+                async with db.connect() as local:
+                    await local.execute("BEGIN IMMEDIATE")
+                    conflict=await (await local.execute("""SELECT 1 FROM verified_peer_links
+                        WHERE (peer_id=? OR account_id=?) AND NOT (peer_id=? AND account_id=? AND phone_digits=?)""",
+                        (peer_id,user_id,peer_id,user_id,digits))).fetchone()
+                    if conflict:
+                        return {"configured":True,"synced":False,"identity_conflict":True}
+                    await local.execute("INSERT OR IGNORE INTO verified_peer_links(peer_id,account_id,phone_digits) VALUES(?,?,?)",(peer_id,user_id,digits))
+                    await local.commit()
                 payload = {
                     "command_id": f"risegram-verified-{int(user_id)}-{time.time_ns()}",
                     "actor": "risegram-bot",
@@ -1181,7 +1187,7 @@ async def sync_collectible_usernames(user_id: int) -> dict:
         return {"synced": 0, "skipped": 0, "configured": True}
     phone = str(user.get("phone") or "")
     phone_digits = db.digits_of(phone)
-    if not phone_digits.startswith("888") or len(phone_digits) < 7:
+    if not 7 <= len(phone_digits) <= 15:
         return {"synced": 0, "skipped": 0, "configured": True}
 
     inventory = await db.list_nft(int(user_id), "username")

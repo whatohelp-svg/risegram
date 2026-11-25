@@ -101,6 +101,8 @@ class GuardMiddleware(BaseMiddleware):
                 _last_click.clear()
         user = await db.get_or_create_user(tg_user.id, tg_user.full_name or "User", tg_user.username)
         data["user"] = user
+        if (is_cb and (event.data or "").startswith("accounts:")) or (isinstance(event, Message) and (event.text or "").split(maxsplit=1)[0:1] == ["/accounts"]):
+            return await handler(event,data)
         # A recoverable admin deletion remains attached to the *same* account.
         # Don't auto-provision a new identity or allow ordinary bot actions while
         # the server has the account frozen. Pending paid invoices still settle.
@@ -222,12 +224,44 @@ def local_miniapp_url() -> str:
 def main_kb():
     return kb(
         [btn("🔒 Код входа", "menu:code", style="primary"), btn("📞 Мой номер", "menu:number")],
+        [btn("👥 Мои аккаунты", "accounts:list")],
         [btn("💎 Донат", "donat:hub")],
         [btn("📱 Открыть приложение", web_app=local_miniapp_url(), style="primary")] if local_miniapp_url() else [webapp_button("primary")],
         [btn("🕒 Мои покупки", "menu:purchases"), btn("ℹ️ Как это работает", "menu:help")],
         [btn("🆘 Поддержка", "menu:support")],
         [btn("⚙️ Настройки", "menu:settings"), btn("✨ Ещё", "menu:more")],
     )
+
+
+async def accounts_screen(event, user):
+    accounts=await db.linked_accounts(event.from_user.id)
+    rows=[]
+    for item in accounts[:50]:
+        selected="✅ " if item["tg_id"]==user["tg_id"] else ""
+        owner=item.get("owner_username") or ""
+        label=f"{selected}{item['phone']} (@{owner})" if owner else f"{selected}{item['phone']}"
+        rows.append([btn(label,f"accounts:select:{item['tg_id']}")])
+    await show(event,"👥 <b>Мои аккаунты</b>\n\nКаждый номер — отдельный профиль с собственными подарками, балансом и верификацией.",kb(*rows,back_row()))
+
+
+@router.message(Command("accounts"))
+@router.callback_query(F.data=="accounts:list")
+async def cb_accounts(event, user):
+    await accounts_screen(event,user)
+
+
+@router.callback_query(F.data.startswith("accounts:select:"))
+async def cb_select_account(call: CallbackQuery,state:FSMContext,user:dict):
+    raw=call.data.rsplit(":",1)[1]
+    if not raw.isdigit() or len(raw)>18:
+        return await call.answer("Некорректный аккаунт",show_alert=True)
+    uid=int(raw)
+    if not await db.select_account(call.from_user.id,uid):
+        return await call.answer("Этот аккаунт вам не принадлежит",show_alert=True)
+    await state.clear()
+    selected=await db.get_user(uid)
+    await accounts_screen(call,selected)
+    await call.answer("Аккаунт выбран")
 
 
 @router.message(CommandStart())
@@ -492,10 +526,7 @@ async def cb_profile(call: CallbackQuery, user: dict):
 
 async def send_stars_invoice(bot: Bot, chat_id: int, *, title: str, description: str, payload: str, stars: int, label: str):
     import terms_policy
-    linked=await db.get_by_telegram(chat_id)
-    if not linked:
-        # Existing callers sometimes supply the local account ID.
-        linked=await db.get_user(chat_id)
+    linked=await db.get_user(chat_id)
     if not linked:
         raise economy.WalletError("Аккаунт оплаты не найден")
     uid=int(linked["tg_id"])
@@ -509,7 +540,7 @@ async def send_stars_invoice(bot: Bot, chat_id: int, *, title: str, description:
         chat_id=chat_id,
         title=title[:32],
         description=description[:255],
-        payload=payload[:128],
+        payload=f"acct:{uid}:{payload}",
         currency="XTR",
         prices=[LabeledPrice(label=label[:32], amount=stars)],
     )
@@ -610,7 +641,7 @@ async def send_rs_invoice(bot: Bot, payer: dict, stars: int, target_id: int) -> 
         return "Сначала откройте личный чат с ботом и привяжите аккаунт."
     await send_stars_invoice(
         bot,
-        chat_id,
+        payer["tg_id"],
         title=f"{fmt_num(amount)} {config.CURRENCY_NAME}",
         description=f"Пополнение {config.CURRENCY_NAME} в {config.BRAND} для {db.shown_username(target)}.",
         payload=f"rs:{stars}:{target_id}",
@@ -756,7 +787,7 @@ async def chat_shop_invoice(bot: Bot, uid: int, kind: str, channel_id: int,
     chat_id = await db.telegram_chat_id(uid)
     if chat_id is None:
         raise native_shop.NativePurchaseError("Нет связи с Telegram-ботом оплаты")
-    await send_stars_invoice(bot, chat_id, title=title, stars=price,
+    await send_stars_invoice(bot, uid, title=title, stars=price,
         payload=payload, label="RiseGram · чат", description=(
             f"{'NFT @'+name if product=='name' else 'Коммерческая метка '+product} "
             f"для {kind} #{channel_id} в RiseGram"
@@ -822,7 +853,7 @@ async def cb_verify_club(call: CallbackQuery, user: dict):
     target = await db.telegram_chat_id(user["tg_id"])
     if target is None:
         return await call.answer("Сначала свяжи Telegram с ботом", show_alert=True)
-    await send_stars_invoice(call.bot, target, title="RiseGram Club · аккаунт",
+    await send_stars_invoice(call.bot, user["tg_id"], title="RiseGram Club · аккаунт",
         description="Платная косметическая метка RiseGram Club. Не официальная верификация",
         payload=f"vc:a:{user['tg_id']}",
         stars=config.ACCOUNT_RISEGRAM_CLUB_PRICE, label="RiseGram Club")
@@ -1128,7 +1159,7 @@ def number_offer(fmt: str, digits: str):
         "📞 <b>Номер на покупку</b>\n\n"
         f"<code>{esc(db.fmt_number(digits))}</code>\n"
         f"Цена: <b>{price} ⭐</b>\n\n"
-        "После оплаты это станет вашим текущим номером, а коды входа придут в этого бота."
+        "После оплаты создастся отдельный аккаунт. Коды входа придут в этого бота."
     )
     rows = [[btn(f"✅ Купить · {price} ⭐", f"num:buy:{fmt}:{digits}", style="success")]]
     if fmt in config.NUMBER_FORMATS:
@@ -1203,7 +1234,7 @@ async def cb_num_buy(call: CallbackQuery, user: dict):
         call.bot,
         user["tg_id"],
         title="Номер +888",
-        description=f"Анонимный номер {db.fmt_number(digits)}. Станет вашим текущим номером.",
+        description=f"Анонимный номер {db.fmt_number(digits)}. Создаст отдельный аккаунт.",
         payload=f"nm:{fmt}:{digits}",
         stars=price,
         label=db.fmt_number(digits)[:32],
@@ -1378,7 +1409,11 @@ async def on_pre_checkout(q: PreCheckoutQuery):
     if q.from_user.id != config.OWNER_TELEGRAM_ID and await db.get_meta("maintenance") == "1":
         await q.answer(ok=False, error_message="Технические работы. Оплатите чуть позже.")
         return
-    linked = await db.get_by_telegram(q.from_user.id)
+    bound=q.invoice_payload.split(":",2)
+    if len(bound)!=3 or bound[0]!="acct" or not bound[1].isdigit() or len(bound[1])>18:
+        return await q.answer(ok=False,error_message="Счёт устарел. Создайте новый для нужного аккаунта.")
+    uid=int(bound[1])
+    linked=await db.get_user(uid) if await db.telegram_chat_id(uid)==q.from_user.id else None
     if not linked:
         await q.answer(ok=False, error_message="Сначала запустите бота для привязки аккаунта.")
         return
@@ -1386,7 +1421,7 @@ async def on_pre_checkout(q: PreCheckoutQuery):
     if not await terms_policy.purchase_accepted(int(linked["tg_id"])):
         await q.answer(ok=False,error_message="Примите условия покупки в @risegrambot и повторите оплату")
         return
-    err = await validate_order(linked["tg_id"], q.invoice_payload, q.total_amount)
+    err = await validate_order(linked["tg_id"], bound[2], q.total_amount)
     if err:
         await q.answer(ok=False, error_message=err)
     else:
@@ -1461,7 +1496,7 @@ async def deliver_order(bot: Bot, uid: int, payload: str, stars: int, charge: st
             return False, "number", "Номер уже занят", ""
         await db.release("number", digits)
         return True, "number", db.fmt_number(digits), (
-            f"✅ Номер <code>{esc(db.fmt_number(digits))}</code> теперь ваш. Коды входа будут приходить в этого бота."
+            f"✅ Создан отдельный аккаунт <code>{esc(db.fmt_number(digits))}</code>. Выберите его в «Мои аккаунты»."
         )
     if kind == "nu":
         name = a[0]
@@ -1495,6 +1530,20 @@ async def complete_risestars_order(bot, order):
 async def on_paid(message: Message, user: dict):
     sp = message.successful_payment
     uid, stars, charge, payload = user["tg_id"], sp.total_amount, sp.telegram_payment_charge_id, sp.invoice_payload
+    if payload.startswith("acct:"):
+        bound=payload.split(":",2)
+        if len(bound)!=3 or not bound[1].isdigit() or len(bound[1])>18 or await db.telegram_chat_id(int(bound[1]))!=message.from_user.id:
+            await message.bot.refund_star_payment(user_id=message.from_user.id,telegram_payment_charge_id=charge)
+            return
+        uid=int(bound[1])
+        user=await db.get_user(uid)
+        payload=bound[2]
+    else:
+        # A legacy invoice has no payer account binding.
+        linked=await db.linked_accounts(message.from_user.id)
+        if len(linked)!=1:
+            await message.bot.refund_star_payment(user_id=message.from_user.id,telegram_payment_charge_id=charge)
+            return
     try:  # запись ДО выдачи: повторная доставка апдейта не выдаст товар второй раз
         pid = await db.add_purchase(uid, "pending", "В обработке", stars, charge, payload, "processing")
     except sqlite3.IntegrityError:
@@ -1586,7 +1635,7 @@ async def items_screen(event, user: dict):
             lock = " 🛒 на маркете" if n["id"] in listed else ""
             text += f"{'🟢' if on else '⚪'} <code>{esc(db.fmt_number(n['value']))}</code>{lock}\n"
             if not on and n["id"] not in listed:
-                rows.append([btn(f"Сделать текущим {db.fmt_number(n['value'])}", f"my:ph:{n['id']}")])
+                rows.append([btn(f"Создать аккаунт {db.fmt_number(n['value'])}", f"my:ph:{n['id']}")])
         if len(nums) > ITEMS_SHOWN:
             text += f"…и ещё {len(nums) - ITEMS_SHOWN}\n"
     rows.append([btn("🛒 Маркет", "market:hub")])
@@ -1626,16 +1675,13 @@ async def cb_my_phone(call: CallbackQuery, user: dict):
     if await db.listing_for_item(it["id"]):
         await call.answer("Номер выставлен на маркете. Сначала снимите лот.", show_alert=True)
         return
-    old = user.get("phone_digits")
-    if old and old != it["value"]:
-        # Прежний номер сохраняем в инвентаре, иначе он пропадёт насовсем (как при покупке номера).
-        # Если он там уже есть, add_nft вернёт False — это нормально.
-        await db.add_nft(user["tg_id"], "number", old, 0)
-    if not await db.set_phone(user["tg_id"], it["value"]):
-        await call.answer("Не удалось сменить номер.", show_alert=True)
-        return
-    user = await db.get_user(user["tg_id"])
-    await items_screen(call, user)
+    if it["value"]==user["phone_digits"]:
+        return await call.answer("Это номер текущего аккаунта",show_alert=True)
+    new=await db.create_number_account(user["tg_id"],it["value"],inventory_id=it["id"])
+    if not new:
+        return await call.answer("Номер уже связан с аккаунтом или требует проверки администрацией",show_alert=True)
+    await db.select_account(call.from_user.id,new["tg_id"])
+    await accounts_screen(call,new)
 
 
 # ═══════════════════════════ /doxnumber и /migrate ══════════════════════════
@@ -1645,24 +1691,7 @@ async def cb_my_phone(call: CallbackQuery, user: dict):
 async def cmd_doxnumber(message: Message, user: dict):
     if not await need_feature(message, "auth_numbers"):
         return
-    if user.get("dox_claimed"):
-        await message.answer("ℹ️ Бонусный номер +1 уже получен.")
-        return
-    for _ in range(40):
-        d = db.gen_us_digits()
-        if not await db.number_taken(d):
-            break
-    else:
-        await message.answer("Не удалось подобрать номер, попробуйте позже.")
-        return
-    if await db.claim_dox_bonus(user["tg_id"], d):
-        await message.answer(
-            f"🇺🇸 Ваш номер <code>{esc(db.fmt_number(d))}</code> активирован, бонус <b>{fmt_num(config.DOXNUMBER_BONUS)} {config.CURRENCY_NAME}</b> зачислен.\n"
-            "Старый номер сохранён в «Мои NFT и номера».",
-            reply_markup=kb([btn("🏠 Меню", "menu:main")]),
-        )
-    else:
-        await message.answer("❌ Не получилось выдать номер, попробуйте ещё раз.")
+    await message.answer("Выдача бонусного номера временно отключена для безопасного разделения аккаунтов.")
 
 
 @router.message(Command("migrate"))
@@ -1685,7 +1714,7 @@ async def msg_migrate(message: Message, state: FSMContext, user: dict):
         return
     await state.clear()
     if await db.claim_legacy_number(d, user["tg_id"]):
-        await message.answer(f"✅ Номер <code>{esc(db.fmt_number(d))}</code> привязан и стал текущим.")
+        await message.answer(f"✅ Номер <code>{esc(db.fmt_number(d))}</code> привязан как отдельный аккаунт. Откройте «Мои аккаунты».")
     else:
         await message.answer("❌ Номер не найден в списке переноса или уже привязан.")
 
