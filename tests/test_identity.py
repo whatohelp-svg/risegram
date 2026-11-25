@@ -116,7 +116,7 @@ class IdentityMigrationTests(unittest.IsolatedAsyncioTestCase):
         await db.set_verification(uid, "risegram", True)
         await db.set_verification(uid, "major", True)
         self.assertTrue(await db.add_nft(uid, "username", "primaryasset"))
-        self.assertTrue(await db.grant_number_to_user(uid, "8881234567"))
+        self.assertTrue(await db.add_nft(uid, "number", "8881234567"))
         self.assertEqual((await db.get_user(uid))["phone_digits"], primary["phone_digits"])
         item = (await db.list_nft(uid, "number"))[0]
         self.assertIsNone(await db.activate_number_account(chat + 1, uid, item["id"]))
@@ -143,6 +143,39 @@ class IdentityMigrationTests(unittest.IsolatedAsyncioTestCase):
         await db.set_verification(secondary["tg_id"], "major", True)
         self.assertTrue((await db.get_user(secondary["tg_id"]))["verified_major"])
         self.assertFalse((await db.get_user(secondary["tg_id"]))["verified_risegram"])
+
+    async def test_backfill_issued_numbers_without_changing_primary_or_badges(self):
+        chat = 123456789
+        primary = await db.get_or_create_user(chat, "Test User", "example")
+        uid = primary["tg_id"]
+        await db.set_verification(uid, "risegram", True)
+        await db.add_nft(uid, "number", primary["phone_digits"])
+        await db.add_nft(uid, "number", "8880000")
+        await db.add_nft(uid, "number", "8887777")
+        listed = await db.fetchone("SELECT id FROM user_nft_inventory WHERE value='8887777' AND item_type='number'")
+        await db.execute("INSERT INTO market_listings(seller_id,item_id,item_type,value,price,status,created_at) VALUES(?,?,?,?,?,'active',?)",
+                         (uid, listed["id"], "number", "8887777", 100, db.now()))
+        self.assertEqual(await db.reconcile_number_accounts(), 1)
+        self.assertEqual(await db.reconcile_number_accounts(), 0)
+        secondary = await db.find_user("+8880000")
+        self.assertNotEqual(uid, secondary["tg_id"])
+        self.assertFalse(secondary["verified_risegram"])
+        self.assertTrue((await db.get_user(uid))["verified_risegram"])
+        self.assertEqual((await db.get_by_telegram(chat))["tg_id"], uid)
+        self.assertEqual((await db.get_user(uid))["phone_digits"], primary["phone_digits"])
+        self.assertIsNone(await db.find_user("+8887777"))
+        self.assertTrue(await db.grant_number_to_user(uid, "8888888"))
+        self.assertEqual(len(await db.accounts_for_telegram(chat)), 3)
+        await db.init_db()
+        self.assertEqual(len(await db.accounts_for_telegram(chat)), 3)
+
+    async def test_backfill_does_not_unban_owner(self):
+        chat = 123456789
+        primary = await db.get_or_create_user(chat, "Test User", "example")
+        await db.set_banned(primary["tg_id"], True)
+        await db.add_nft(primary["tg_id"], "number", "8885555")
+        self.assertEqual(await db.reconcile_number_accounts(), 1)
+        self.assertTrue((await db.find_user("+8885555"))["banned"])
 
     async def test_starter_nfts_are_owner_inventory_assets(self):
         owner = await db.get_user(config.OWNER_ID)
