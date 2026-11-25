@@ -109,6 +109,41 @@ class IdentityMigrationTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual({x["value"] for x in active}, {"aliastwo"})
 
+    async def test_number_creates_separate_account_without_copying_grants(self):
+        chat = 123456789
+        primary = await db.get_or_create_user(chat, "Test User", "koyyzzov")
+        uid = primary["tg_id"]
+        await db.set_verification(uid, "risegram", True)
+        await db.set_verification(uid, "major", True)
+        self.assertTrue(await db.add_nft(uid, "username", "primaryasset"))
+        self.assertTrue(await db.grant_number_to_user(uid, "8881234567"))
+        self.assertEqual((await db.get_user(uid))["phone_digits"], primary["phone_digits"])
+        item = (await db.list_nft(uid, "number"))[0]
+        self.assertIsNone(await db.activate_number_account(chat + 1, uid, item["id"]))
+        secondary = await db.activate_number_account(chat, uid, item["id"])
+        self.assertNotEqual(uid, secondary["tg_id"])
+        self.assertNotEqual(primary["rise_id"], secondary["rise_id"])
+        self.assertEqual(secondary["phone_digits"], "8881234567")
+        self.assertEqual(secondary["username"], "koyyzzov")
+        self.assertFalse(secondary["verified_risegram"])
+        self.assertFalse(secondary["verified_major"])
+        self.assertEqual(await db.list_nft(secondary["tg_id"], "username"), [])
+        self.assertEqual(await db.telegram_chat_id(secondary["tg_id"]), chat)
+        self.assertEqual((await db.get_by_telegram(chat))["tg_id"], secondary["tg_id"])
+        self.assertEqual((await db.get_primary_by_telegram(chat))["tg_id"], uid)
+        self.assertTrue((await db.get_user(uid))["verified_risegram"])
+        self.assertTrue((await db.get_user(uid))["verified_major"])
+        self.assertEqual(len(await db.accounts_for_telegram(chat)), 2)
+        self.assertIsNone(await db.find_user("@koyyzzov"))
+        self.assertEqual((await db.find_user("+8881234567"))["tg_id"], secondary["tg_id"])
+        self.assertFalse(await db.select_telegram_account(chat + 1, secondary["tg_id"]))
+        self.assertTrue(await db.select_telegram_account(chat, uid))
+        self.assertEqual((await db.get_by_telegram(chat))["tg_id"], uid)
+        self.assertIsNone(await db.activate_number_account(chat, uid, item["id"]))
+        await db.set_verification(secondary["tg_id"], "major", True)
+        self.assertTrue((await db.get_user(secondary["tg_id"]))["verified_major"])
+        self.assertFalse((await db.get_user(secondary["tg_id"]))["verified_risegram"])
+
     async def test_starter_nfts_are_owner_inventory_assets(self):
         owner = await db.get_user(config.OWNER_ID)
         items = await db.list_nft(owner["tg_id"])

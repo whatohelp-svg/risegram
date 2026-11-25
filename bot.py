@@ -131,7 +131,7 @@ class GuardMiddleware(BaseMiddleware):
             return result
         is_admin = tg_user.id == config.OWNER_TELEGRAM_ID or await db.is_admin(int(user["tg_id"]))
         data["is_admin"] = is_admin
-        if user.get("banned") and not is_admin:
+        if user.get("banned") and not is_admin and not (is_cb and (event.data or "").startswith("accounts:")):
             await _reply_block(event, "❌ Ваш аккаунт заблокирован.")
             return
         if not is_admin and await db.get_meta("maintenance") == "1":
@@ -373,14 +373,22 @@ async def cb_purchase_terms(call:CallbackQuery,user:dict):
 @router.callback_query(F.data.startswith("terms:"))
 async def cb_terms(call:CallbackQuery,user:dict):
     import terms_policy
-    if call.data=="terms:decline:"+terms_policy.VERSION:
-        terms_policy.PENDING.pop(int(user["tg_id"]),None)
-        return await show(call,"Вход отменён. Чтобы продолжить позже, открой /terms.",kb(back_row("menu:main")))
-    if call.data!="terms:accept:"+terms_policy.VERSION:
+    parts = call.data.split(":")
+    if len(parts) not in (3,4) or parts[2] != terms_policy.VERSION:
         return await call.answer("Редакция изменилась. Открой /terms",show_alert=True)
-    if await db.telegram_chat_id(int(user["tg_id"]))!=call.from_user.id:
+    uid = int(user["tg_id"])
+    if len(parts) == 4:
+        if not parts[3].isdigit():
+            return await call.answer("Аккаунт не найден",show_alert=True)
+        uid = int(parts[3])
+    if await db.telegram_chat_id(uid) != call.from_user.id:
         return await call.answer("Не удалось подтвердить аккаунт",show_alert=True)
-    sent=await terms_policy.confirm(call.bot,int(user["tg_id"]))
+    if parts[1] == "decline":
+        terms_policy.PENDING.pop(uid,None)
+        return await show(call,"Вход отменён. Чтобы продолжить позже, открой /terms.",kb(back_row("menu:main")))
+    if parts[1] != "accept":
+        return await call.answer("Неизвестное действие",show_alert=True)
+    sent=await terms_policy.confirm(call.bot,uid)
     if sent:
         return await show(call,"✅ Условия приняты. Код отправлен отдельным сообщением.",kb([btn("Код входа","menu:code")],back_row("menu:main")))
     await show(call,await main_text(user),main_kb())
@@ -1422,8 +1430,8 @@ async def on_pre_checkout(q: PreCheckoutQuery):
         await q.answer(ok=False, error_message="Технические работы. Оплатите чуть позже.")
         return
     linked, original_payload = await invoice_account(q.from_user.id, q.invoice_payload)
-    if not linked:
-        await q.answer(ok=False, error_message="Сначала запустите бота для привязки аккаунта.")
+    if not linked or linked.get("banned"):
+        await q.answer(ok=False, error_message="Аккаунт покупки недоступен.")
         return
     import terms_policy
     if not await terms_policy.purchase_accepted(int(linked["tg_id"])):

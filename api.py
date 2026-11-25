@@ -1186,7 +1186,7 @@ async def sync_collectible_usernames(user_id: int) -> dict:
         return {"synced": 0, "skipped": 0, "configured": True}
     phone = str(user.get("phone") or "")
     phone_digits = db.digits_of(phone)
-    if not phone_digits.startswith("888") or len(phone_digits) < 7:
+    if not 7 <= len(phone_digits) <= 15:
         return {"synced": 0, "skipped": 0, "configured": True}
 
     inventory = await db.list_nft(int(user_id), "username")
@@ -1239,6 +1239,9 @@ async def sync_collectible_usernames(user_id: int) -> dict:
                     _username_sync_last[int(user_id)] = time.monotonic() - 165
                     return {"synced": 0, "skipped": len(fingerprint), "configured": True}
                 mt_user_id = int(resolved["user_id"])
+                links = await db.fetchall("SELECT * FROM verified_peer_links WHERE peer_id=? OR account_id=?", (mt_user_id,int(user_id)))
+                if any(int(link["peer_id"]) != mt_user_id or int(link["account_id"]) != int(user_id) or link["phone_digits"] != phone_digits for link in links):
+                    return {"synced": 0, "skipped": len(fingerprint), "configured": True, "identity_conflict": True}
 
                 async with session.get(
                     f"{base}/v1/collectible-usernames",

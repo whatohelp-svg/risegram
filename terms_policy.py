@@ -64,11 +64,12 @@ PURCHASE_PROMPT=("🛒 <b>Условия покупки в RiseGram</b>\n\n"
         "Перед первой покупкой ознакомьтесь с условиями оплаты, получения виртуальных товаров и возвратов.\n\n"
         "Нажимая «Принимаю», вы соглашаетесь с условиями покупок. Согласие сохраняется, повторно принимать его не нужно, пока редакция не изменится.")
 
-def markup():
+def markup(uid=None):
+    suffix = ":" + str(uid) if uid is not None else ""
     return kb([btn("📄 Пользовательское соглашение",url=URL)],
               [btn("🔐 Политика конфиденциальности",url=PRIVACY_URL)],
-              [btn("✅ Принимаю","terms:accept:"+VERSION,style="success")],
-              [btn("Не согласен","terms:decline:"+VERSION)])
+              [btn("✅ Принимаю","terms:accept:"+VERSION+suffix,style="success")],
+              [btn("Не согласен","terms:decline:"+VERSION+suffix)])
 
 def purchase_markup():
     return kb([btn("📄 Условия покупки",url=PURCHASE_URL)],
@@ -108,7 +109,7 @@ async def prompt(bot,uid,code_message=None):
             if PENDING.get(uid) is item:
                 PENDING.pop(uid,None)
         asyncio.get_running_loop().call_later(120,erase)
-    sent=await safe_send(bot,uid,PROMPT,markup())
+    sent=await safe_send(bot,uid,PROMPT,markup(uid))
     if not sent:
         PENDING.pop(uid,None)
     return sent

@@ -579,7 +579,7 @@ INDEXES = [
 
 async def _migrate_legacy_telegram_keys(db, rows) -> None:
     """Move legacy Telegram-keyed rows to internal RiseGram IDs and preserve delivery links."""
-    cur = await db.execute("SELECT COUNT(*) FROM telegram_links")
+    cur = await db.execute("SELECT (SELECT COUNT(*) FROM telegram_links)+(SELECT COUNT(*) FROM telegram_subaccounts)")
     linked_count = (await cur.fetchone())[0]
     await cur.close()
     if linked_count or not rows:
@@ -902,6 +902,8 @@ async def find_user(query: str) -> dict | None:
 
 async def count_users(search: str = "") -> int:
     if search:
+        if search.strip().startswith("+"):
+            return await scalar("SELECT COUNT(*) FROM users WHERE phone_digits=?", (digits_of(search),))
         like = f"%{norm_username(search)}%"
         return await scalar(
             "SELECT COUNT(*) FROM users WHERE lower(COALESCE(username,'')) LIKE ? OR lower(COALESCE(name,'')) LIKE ?",
@@ -912,6 +914,8 @@ async def count_users(search: str = "") -> int:
 
 async def list_users(limit: int = 8, offset: int = 0, search: str = "") -> list[dict]:
     if search:
+        if search.strip().startswith("+"):
+            return await fetchall("SELECT * FROM users WHERE phone_digits=? LIMIT ? OFFSET ?", (digits_of(search),limit,offset))
         like = f"%{norm_username(search)}%"
         return await fetchall(
             """SELECT * FROM users WHERE lower(COALESCE(username,'')) LIKE ? OR lower(COALESCE(name,'')) LIKE ?
@@ -940,6 +944,7 @@ async def set_verification(tg_id: int, kind: str, enabled: bool) -> None:
             "UPDATE users SET verified=CASE WHEN verified_risegram=1 OR verified_major=1 THEN 1 ELSE 0 END WHERE tg_id=?",
             (tg_id,),
         )
+        await conn.commit()
 
 
 async def set_verified(tg_id: int, verified: bool) -> None:

@@ -692,8 +692,11 @@ async def remove_nft(item_id: int, *, force: bool = False) -> str:
     it = await db.get_nft(item_id)
     if not it:
         return "Уже удалено."
-    if it["item_type"] == "number" and not force:
-        return "Анонимные номера нельзя удалять: они связаны с входом и привязкой аккаунта."
+    if it["item_type"] == "number":
+        if await db.fetchone("SELECT tg_id FROM users WHERE phone_digits=?", (it["value"],)):
+            return "Номер используется отдельным аккаунтом: отзыв требует ручной проверки, аккаунт не изменён."
+        if not force:
+            return "Анонимные номера нельзя удалять: они связаны с входом и привязкой аккаунта."
     uid = it["tg_id"]
     await db.delete_nft(item_id)
     u = await db.get_user(uid)
@@ -1260,7 +1263,11 @@ async def on_input(message: Message, state: FSMContext, user: dict):
         return await restoration_preview(message, state, text)
     if act == "usearch":
         await state.clear()
-        if text.startswith("@") or re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{3,31}", text):
+        if text.startswith("+"):
+            exact = await db.find_user(text)
+            if exact:
+                return await screen_user(message, int(exact["tg_id"]))
+        if (text.startswith("@") or re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{3,31}", text)) and len(await db.fetchall("SELECT tg_id FROM users WHERE lower(replace(username,'@',''))=? LIMIT 2", (db.norm_username(text),))) < 2:
             exact = await parse_target(text)
             if exact:
                 return await screen_user(message, int(exact["tg_id"]))
@@ -1280,6 +1287,8 @@ async def on_input(message: Message, state: FSMContext, user: dict):
     if act in ("grant_target", "inv_target", "ban_target", "admin_add"):
         t = await parse_target(text)
         if not t:
+            if len(await db.fetchall("SELECT tg_id FROM users WHERE lower(replace(username,'@',''))=? LIMIT 2", (db.norm_username(text),))) > 1:
+                return await again("Несколько аккаунтов. Введите точный номер с + или внутренний ID.")
             if act == "inv_target" and message.from_user.id == config.OWNER_TELEGRAM_ID:
                 from support_console import resolve, native_label
                 nid = await resolve(text)
