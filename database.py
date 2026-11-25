@@ -2024,6 +2024,12 @@ async def create_listing(seller_id: int, item_id: int, price: float) -> tuple[bo
         return False, "Этот NFT-юзернейм активен. Сначала отключите его в инвентаре.", 0
     try:
         async with connect() as db:
+            await db.execute("BEGIN IMMEDIATE")
+            # The backfill can move a number while this handler is preparing a listing.
+            current = await (await db.execute("""SELECT n.*,u.phone_digits FROM user_nft_inventory n
+                JOIN users u ON u.tg_id=n.tg_id WHERE n.id=? AND n.tg_id=?""", (item_id,seller_id))).fetchone()
+            if not current or (current["item_type"] == "number" and current["value"] == current["phone_digits"]) or (current["item_type"] == "username" and current["is_active"]):
+                return False, "Предмет уже активирован или недоступен.", 0
             cur = await db.execute(
                 "INSERT INTO market_listings (seller_id,item_id,item_type,value,price,status,created_at) VALUES (?,?,?,?,?,'active',?)",
                 (seller_id, item_id, it["item_type"], it["value"], price, now()),
