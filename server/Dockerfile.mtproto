@@ -17,6 +17,8 @@ RUN git init /src \
     && git -C /src checkout --detach FETCH_HEAD
 COPY server/patches/patch_mtproto.py /tmp/patch_mtproto.py
 RUN python3 /tmp/patch_mtproto.py
+COPY server/patches/official_reaction_refresh.py /tmp/official_reaction_refresh.py
+RUN python3 /tmp/official_reaction_refresh.py
 COPY server/patches/short_collectible_names.py /tmp/short_collectible_names.py
 RUN python3 /tmp/short_collectible_names.py
 RUN gofmt -w /src/internal/domain/collectible_username.go
@@ -57,7 +59,13 @@ RUN python3 /tmp/reaction_seed.py /out/reaction-seed
 FROM build-base AS reaction-assets
 RUN apk add --no-cache py3-pillow
 COPY server/patches/build_reaction_seed.py /tmp/build_reaction_seed.py
-RUN python3 /tmp/build_reaction_seed.py /out/reaction-seed
+COPY server/patches/prepare_official_reactions.py /tmp/prepare_official_reactions.py
+COPY server/reaction-assets/ /tmp/official-reactions/
+RUN if [ -f /tmp/official-reactions/telegram_reactions_export/global_json/available_reactions_raw.json ]; then \
+        python3 /tmp/prepare_official_reactions.py /tmp/official-reactions /out/reaction-seed; \
+    else \
+        python3 /tmp/build_reaction_seed.py /out/reaction-seed; \
+    fi
 
 FROM build-base AS build-server
 ARG TARGETOS
