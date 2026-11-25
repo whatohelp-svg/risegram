@@ -54,6 +54,11 @@ RUN apk add --no-cache py3-pillow
 COPY server/patches/reaction_seed.py /tmp/reaction_seed.py
 RUN python3 /tmp/reaction_seed.py /out/reaction-seed
 
+FROM build-base AS reaction-assets
+RUN apk add --no-cache py3-pillow
+COPY server/patches/build_reaction_seed.py /tmp/build_reaction_seed.py
+RUN python3 /tmp/build_reaction_seed.py /out/reaction-seed
+
 FROM build-base AS build-server
 ARG TARGETOS
 ARG TARGETARCH
@@ -110,6 +115,8 @@ RUN apk add --no-cache ffmpeg openssl \
 COPY --from=build-base --chown=telesrv:telesrv /src/data/langpack/android/android_en_v59885528.strings /usr/share/telesrv/langpack/
 COPY --from=build-base --chown=telesrv:telesrv /src/data/langpack/android/android_ru_v59974213.strings /usr/share/telesrv/langpack/
 COPY --from=reaction-media --chown=telesrv:telesrv /out/reaction-seed/ /app/data/sticker-seed/
+COPY --from=reaction-assets --chown=telesrv:telesrv /out/reaction-seed /usr/share/telesrv/reaction-seed
+ENV TELESRV_STICKER_SEED_DIR=/usr/share/telesrv/reaction-seed
 COPY --from=build-server /out/telesrv /usr/local/bin/telesrv
 EXPOSE 2398 2400 2401 2599 12399/udp 12400/udp
 CMD ["telesrv"]
