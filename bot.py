@@ -222,7 +222,7 @@ def local_miniapp_url() -> str:
 def main_kb():
     return kb(
         [btn("🔒 Код входа", "menu:code", style="primary"), btn("📞 Мой номер", "menu:number")],
-        [btn("💎 Донат", "donat:hub")],
+        [btn("👥 Мои аккаунты", "accounts:list"), btn("💎 Донат", "donat:hub")],
         [btn("📱 Открыть приложение", web_app=local_miniapp_url(), style="primary")] if local_miniapp_url() else [webapp_button("primary")],
         [btn("🕒 Мои покупки", "menu:purchases"), btn("ℹ️ Как это работает", "menu:help")],
         [btn("🆘 Поддержка", "menu:support")],
@@ -248,6 +248,37 @@ async def cb_main(call: CallbackQuery, user: dict):
     if not await terms_policy.accepted(int(user["tg_id"])):
         return await show(call,terms_policy.PROMPT,terms_policy.markup())
     await show(call, await main_text(user), main_kb())
+
+
+async def accounts_menu(event, user: dict):
+    rows = await db.accounts_for_telegram(event.from_user.id)
+    text = "👥 <b>Мои аккаунты</b>\n\nКаждый номер — отдельный аккаунт RiseGram.\n"
+    buttons = []
+    for account in rows:
+        label = f"{account['phone']} (@{account['username'] or '—'})"
+        mark = "🟢 " if account["tg_id"] == user["tg_id"] else ""
+        text += f"\n{mark}{esc(label)} · ID <code>{account['rise_id']}</code>"
+        buttons.append([btn((mark + label)[:60], f"accounts:select:{account['tg_id']}")])
+    buttons.append([btn("➕ Создать аккаунт с выданным номером", "my:items")])
+    await show(event, text, kb(*buttons, back_row()))
+
+
+@router.message(Command("accounts"))
+@router.callback_query(F.data == "accounts:list")
+async def cb_accounts(event, user: dict):
+    await accounts_menu(event, user)
+
+
+@router.callback_query(F.data.startswith("accounts:select:"))
+async def accounts_select(call: CallbackQuery, state: FSMContext):
+    raw = call.data.rsplit(":", 1)[-1]
+    if not raw.isdigit() or not await db.select_telegram_account(call.from_user.id, int(raw)):
+        return await call.answer("Аккаунт не найден", show_alert=True)
+    await state.clear()
+    account = await db.get_user(int(raw))
+    if account.get("banned"):
+        return await call.answer("Аккаунт заблокирован", show_alert=True)
+    await cb_main(call, account)
 
 
 @router.callback_query(F.data == "menu:webapp")
@@ -492,10 +523,8 @@ async def cb_profile(call: CallbackQuery, user: dict):
 
 async def send_stars_invoice(bot: Bot, chat_id: int, *, title: str, description: str, payload: str, stars: int, label: str):
     import terms_policy
-    linked=await db.get_by_telegram(chat_id)
-    if not linked:
-        # Existing callers sometimes supply the local account ID.
-        linked=await db.get_user(chat_id)
+    # All callers pass an explicit local account ID, not a delivery chat.
+    linked=await db.get_user(chat_id)
     if not linked:
         raise economy.WalletError("Аккаунт оплаты не найден")
     uid=int(linked["tg_id"])
@@ -505,11 +534,13 @@ async def send_stars_invoice(bot: Bot, chat_id: int, *, title: str, description:
     chat_id=await db.telegram_chat_id(uid)
     if not chat_id:
         raise economy.WalletError("Аккаунт оплаты не привязан")
+    if len(f"acct:{uid}:{payload}".encode()) > 128:
+        raise economy.WalletError("Слишком длинный идентификатор покупки")
     await bot.send_invoice(
         chat_id=chat_id,
         title=title[:32],
         description=description[:255],
-        payload=payload[:128],
+        payload=f"acct:{uid}:{payload}",
         currency="XTR",
         prices=[LabeledPrice(label=label[:32], amount=stars)],
     )
@@ -610,7 +641,7 @@ async def send_rs_invoice(bot: Bot, payer: dict, stars: int, target_id: int) -> 
         return "Сначала откройте личный чат с ботом и привяжите аккаунт."
     await send_stars_invoice(
         bot,
-        chat_id,
+        payer["tg_id"],
         title=f"{fmt_num(amount)} {config.CURRENCY_NAME}",
         description=f"Пополнение {config.CURRENCY_NAME} в {config.BRAND} для {db.shown_username(target)}.",
         payload=f"rs:{stars}:{target_id}",
@@ -756,7 +787,7 @@ async def chat_shop_invoice(bot: Bot, uid: int, kind: str, channel_id: int,
     chat_id = await db.telegram_chat_id(uid)
     if chat_id is None:
         raise native_shop.NativePurchaseError("Нет связи с Telegram-ботом оплаты")
-    await send_stars_invoice(bot, chat_id, title=title, stars=price,
+    await send_stars_invoice(bot, uid, title=title, stars=price,
         payload=payload, label="RiseGram · чат", description=(
             f"{'NFT @'+name if product=='name' else 'Коммерческая метка '+product} "
             f"для {kind} #{channel_id} в RiseGram"
@@ -822,7 +853,7 @@ async def cb_verify_club(call: CallbackQuery, user: dict):
     target = await db.telegram_chat_id(user["tg_id"])
     if target is None:
         return await call.answer("Сначала свяжи Telegram с ботом", show_alert=True)
-    await send_stars_invoice(call.bot, target, title="RiseGram Club · аккаунт",
+    await send_stars_invoice(call.bot, user["tg_id"], title="RiseGram Club · аккаунт",
         description="Платная косметическая метка RiseGram Club. Не официальная верификация",
         payload=f"vc:a:{user['tg_id']}",
         stars=config.ACCOUNT_RISEGRAM_CLUB_PRICE, label="RiseGram Club")
@@ -1203,7 +1234,7 @@ async def cb_num_buy(call: CallbackQuery, user: dict):
         call.bot,
         user["tg_id"],
         title="Номер +888",
-        description=f"Анонимный номер {db.fmt_number(digits)}. Станет вашим текущим номером.",
+        description=f"Анонимный номер {db.fmt_number(digits)}. Создайте отдельный аккаунт из инвентаря.",
         payload=f"nm:{fmt}:{digits}",
         stars=price,
         label=db.fmt_number(digits)[:32],
@@ -1372,13 +1403,25 @@ async def validate_order(uid: int, payload: str, total: int) -> str | None:
     return None
 
 
+async def invoice_account(chat_id: int, payload: str):
+    if payload.startswith("acct:"):
+        parts = payload.split(":", 2)
+        if len(parts) != 3:
+            return None, payload
+        _, uid, original = parts
+        if uid.isdigit() and await db.telegram_chat_id(int(uid)) == chat_id:
+            return await db.get_user(int(uid)), original
+        return None, original
+    return await db.get_primary_by_telegram(chat_id), payload
+
+
 @router.pre_checkout_query()
 async def on_pre_checkout(q: PreCheckoutQuery):
     # На техработах оплату не принимаем: pre_checkout не проходит через GuardMiddleware, поэтому проверяем здесь.
     if q.from_user.id != config.OWNER_TELEGRAM_ID and await db.get_meta("maintenance") == "1":
         await q.answer(ok=False, error_message="Технические работы. Оплатите чуть позже.")
         return
-    linked = await db.get_by_telegram(q.from_user.id)
+    linked, original_payload = await invoice_account(q.from_user.id, q.invoice_payload)
     if not linked:
         await q.answer(ok=False, error_message="Сначала запустите бота для привязки аккаунта.")
         return
@@ -1386,7 +1429,7 @@ async def on_pre_checkout(q: PreCheckoutQuery):
     if not await terms_policy.purchase_accepted(int(linked["tg_id"])):
         await q.answer(ok=False,error_message="Примите условия покупки в @risegrambot и повторите оплату")
         return
-    err = await validate_order(linked["tg_id"], q.invoice_payload, q.total_amount)
+    err = await validate_order(linked["tg_id"], original_payload, q.total_amount)
     if err:
         await q.answer(ok=False, error_message=err)
     else:
@@ -1461,7 +1504,7 @@ async def deliver_order(bot: Bot, uid: int, payload: str, stars: int, charge: st
             return False, "number", "Номер уже занят", ""
         await db.release("number", digits)
         return True, "number", db.fmt_number(digits), (
-            f"✅ Номер <code>{esc(db.fmt_number(digits))}</code> теперь ваш. Коды входа будут приходить в этого бота."
+            f"✅ Номер <code>{esc(db.fmt_number(digits))}</code> теперь ваш. Создайте отдельный аккаунт в «Мои NFT и номера»."
         )
     if kind == "nu":
         name = a[0]
@@ -1494,7 +1537,12 @@ async def complete_risestars_order(bot, order):
 @router.message(F.successful_payment)
 async def on_paid(message: Message, user: dict):
     sp = message.successful_payment
-    uid, stars, charge, payload = user["tg_id"], sp.total_amount, sp.telegram_payment_charge_id, sp.invoice_payload
+    linked, payload = await invoice_account(message.from_user.id, sp.invoice_payload)
+    if not linked:
+        await message.bot.refund_star_payment(user_id=message.from_user.id, telegram_payment_charge_id=sp.telegram_payment_charge_id)
+        return await message.answer("Аккаунт покупки недоступен. Звёзды возвращены.")
+    user = linked
+    uid, stars, charge = user["tg_id"], sp.total_amount, sp.telegram_payment_charge_id
     try:  # запись ДО выдачи: повторная доставка апдейта не выдаст товар второй раз
         pid = await db.add_purchase(uid, "pending", "В обработке", stars, charge, payload, "processing")
     except sqlite3.IntegrityError:
@@ -1586,7 +1634,7 @@ async def items_screen(event, user: dict):
             lock = " 🛒 на маркете" if n["id"] in listed else ""
             text += f"{'🟢' if on else '⚪'} <code>{esc(db.fmt_number(n['value']))}</code>{lock}\n"
             if not on and n["id"] not in listed:
-                rows.append([btn(f"Сделать текущим {db.fmt_number(n['value'])}", f"my:ph:{n['id']}")])
+                rows.append([btn(f"Создать аккаунт {db.fmt_number(n['value'])}", f"my:ph:{n['id']}")])
         if len(nums) > ITEMS_SHOWN:
             text += f"…и ещё {len(nums) - ITEMS_SHOWN}\n"
     rows.append([btn("🛒 Маркет", "market:hub")])
@@ -1626,16 +1674,12 @@ async def cb_my_phone(call: CallbackQuery, user: dict):
     if await db.listing_for_item(it["id"]):
         await call.answer("Номер выставлен на маркете. Сначала снимите лот.", show_alert=True)
         return
-    old = user.get("phone_digits")
-    if old and old != it["value"]:
-        # Прежний номер сохраняем в инвентаре, иначе он пропадёт насовсем (как при покупке номера).
-        # Если он там уже есть, add_nft вернёт False — это нормально.
-        await db.add_nft(user["tg_id"], "number", old, 0)
-    if not await db.set_phone(user["tg_id"], it["value"]):
-        await call.answer("Не удалось сменить номер.", show_alert=True)
-        return
-    user = await db.get_user(user["tg_id"])
-    await items_screen(call, user)
+    account = await db.activate_number_account(call.from_user.id, user["tg_id"], it["id"])
+    if not account:
+        return await call.answer("Номер уже связан с аккаунтом или недоступен", show_alert=True)
+    await show(call, "✅ Создан отдельный аккаунт <code>" + esc(account["phone"]) +
+        "</code>\nСтарый аккаунт, его галочки, подарки и баланс не изменены. Войдите с новым номером в RiseGram.",
+        kb([btn("Мои аккаунты", "accounts:list"), btn("Меню", "menu:main")]))
 
 
 # ═══════════════════════════ /doxnumber и /migrate ══════════════════════════
@@ -1657,8 +1701,8 @@ async def cmd_doxnumber(message: Message, user: dict):
         return
     if await db.claim_dox_bonus(user["tg_id"], d):
         await message.answer(
-            f"🇺🇸 Ваш номер <code>{esc(db.fmt_number(d))}</code> активирован, бонус <b>{fmt_num(config.DOXNUMBER_BONUS)} {config.CURRENCY_NAME}</b> зачислен.\n"
-            "Старый номер сохранён в «Мои NFT и номера».",
+            f"🇺🇸 Ваш номер <code>{esc(db.fmt_number(d))}</code> выдан в инвентарь, бонус <b>{fmt_num(config.DOXNUMBER_BONUS)} {config.CURRENCY_NAME}</b> зачислен.\n"
+            "Создайте отдельный аккаунт с новым номером в «Мои NFT и номера».",
             reply_markup=kb([btn("🏠 Меню", "menu:main")]),
         )
     else:
@@ -1685,7 +1729,7 @@ async def msg_migrate(message: Message, state: FSMContext, user: dict):
         return
     await state.clear()
     if await db.claim_legacy_number(d, user["tg_id"]):
-        await message.answer(f"✅ Номер <code>{esc(db.fmt_number(d))}</code> привязан и стал текущим.")
+        await message.answer(f"✅ Номер <code>{esc(db.fmt_number(d))}</code> добавлен в инвентарь. Создайте отдельный аккаунт в «Мои NFT и номера».")
     else:
         await message.answer("❌ Номер не найден в списке переноса или уже привязан.")
 
