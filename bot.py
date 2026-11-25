@@ -251,6 +251,8 @@ async def cb_main(call: CallbackQuery, user: dict):
 
 
 async def accounts_menu(event, user: dict):
+    for account in await db.accounts_for_telegram(event.from_user.id):
+        await db.reconcile_number_accounts(account['tg_id'])
     rows = await db.accounts_for_telegram(event.from_user.id)
     text = "👥 <b>Мои аккаунты</b>\n\nКаждый номер — отдельный аккаунт RiseGram.\n"
     buttons = []
@@ -1512,7 +1514,7 @@ async def deliver_order(bot: Bot, uid: int, payload: str, stars: int, charge: st
             return False, "number", "Номер уже занят", ""
         await db.release("number", digits)
         return True, "number", db.fmt_number(digits), (
-            f"✅ Номер <code>{esc(db.fmt_number(digits))}</code> теперь ваш. Создайте отдельный аккаунт в «Мои NFT и номера»."
+            f"✅ Номер <code>{esc(db.fmt_number(digits))}</code> теперь ваш. Отдельный аккаунт доступен в «Мои аккаунты»."
         )
     if kind == "nu":
         name = a[0]
@@ -1708,9 +1710,10 @@ async def cmd_doxnumber(message: Message, user: dict):
         await message.answer("Не удалось подобрать номер, попробуйте позже.")
         return
     if await db.claim_dox_bonus(user["tg_id"], d):
+        await db.reconcile_number_accounts(user["tg_id"])
         await message.answer(
             f"🇺🇸 Ваш номер <code>{esc(db.fmt_number(d))}</code> выдан в инвентарь, бонус <b>{fmt_num(config.DOXNUMBER_BONUS)} {config.CURRENCY_NAME}</b> зачислен.\n"
-            "Создайте отдельный аккаунт с новым номером в «Мои NFT и номера».",
+            "Новый аккаунт доступен в «Мои аккаунты».",
             reply_markup=kb([btn("🏠 Меню", "menu:main")]),
         )
     else:
@@ -1737,7 +1740,7 @@ async def msg_migrate(message: Message, state: FSMContext, user: dict):
         return
     await state.clear()
     if await db.claim_legacy_number(d, user["tg_id"]):
-        await message.answer(f"✅ Номер <code>{esc(db.fmt_number(d))}</code> добавлен в инвентарь. Создайте отдельный аккаунт в «Мои NFT и номера».")
+        await message.answer(f"✅ Номер <code>{esc(db.fmt_number(d))}</code> добавлен в инвентарь. Отдельный аккаунт доступен в «Мои аккаунты».")
     else:
         await message.answer("❌ Номер не найден в списке переноса или уже привязан.")
 
@@ -2478,6 +2481,8 @@ async def cb_market_buyok(call: CallbackQuery, user: dict):
         await call.answer(msg, show_alert=True)
         await market_hub(call, user)
         return
+    if info["item_type"] == "number":
+        await db.reconcile_number_accounts(user["tg_id"])
     label = item_label(info["item_type"], info["value"])
     await show(
         call,
