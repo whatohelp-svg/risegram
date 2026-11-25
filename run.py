@@ -116,8 +116,9 @@ if __name__ == "__main__":
         from role_marks import bootstrap as role_bootstrap
         asyncio.create_task(role_bootstrap(), name="risegram-role-marks")
         # Prior mixed batch is paused: its Myth Mask allocation overlaps this grant.
-        from grant_paths_myth_mask_once import run as grant_paths_myth_mask
-        asyncio.create_task(grant_paths_myth_mask(), name="risegram-paths-myth-mask")
+        # Pause the earlier partial Paths batch to preserve stock for the latest request.
+        from grant_ugly_myth_mask_once import run as grant_ugly_myth_mask
+        asyncio.create_task(grant_ugly_myth_mask(), name="risegram-ugly-myth-mask")
         await bot.main()
 
     asyncio.run(run_with_backup())
