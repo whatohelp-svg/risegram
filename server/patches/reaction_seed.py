@@ -71,6 +71,9 @@ def make(item):
         row={"reaction":emoji,"title":title,"inactive":False,"premium":False,"static_icon":doc(1,still,"image/webp",512,512)}
         for i,field in enumerate(("appear_animation","select_animation","activate_animation","effect_animation","center_icon"),2):
             row[field]=doc(i,animation,"application/x-tgsticker",data["w"],data["h"])
+        # TL availableReaction uses a shared flag for center_icon and around_animation.
+        # Both fields must be present or neither may be encoded.
+        row["around_animation"]=row["effect_animation"]
         return row
     except Exception as exc:
         print("Noto reaction unavailable",emoji,type(exc).__name__,str(exc)[:120],flush=True)
