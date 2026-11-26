@@ -9,16 +9,25 @@ from aiohttp import ClientSession, ClientTimeout, FormData
 import config
 import database as db
 import gift_drops as drops
-from collectible_pools import pool_material
+from collectible_pools import pool_material, NAMES, CDN
 
 ASSETS = json.loads((Path(__file__).parent / "data/drop_assets.json").read_text())
 SOURCE = "https://raw.githubusercontent.com/ssamy2/TelegramGiftsAssests/1eb0666fff81b63f9002004084ff0ee3a9eed10f/"
+# New collections can have a complete collectible pool before the older
+# pinned artwork archive catches up. Use their exact original gift artwork.
+POOL_IDS = json.loads((Path(__file__).parent / "data/pools/names.json").read_text())
+import re
+for source_id, title in POOL_IDS.items():
+    slug = re.sub(r"[^a-z0-9]", "", title.lower())
+    ASSETS.setdefault(slug, [f"originals/{source_id}/Original.tgs", True])
+
 log = logging.getLogger("risegram.native_drops")
 _MISSING_ASSET_WARNED = set()
 
 
 async def asset(session, path):
-    async with session.get(SOURCE + quote(path)) as response:
+    base = CDN if path.startswith("originals/") else SOURCE
+    async with session.get(base + quote(path)) as response:
         response.raise_for_status()
         data = await response.read()
     if not 0 < len(data) <= 512 * 1024:
