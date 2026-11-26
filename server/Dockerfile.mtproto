@@ -123,6 +123,8 @@ COPY --from=build-base --chown=telesrv:telesrv /src/data/langpack/android/androi
 COPY --from=build-base --chown=telesrv:telesrv /src/data/langpack/android/android_ru_v59974213.strings /usr/share/telesrv/langpack/
 COPY --from=reaction-assets --chown=telesrv:telesrv /out/reaction-seed /usr/share/telesrv/reaction-seed
 ENV TELESRV_STICKER_SEED_DIR=/usr/share/telesrv/reaction-seed
+# Temporarily hide message reactions until original animation assets are available.
+ENV RISEGRAM_HIDE_REACTIONS=1
 COPY --from=build-server /out/telesrv /usr/local/bin/telesrv
 EXPOSE 2398 2400 2401 2599 12399/udp 12400/udp
 CMD ["telesrv"]
