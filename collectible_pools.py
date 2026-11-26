@@ -21,17 +21,16 @@ def model_metadata(item):
     return {"rarity_permille": int(item["rarityPermille"])}
 
 
-async def fresh_model_catalog(session, slug):
-    title = NAMES[slug]
-    async with session.get("https://api.changes.tg/models/" + quote(title)) as response:
+async def fresh_crafts(session, slug):
+    async with session.get("https://api.changes.tg/crafts") as response:
         response.raise_for_status()
-        rows = await response.json(content_type=None)
-        if not isinstance(rows, list) or not rows or not all(
-            isinstance(row, dict) and row.get("name") for row in rows
-        ):
-            raise ValueError("Invalid live model catalog for " + title)
-        return rows
-
+        data = await response.json(content_type=None)
+        if not isinstance(data.get("gifts"), list):
+            raise ValueError("Invalid craft catalog")
+        for gift in data["gifts"]:
+            if re.sub(r"[^a-z0-9]", "", gift["name"].lower()) == slug:
+                return gift["craftedModels"] if gift.get("craftable") else []
+        return []
 
 
 async def pool_material(session, slug):
@@ -39,9 +38,8 @@ async def pool_material(session, slug):
     local = ROOT / (title + ".zip")
     # A local archived pool may predate the crafted-only models. Refresh it
     # from the source metadata, and use the current source artwork when needed.
-    live_models = await fresh_model_catalog(session, slug)
-    has_craft = any(model_metadata(item).get("crafted") for item in live_models)
-    if local.exists() and not has_craft:
+    crafts = await fresh_crafts(session, slug)
+    if local.exists():
         with zipfile.ZipFile(local) as archive:
             catalog = json.loads(archive.read("catalog.json"))
             files = {name[:-4]: archive.read(name) for name in archive.namelist() if name.endswith(".tgs")}
@@ -59,11 +57,35 @@ async def pool_material(session, slug):
                 raise ValueError(f"Missing collectible asset {path}")
 
         catalog = {kind: json.loads(await fetch(f"{kind}/{title}/{kind}.json"))
-                   for kind in ("patterns", "backdrops")}
-        catalog["models"] = live_models
+                   for kind in ("models", "patterns", "backdrops")}
         requests = {f"{kind}{index}": fetch(f"{kind}/{title}/{item['name']}.tgs")
                     for kind in ("models", "patterns") for index, item in enumerate(catalog[kind])}
         files = dict(zip(requests, await asyncio.gather(*requests.values()), strict=True))
+    # Exact crafting models and tiers from the live /crafts endpoint.
+    # Remove any stale regular entries for models reclassified as crafted.
+    if crafts:
+        craft_names = {item["name"] for item in crafts}
+        ordinary = [(i, item) for i, item in enumerate(catalog["models"])
+                    if item["name"] not in craft_names and not model_metadata(item).get("crafted")]
+        model_files = {f"models{j}": files[f"models{i}"] for j, (i, _) in enumerate(ordinary)}
+        catalog["models"] = [item for _, item in ordinary]
+        files = {k: v for k, v in files.items() if not k.startswith("models")}
+        files.update(model_files)
+        limit = asyncio.Semaphore(6)
+
+        async def crafted_asset(item):
+            async with limit:
+                url = "https://api.changes.tg/model/" + quote(title, safe="") + "/" + quote(item["name"], safe="") + ".tgs"
+                async with session.get(url) as response:
+                    response.raise_for_status()
+                    data = await response.read()
+                    if not data.startswith(b"\x1f\x8b") or len(data) > 512 * 1024:
+                        raise ValueError("Invalid crafted animation " + item["name"])
+                    return data
+
+        for item, data in zip(crafts, await asyncio.gather(*(crafted_asset(item) for item in crafts)), strict=True):
+            files[f"models{len(catalog['models'])}"] = data
+            catalog["models"].append(dict(item, crafted=True))
     fields = {}
     for kind in ("models", "patterns", "backdrops"):
         rows = []
