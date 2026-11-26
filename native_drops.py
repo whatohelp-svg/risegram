@@ -9,7 +9,7 @@ from aiohttp import ClientSession, ClientTimeout, FormData
 import config
 import database as db
 import gift_drops as drops
-from collectible_pools import pool_material, NAMES, CDN
+from collectible_pools import pool_material
 
 ASSETS = json.loads((Path(__file__).parent / "data/drop_assets.json").read_text())
 SOURCE = "https://raw.githubusercontent.com/ssamy2/TelegramGiftsAssests/1eb0666fff81b63f9002004084ff0ee3a9eed10f/"
@@ -26,8 +26,9 @@ _MISSING_ASSET_WARNED = set()
 
 
 async def asset(session, path):
-    base = CDN if path.startswith("originals/") else SOURCE
-    async with session.get(base + quote(path)) as response:
+    url = ("https://api.changes.tg/original/" + path.split("/")[1] + ".tgs"
+           if path.startswith("originals/") else SOURCE + quote(path))
+    async with session.get(url) as response:
         response.raise_for_status()
         data = await response.read()
     if not 0 < len(data) <= 512 * 1024:
@@ -100,17 +101,25 @@ async def publish(session, assets, row):
         }, {"file": art})
         state = {"id": int(result["gift_id"]), "enabled": False, "version": 0}
         await db.set_meta(key, json.dumps(state))
-    if row["can_upgrade"] and ASSETS[row["gift_id"]][1] and not state.get("full_pool"):
+    craft_collections = {"deskcalendar", "jinglebells", "mythmask", "resistancedog"}
+    needs_craft_pool = row["gift_id"] in craft_collections and not state.get("craft_pool_v1")
+    if row["can_upgrade"] and ASSETS[row["gift_id"]][1] and (not state.get("full_pool") or needs_craft_pool):
         fields, files = await pool_material(assets, row["gift_id"])
         # The pre-migration Postgres volume cached failed/stuck receipts for
         # drops 27-31. All five have a gift catalog row but lacked a collectible
         # revision at the time of verification. Retry using a new deterministic
         # key; do not change keys for previously successful earlier drops.
-        pool_action = "full-pool-v2" if int(row["id"]) in (27, 28, 29, 30, 31) else "full-pool-v1"
+        has_crafted = any(model.get("crafted") for model in fields["models"])
+        if needs_craft_pool and not has_crafted:
+            raise ValueError("Craft catalog temporarily missing; retaining previous pool")
+        pool_action = ("craft-pool-v1" if has_crafted else
+                       ("full-pool-v2" if int(row["id"]) in (27, 28, 29, 30, 31) else "full-pool-v1"))
         await apply_command(session, key, f"/v1/gifts/{state['id']}/collectibles/publish", pool_action, {
             **fields, "upgrade_stars": 25, "supply_total": row["supply"], "slug_prefix": f"rise{row['id']}",
         }, files)
         state["full_pool"] = True
+        if has_crafted:
+            state["craft_pool_v1"] = True
         await db.set_meta(key, json.dumps(state))
         log.info("Full pool published for drop %s: %d models, %d patterns, %d backdrops",
                  row["id"], len(fields["models"]), len(fields["patterns"]), len(fields["backdrops"]))
