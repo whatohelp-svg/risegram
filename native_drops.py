@@ -132,6 +132,34 @@ async def publish(session, assets, row):
         await db.set_meta(key, json.dumps(state))
         log.info("Full pool published for drop %s: %d models, %d patterns, %d backdrops",
                  row["id"], len(fields["models"]), len(fields["patterns"]), len(fields["backdrops"]))
+    # Receipts issued before a collectible pool was published retain the old
+    # message action. Repair only active, unconverted user gifts for these
+    # two explicitly requested drops, after the real pool is available.
+    if row["id"] in (25, 38) and row["gift_id"] == "resistancedog" and state.get("craft_pool_v1") and not state.get("upgrade_receipts_v1"):
+        import native_economy
+        async with native_economy.transaction() as conn:
+            targets = """SELECT p.owner_peer_id,p.msg_id,b.private_message_id,r.upgrade_stars
+                FROM peer_star_gifts p JOIN message_boxes b ON b.owner_user_id=p.owner_peer_id AND b.box_id=p.msg_id
+                JOIN star_gift_catalog c ON c.gift_id=p.gift_id
+                JOIN star_gift_collectible_revisions r ON r.id=c.collectible_revision_id
+                WHERE p.gift_id=%s AND p.owner_peer_type='user' AND p.lifecycle_status='active'
+                  AND p.unique_gift_id IS NULL AND NOT p.converted AND r.status='published'
+                  AND r.upgrade_stars>0 AND r.issued<r.supply_total
+                  AND b.media#>>'{service_action,kind}'='star_gift'
+                  AND b.media#>>'{service_action,star_gift,gift_id}'=p.gift_id::text"""
+            for table, predicate in (
+                ("private_messages", "m.id=t.private_message_id"),
+                ("message_boxes", "(m.private_message_id=t.private_message_id OR (m.owner_user_id=t.owner_peer_id AND m.box_id=t.msg_id))"),
+            ):
+                await conn.execute(f"""WITH targets AS ({targets})
+                    UPDATE {table} m SET media=jsonb_set(jsonb_set(m.media,'{{service_action,star_gift,can_upgrade}}','true'::jsonb),
+                    '{{service_action,star_gift,upgrade_price_stars}}',to_jsonb(t.upgrade_stars))
+                    FROM targets t WHERE {predicate}
+                    AND m.media#>>'{{service_action,star_gift,gift_id}}'=%s
+                    AND m.media#>>'{{service_action,kind}}'='star_gift'""", (state["id"], str(state["id"])))
+        state["upgrade_receipts_v1"] = True
+        await db.set_meta(key, json.dumps(state))
+        log.info("Repaired pre-publication upgrade receipts for Resistance Dog drop %s", row["id"])
     if state["enabled"] != enabled:
         version = state["version"] + 1
         await apply_command(session, key, "/v1/gifts/set-enabled", f"visibility-{version}", {"gift_id":state["id"], "enabled":enabled})
@@ -158,6 +186,20 @@ async def worker():
         await db.set_meta("owner-confirmed-drop38-upgrade-v1", "done")
         if changed:
             log.info("Restored owner-selected upgrade policy for Resistance Dog drop 38")
+
+    # Owner requested upgrade support for Resistance Dog, including the older
+    # 25-copy drop created before its original asset was available.
+    def repair_older_resistance_dog():
+        row = drops.get_admin_drop(25)
+        if row and row["gift_id"] == "resistancedog" and row["supply"] == 25 and row["price_stars"] == 5000:
+            return drops.enable_upgrade(25)
+        return False
+
+    if await db.get_meta("owner-confirmed-drop25-upgrade-v1") != "done":
+        changed = await asyncio.to_thread(repair_older_resistance_dog)
+        await db.set_meta("owner-confirmed-drop25-upgrade-v1", "done")
+        if changed:
+            log.info("Restored upgrade policy for Resistance Dog drop 25")
 
     # Previous gift restoration and verifier repair jobs were single-use.
     # Never replay administrative mutations on an ordinary app restart.
