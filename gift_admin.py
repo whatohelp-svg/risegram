@@ -80,7 +80,14 @@ async def drop_detail(event, drop_id, page=0):
             f"Цена: {g['price_stars']} RiseStars\n"
             f"Статус: {'🟢 Активен' if enabled else '🔴 Остановлен'}\n\n"
             "Покупки продолжают учитываться сервером — данные дропа не удаляются")
+    from native_drops import ASSETS
+    template = ASSETS.get(g["gift_id"])
+    upgrade_rows = []
+    text += "\n\n✨ Улучшение: " + ("разрешено" if g["can_upgrade"] else "запрещено")
+    if not g["can_upgrade"] and template and template[1]:
+        upgrade_rows.append([btn("✨ Разрешить улучшение", f"adm:localgift:enableupgrade:{g['id']}:{page}", style="success")])
     await show(event, text, kb(
+        *upgrade_rows,
         [btn("🔴 Остановить" if enabled else "🟢 Возобновить",
              f"adm:localgift:toggle:{g['id']}:{page}",
              style="danger" if enabled else "success")],
@@ -94,7 +101,10 @@ async def choose_upgrade(event,state,allow):
         return await show(event,"Сессия устарела. Начни заново.",kb([btn("Каталог","adm:localgifts:0")]))
     from native_drops import ASSETS
     template = ASSETS.get(data["gift_id"])
-    await state.update_data(upgrade=bool(allow and template and template[1]))
+    if allow and not (template and template[1]):
+        return await show(event, "Для этой коллекции пока нет моделей улучшения. Дроп не создан.",
+                          kb([btn("Назад в каталог", "adm:localgifts:0")]))
+    await state.update_data(upgrade=bool(allow))
     await show(event,
          "🕐 <b>Когда открыть продажи?</b>\nВремя по Петропавловску и Алматы (UTC+5)",
          kb([btn("🚀 Сразу","adm:localgift:when:now",style="success"),
@@ -171,6 +181,16 @@ async def on_callback(call,state,parts):
         except (ValueError, IndexError): return
         try: page = int(parts[4])
         except (ValueError, IndexError): page = 0
+        return await drop_detail(call, drop_id, page)
+    if sub=="enableupgrade":
+        try:
+            drop_id = int(parts[3])
+            page = int(parts[4]) if len(parts)>4 else 0
+            changed = await asyncio.to_thread(gifts.enable_upgrade, drop_id)
+        except (ValueError, IndexError) as exc:
+            return await call.answer(str(exc), show_alert=True)
+        if changed:
+            await db.log_admin_action(config.OWNER_ID, f"Разрешено улучшение дропа #{drop_id}")
         return await drop_detail(call, drop_id, page)
     if sub=="toggle":
         try: drop_id = int(parts[3])
