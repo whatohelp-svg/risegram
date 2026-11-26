@@ -114,9 +114,18 @@ async def publish(session, assets, row):
             raise ValueError("Craft catalog temporarily missing; retaining previous pool")
         pool_action = ("craft-pool-v1" if has_crafted else
                        ("full-pool-v2" if int(row["id"]) in (27, 28, 29, 30, 31) else "full-pool-v1"))
-        await apply_command(session, key, f"/v1/gifts/{state['id']}/collectibles/publish", pool_action, {
-            **fields, "upgrade_stars": 25, "supply_total": row["supply"], "slug_prefix": f"rise{row['id']}",
-        }, files)
+        endpoint = f"/v1/gifts/{state['id']}/collectibles/publish"
+        payload = {**fields, "upgrade_stars": 25, "supply_total": row["supply"], "slug_prefix": f"rise{row['id']}"}
+        if has_crafted:
+            # Older MTProto servers ignore the crafted fields; validate against
+            # the actual deployed API before sending a state-changing command.
+            preview = await apply_command(session, key, endpoint, pool_action + "-preview",
+                                          dict(payload, dry_run=True), files)
+            expected = {m["name"]: m["rarity_kind"] for m in fields["models"] if m.get("crafted")}
+            actual = {m["name"]: m.get("rarity_kind") for m in preview.get("models", []) if m.get("crafted")}
+            if actual != expected:
+                raise ValueError("Waiting for MTProto crafted-model API rollout")
+        await apply_command(session, key, endpoint, pool_action, payload, files)
         state["full_pool"] = True
         if has_crafted:
             state["craft_pool_v1"] = True
