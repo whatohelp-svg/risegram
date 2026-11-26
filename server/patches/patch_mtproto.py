@@ -585,3 +585,14 @@ patch_go_file(
 """,
     "publish true crafted model rarity",
 )
+
+
+patch_go_file(
+    "internal/admin/service.go",
+    """\t\t\t"name": strings.TrimSpace(upload.Name), "rarity_permille": upload.RarityPermille,
+""",
+    """\t\t\t"name": strings.TrimSpace(upload.Name), "rarity_permille": upload.RarityPermille,
+\t\t\t"rarity_kind": upload.RarityKind, "crafted": upload.Crafted,
+""",
+    "report crafted metadata in validation receipts",
+)
