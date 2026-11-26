@@ -541,3 +541,47 @@ patch_go_file(
 """,
     "record completed reaction asset import",
 )
+
+
+# Accept genuine crafted-only model tiers through the multipart drop publisher.
+# Preserve the existing validation and do not make crafted models upgrade rolls.
+patch_go_file(
+    "internal/admin/service.go",
+    """type StarGiftCollectibleAnimationUpload struct {
+\tName           string `json:"name"`
+\tRarityPermille int    `json:"rarity_permille"`
+""",
+    """type StarGiftCollectibleAnimationUpload struct {
+\tName           string `json:"name"`
+\tRarityPermille int    `json:"rarity_permille"`
+\tRarityKind     string `json:"rarity_kind,omitempty"`
+\tCrafted        bool   `json:"crafted,omitempty"`
+""",
+    "accept crafted model metadata",
+)
+patch_go_file(
+    "internal/admin/service.go",
+    """\t\t\tattributes[i] = domain.StarGiftCollectibleAttribute{
+\t\t\t\tKind: kind, Name: strings.TrimSpace(uploads[i].Name), RarityKind: domain.StarGiftRarityPermille,
+\t\t\t\tRarityPermille: uploads[i].RarityPermille,
+""",
+    """\t\t\trarityKind := domain.StarGiftRarityPermille
+\t\t\tif uploads[i].Crafted {
+\t\t\t\tif kind != domain.StarGiftCollectibleModel || uploads[i].RarityPermille != 0 {
+\t\t\t\t\treturn nil, domain.ErrStarGiftCollectibleInvalid
+\t\t\t\t}
+\t\t\t\tswitch uploads[i].RarityKind {
+\t\t\t\tcase "uncommon", "rare", "epic", "legendary":
+\t\t\t\t\trarityKind = domain.StarGiftAttributeRarityKind(uploads[i].RarityKind)
+\t\t\t\tdefault:
+\t\t\t\t\treturn nil, domain.ErrStarGiftCollectibleInvalid
+\t\t\t\t}
+\t\t\t} else if uploads[i].RarityKind != "" && uploads[i].RarityKind != "permille" {
+\t\t\t\treturn nil, domain.ErrStarGiftCollectibleInvalid
+\t\t\t}
+\t\t\tattributes[i] = domain.StarGiftCollectibleAttribute{
+\t\t\t\tKind: kind, Name: strings.TrimSpace(uploads[i].Name), RarityKind: rarityKind,
+\t\t\t\tRarityPermille: uploads[i].RarityPermille, Crafted: uploads[i].Crafted,
+""",
+    "publish true crafted model rarity",
+)
