@@ -144,6 +144,21 @@ async def publish(session, assets, row):
 async def worker():
     if not config.MTPROTO_ADMIN_API_TOKEN:
         return
+    # Owner explicitly reported that upgrade was selected for drop 38, but
+    # the old catalog lacked the Resistance Dog source and silently cleared it.
+    # Repair only this confirmed drop; never alter unrelated drop policies.
+    def repair_resistance_dog():
+        row = drops.get_admin_drop(38)
+        if row and row["gift_id"] == "resistancedog" and row["supply"] == 5 and row["price_stars"] == 2147483647:
+            return drops.enable_upgrade(38)
+        return False
+
+    if await db.get_meta("owner-confirmed-drop38-upgrade-v1") != "done":
+        changed = await asyncio.to_thread(repair_resistance_dog)
+        await db.set_meta("owner-confirmed-drop38-upgrade-v1", "done")
+        if changed:
+            log.info("Restored owner-selected upgrade policy for Resistance Dog drop 38")
+
     # Previous gift restoration and verifier repair jobs were single-use.
     # Never replay administrative mutations on an ordinary app restart.
     timeout = ClientTimeout(total=240)
