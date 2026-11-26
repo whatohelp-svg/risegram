@@ -230,6 +230,11 @@ def main_kb():
     )
 
 
+@router.message(Command("credits"))
+async def cmd_credits(message: Message):
+    await message.answer("RiseGram · данные коллекционных моделей: @GiftChanges / api.changes.tg")
+
+
 @router.message(CommandStart())
 async def cmd_start(message: Message, state: FSMContext, user: dict):
     await state.clear()
