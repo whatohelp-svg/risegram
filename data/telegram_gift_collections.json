@@ -1,5 +1,10 @@
 [
   {
+    "gift_id": "mythmask",
+    "title": "Myth Masks",
+    "fragment_url": "https://fragment.com/gifts/mythmask"
+  },
+  {
     "gift_id": "intelligencecup",
     "title": "Intelligence Cups",
     "fragment_url": "https://fragment.com/gifts/intelligencecup"
