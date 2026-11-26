@@ -91,7 +91,7 @@ def make(item):
         fx=doc(3,effect,"application/x-tgsticker",effect_meta["w"],effect_meta["h"])
         return {"reaction":emoji,"title":title,"inactive":False,"premium":False,"static_icon":static,
                 "appear_animation":anim,"select_animation":anim,"activate_animation":anim,
-                "effect_animation":fx,"around_animation":fx,"center_icon":static}
+                "effect_animation":fx,"around_animation":fx,"center_icon":anim}
     except Exception as exc:
         print("Telegram asset unavailable",emoji,type(exc).__name__,str(exc)[:160],flush=True)
         return None
@@ -101,6 +101,8 @@ with ThreadPoolExecutor(max_workers=8) as pool:
 missing={r[0] for r in ROWS}- {r["reaction"] for r in rows}
 if missing: raise SystemExit("Telegram asset import incomplete: "+repr(missing))
 if REQUIRED-{r["reaction"] for r in rows}: raise SystemExit("Required reaction assets missing")
-(META/"available_reactions_raw.json").write_text(json.dumps({"result":{"reactions":rows}},ensure_ascii=False))
+payload=json.dumps({"result":{"reactions":rows}},ensure_ascii=False).encode("utf-8")
+(META/"available_reactions_raw.json").write_bytes(payload)
+(ROOT.parent/"telegram-origin.ready").write_text(hashlib.sha256(payload).hexdigest())
 (ROOT/"NOTICE.txt").write_text("Telegram emoji artwork and effects: Telegram. Public exports: https://github.com/saeedtahmtan/telemoji and https://github.com/ilyhalight/telegram-emoji-effects. Use subject to Telegram terms.\n")
 print("Prepared",len(rows),"Telegram-origin reactions")
