@@ -172,6 +172,21 @@ def list_admin_drops(limit=20, offset=0):
         JOIN rg_gift_catalog c ON c.gift_id=d.gift_id
         ORDER BY d.id DESC LIMIT ? OFFSET ?""",(limit,offset))]
 
+def enable_upgrade(drop_id):
+    # Enable only a collection that has a real collectible pool source.
+    from native_drops import ASSETS
+    with connection() as conn:
+        row = conn.execute("SELECT gift_id,can_upgrade FROM rg_gift_drops WHERE id=?", (int(drop_id),)).fetchone()
+        if not row:
+            raise ValueError("Дроп не найден")
+        template = ASSETS.get(row["gift_id"])
+        if not template or not template[1]:
+            raise ValueError("Для этой коллекции нет моделей улучшения")
+        conn.execute("UPDATE rg_gift_drops SET can_upgrade=1 WHERE id=?", (int(drop_id),))
+        conn.commit()
+        return not bool(row["can_upgrade"])
+
+
 def toggle_drop(drop_id):
     with connection() as conn:
         cur=conn.execute("UPDATE rg_gift_drops SET enabled=1-enabled WHERE id=?",(drop_id,))
