@@ -32,7 +32,17 @@ jobs:
           TELEGRAM_API_ID: ${{ vars.RISEGRAM_WEB_API_ID }}
           TELEGRAM_API_HASH: ${{ vars.RISEGRAM_WEB_API_HASH }}
         run: |
-          test -n "$TELEGRAM_API_ID" && test -n "$TELEGRAM_API_HASH"
+          set -euo pipefail
+          # The private RiseGram MTProto server uses the API ID as client
+          # metadata, not a Telegram account credential. These placeholders
+          # are for an unpublished experimental artifact only.
+          if [ -z "$TELEGRAM_API_ID" ] && [ -z "$TELEGRAM_API_HASH" ]; then
+            export TELEGRAM_API_ID=100000
+            export TELEGRAM_API_HASH=00000000000000000000000000000000
+            echo "::notice::Using isolated RiseGram beta client identifiers; do not publish until authentication is verified."
+          fi
+          [[ "$TELEGRAM_API_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$TELEGRAM_API_HASH" =~ ^[a-fA-F0-9]{32}$ ]]
           npm ci
           npm run build:production
       - uses: actions/upload-artifact@v4
